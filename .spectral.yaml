@@ -1,0 +1,103 @@
+# .spectral.yaml
+extends:
+  - spectral:oas  # Reglas base de OpenAPI
+
+rules:
+  # ── Reglas base OpenAPI ────────────────────────────────────────────
+
+  # Todos los endpoints deben tener operationId
+  operation-operationId: error
+
+  # Todos los endpoints deben tener description
+  operation-description: error
+
+  # Todos los endpoints deben tener summary
+  fitmess-operation-summary:
+    description: "Todos los endpoints deben tener summary"
+    message: "Endpoint sin summary: {{path}}"
+    severity: error
+    given: "$.paths[*][get,post,put,patch,delete]"
+    then:
+      field: "summary"
+      function: truthy
+
+  # ── Reglas del proyecto fitmess-api ────────────────────────────────
+
+  # Respuestas de error deben usar application/problem+json (RFC 9457)
+  # Alineado con: rulesCodigo.md §Respuestas, error-handling skill §6
+  fitmess-error-content-type:
+    description: "Las respuestas de error (4xx, 5xx) deben usar Content-Type application/problem+json (RFC 9457)"
+    message: "La respuesta {{property}} debe tener content: application/problem+json"
+    severity: error
+    given: "$.paths[*][*].responses[?(@property.match(/^[45]\\d{2}$/))].content"
+    then:
+      field: "application/problem+json"
+      function: truthy
+
+  # ── Campos internos prohibidos en DTOs de respuesta ────────────────
+  # Alineado con: rulesArquitectura.md §API, api-first skill §4
+  # Una sola regla con then-array: cada field se valida individualmente.
+  # Para agregar un campo prohibido: añadir un entry falsy al array.
+  # Ventaja vs reglas separadas: un solo lugar para mantener la lista.
+  # Ventaja vs schema+not: error individual por campo con path exacto.
+  fitmess-no-internal-fields:
+    description: "DTOs de respuesta no deben exponer campos internos o sensibles"
+    severity: error
+    given: "$.components.schemas[*].properties"
+    then:
+      - field: "archivedAt"
+        function: falsy
+      - field: "deletedAt"
+        function: falsy
+      - field: "password"
+        function: falsy
+      - field: "passwordHash"
+        function: falsy
+      - field: "refreshToken"
+        function: falsy
+      - field: "accessToken"
+        function: falsy
+
+  # ── Endpoints autenticados deben documentar 401 ────────────────────
+  # fitmess-api usa @ApiBearerAuth() por operación (no security global).
+  # La regla de operación es la principal; la global está off por defecto.
+  #
+  # Endpoints públicos deben usar security: [] para excluirse explícitamente.
+  # Ejemplos: /auth/login, /auth/register, /health
+
+  fitmess-auth-401-operation:
+    description: "Los endpoints con @ApiBearerAuth() deben documentar respuesta 401"
+    message: "Endpoint con autenticación sin respuesta 401 documentada"
+    severity: warn
+    given: "$.paths[*][*][?(@.security && @.security.length > 0)]"
+    then:
+      field: "responses.401"
+      function: truthy
+
+  # Activar esta regla solo si se agrega security global al DocumentBuilder
+  # (ej: .addSecurityRequirements('bearer')). Mientras se use @ApiBearerAuth()
+  # por operación, esta regla genera falsos positivos en endpoints públicos.
+  # Cuando se active: excluye endpoints con security propia (incluido security: [])
+  # para evitar duplicación con fitmess-auth-401-operation.
+  fitmess-auth-401-global:
+    description: "Si hay security global, endpoints sin security propia deben documentar 401"
+    message: "Endpoint sin respuesta 401 documentada (security global activa)"
+    severity: "off"
+    given: "$.paths[?(@property !== '/api/health')][*][?(!@.security)]"
+    then:
+      field: "responses.401"
+      function: truthy
+
+  # ── Convenciones de rutas ──────────────────────────────────────────
+  # Alineado con: api-first skill §5
+  # Soporta rutas anidadas: /api/resources/{id}/sub/{subId}/action
+  # Segmentos de 1+ caracteres: /api/ai, /api/plans, /api/subscriptions
+  fitmess-path-conventions:
+    description: "Las rutas deben usar lowercase en inglés, parámetros en camelCase, sin trailing slash"
+    message: "Ruta {{property}} no sigue la convención de fitmess-api"
+    severity: warn
+    given: "$.paths"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^\\/api(\\/[a-z]([a-z-]*[a-z])?(\\/{[a-zA-Z]+})?)+$"

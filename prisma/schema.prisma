@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Enums base ---
+
+enum UserRole {
+  COACH
+  ATHLETE
+}
+
+enum PlanStatus {
+  DRAFT
+  PUBLISHED
+  FINALIZED
+  ARCHIVED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ACTIVE
+}

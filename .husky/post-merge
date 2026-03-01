@@ -1,0 +1,6 @@
+changed_files="$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD)"
+
+if echo "$changed_files" | grep -q "^prisma/schema.prisma$"; then
+  echo "🔄 Detectado cambio en schema.prisma. Regenerando Prisma client..."
+  pnpm prisma generate
+fi
