@@ -87,6 +87,8 @@ Load the relevant skill when working on specialized tasks. Skills provide detail
 | `planificar-epica` | Orchestrating Phase 1: Agent Team (Analyst + Architect → Documentor → DBA → CHECKPOINT 1) | Active |
 | `implementar-epica` | Orchestrating Phase 2: Implementation chain (Developer → QA → Tech Lead, max 3 cycles) | Active |
 | `disenar-schema` | Standalone DBA invocation for Prisma schema design outside the planning flow | Active |
+| `validar-qa` | Standalone QA re-validation: tests, coverage, linting, security scan | Active |
+| `revisar-codigo` | Standalone Tech Lead code review: linting, patterns, contract consistency | Active |
 
 ---
 

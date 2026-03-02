@@ -48,11 +48,17 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 |---------|----------|-------------|
 | `/disenar-schema` | Invoca al DBA para trabajo de base de datos | Necesitas modificar el schema fuera del flujo de planificacion |
 | `/disenar-schema "tarea"` | Invoca al DBA con instrucciones especificas | Tarea puntual: agregar modelo, revisar indices, etc. |
+| `/validar-qa` | Re-ejecuta el QA: tests, cobertura, linting, seguridad | Necesitas re-validar despues de un fix manual sin lanzar toda la cadena |
+| `/validar-qa "tarea"` | Re-ejecuta el QA con instrucciones especificas | Tarea puntual: solo cobertura, re-validar un modulo, etc. |
+| `/revisar-codigo` | Re-ejecuta el LT: linting, patrones, consistencia | Necesitas re-revisar codigo sin lanzar toda la cadena |
+| `/revisar-codigo "tarea"` | Re-ejecuta el LT con instrucciones especificas | Tarea puntual: revisar solo patrones de auth, etc. |
 
 **Ejemplo:**
 ```
 /disenar-schema "agregar modelo Notification con campos userId, type, message, readAt"
 /disenar-schema "revisar indices de la tabla coach_requests"
+/validar-qa "re-validar auth despues del fix manual"
+/revisar-codigo "revisar solo patrones de auth"
 ```
 
 ---
@@ -154,8 +160,8 @@ Cada ejecucion genera un archivo `outputs/execution-log.md` que registra paso a 
 | `documentador` | Genera contrato OpenAPI (controllers + DTOs) | `/planificar-epica` (automatico) |
 | `dba` | Diseña schema Prisma (modelos, indices, constraints) | `/planificar-epica` (automatico), `/disenar-schema` |
 | `desarrollador` | Implementa codigo contra el contrato aprobado | `/implementar-epica` (automatico) |
-| `qa` | Tests + cobertura + seguridad + Spectral | `/implementar-epica` (automatico) |
-| `lider-tecnico` | Revision de codigo + linting + patrones | `/implementar-epica` (automatico) |
+| `qa` | Tests + cobertura + seguridad + Spectral | `/implementar-epica` (automatico), `/validar-qa` |
+| `lider-tecnico` | Revision de codigo + linting + patrones | `/implementar-epica` (automatico), `/revisar-codigo` |
 
 ---
 
@@ -195,5 +201,7 @@ pnpm run validate:epica                  → Valida estructura
 /planificar-epica                        → Fase 1 (4 agentes → CHECKPOINT 1)
 pnpm prisma migrate dev                  → Aplica migracion
 /implementar-epica                       → Fase 2 (3 agentes × max 3 ciclos → CHECKPOINT 2)
+/validar-qa                              → Re-validar QA standalone (tests, cobertura, seguridad)
+/revisar-codigo                          → Re-revisar codigo standalone (linting, patrones, contrato)
 git push                                 → Deploy
 ```

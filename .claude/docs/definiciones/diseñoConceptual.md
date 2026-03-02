@@ -9,7 +9,7 @@
 
 ## 1. Que es La Colmena
 
-fitmess-api no es solo un backend NestJS. Es un **sistema de desarrollo asistido por IA** donde 7 agentes especializados, 10 skills de conocimiento, 17 reglas absolutas y 3 mecanismos de validacion automatica trabajan en coordinacion para producir codigo que cumple con un contrato OpenAPI aprobado, pasa gates de cobertura y respeta la legislacion colombiana.
+fitmess-api no es solo un backend NestJS. Es un **sistema de desarrollo asistido por IA** donde 8 agentes especializados, 15 skills de conocimiento, 17 reglas absolutas y 3 mecanismos de validacion automatica trabajan en coordinacion para producir codigo que cumple con un contrato OpenAPI aprobado, pasa gates de cobertura y respeta la legislacion colombiana.
 
 El humano actua como apicultor: no hace la miel, pero decide que flores se polinizan, aprueba la calidad del producto y abre la colmena al mundo (`git push`).
 
@@ -42,7 +42,7 @@ Todo el sistema vive dentro de `.claude/` y `src/`:
     qa.md                       Cadena — tests + vulnerabilidades
     lider-tecnico.md            Cadena — revision de codigo
 
-  skills/                    ← 12 skills (conocimiento especializado)
+  skills/                    ← 15 skills (conocimiento especializado)
     nestjs-conventions/         Modulos, controllers, services, DTOs
     error-handling/             Excepciones, filters, RFC 9457
     testing-patterns/           Vitest, mocks, cobertura
@@ -55,6 +55,8 @@ Todo el sistema vive dentro de `.claude/` y `src/`:
     planificar-epica/           Orquestacion Fase 1 (Agent Team)
     implementar-epica/          Orquestacion Fase 2 (Cadena Impl.)
     disenar-schema/             Slash command standalone → dba
+    validar-qa/                 Slash command standalone → qa
+    revisar-codigo/             Slash command standalone → lider-tecnico
     skill-creator/              Herramienta para crear skills nuevos
 
   rules/                     ← 17 reglas absolutas en 2 archivos
@@ -98,7 +100,7 @@ src/                         ← Codigo NestJS implementado
 
 ---
 
-## 3. Los 7 Agentes
+## 3. Los 8 Agentes
 
 ### 3.1 Anatomia de un agente
 
@@ -158,17 +160,17 @@ Tres agentes que ejecutan de forma estrictamente secuencial:
 |---|---|---|---|---|
 | **Desarrollador** | Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion | nestjs-conventions, error-handling, design-patterns | Lectura | 1ro |
 | **QA** | Read, Glob, Grep, Write, Bash, AskUserQuestion | testing-patterns, error-handling, legal-guardrails | Ninguno | 2do |
-| **Lider Tecnico** | Read, Glob, Grep, AskUserQuestion | nestjs-conventions, error-handling, design-patterns, api-first | Lectura | 3ro |
+| **Lider Tecnico** | Read, Glob, Grep, Write, AskUserQuestion | nestjs-conventions, error-handling, design-patterns, api-first | Lectura | 3ro |
 
 **Restricciones clave:**
 - El **Desarrollador** tiene todas las herramientas (incluido Bash) — es el unico que puede ejecutar comandos y modificar codigo
 - El **QA** escribe tests (`.spec.ts`, `.e2e-spec.ts`) pero **NUNCA modifica codigo de produccion**
-- El **Lider Tecnico** es puramente analitico — sin Write, Edit ni Bash. Solo lee, analiza y reporta
+- El **Lider Tecnico** tiene Write para persistir su reporte (`outputs/revision_codigo.yaml`) pero **NUNCA modifica codigo** — solo lee, analiza y reporta
 - El **QA** ejecuta lint y Prettier; el LT solo analiza los resultados del reporte
 
 ---
 
-## 4. Los 10 Skills
+## 4. Los 15 Skills
 
 Los skills son documentos de conocimiento especializado que los agentes cargan segun necesidad. Cada skill tiene un `SKILL.md` (<500 lineas) y opcionalmente `references/` con detalle extendido.
 
@@ -183,13 +185,18 @@ Los skills son documentos de conocimiento especializado que los agentes cargan s
 | `api-first` | Flujo de diseno antes de codigo, decoradores NestJS/Swagger, ApiProblemResponse, formato canonico del plan YAML | api-contract-patterns.md, swagger-decorators.md |
 | `legal-guardrails` | Ley 1581/2012 (datos), Circular SIC 2/2024, Ley 1273/2009 (seguridad), Ley 527/1999 (transacciones), checklists por tipo de HU | legal-checklists.md |
 
-### 4.2 Skills de proceso (3) — NO listados en CLAUDE.md
+### 4.2 Skills de proceso (8) — orquestación y slash commands
 
 | Skill | Modo | Agente asociado |
 |---|---|---|
 | `requirements-decomposition` | Skill directo | business-analyst |
 | `analizar-requerimiento` | Slash command (`context: fork`, `agent: business-analyst`) | business-analyst |
 | `refinar-hu` | Slash command (`context: fork`, `agent: business-analyst`) | business-analyst |
+| `planificar-epica` | Orquestación Fase 1 | Agent Team (Analista + Arquitecto + Documentador + DBA) |
+| `implementar-epica` | Orquestación Fase 2 | Cadena (Desarrollador → QA → LT) |
+| `disenar-schema` | Slash command (`context: fork`, `agent: dba`) | dba |
+| `validar-qa` | Slash command (`context: fork`, `agent: qa`) | qa |
+| `revisar-codigo` | Slash command (`context: fork`, `agent: lider-tecnico`) | lider-tecnico |
 
 ### 4.3 Skill de infraestructura (1)
 
@@ -203,7 +210,7 @@ Los skills son documentos de conocimiento especializado que los agentes cargan s
 
 Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin excepciones.
 
-### 5.1 Rules — Codigo (`rulesCodigo.md`, 7 secciones)
+### 5.1 Rules — Codigo (`rulesCodigo.md`, 9 secciones)
 
 | Seccion | Regla central |
 |---|---|
@@ -215,7 +222,7 @@ Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin exc
 | Lenguaje | Mensajes y comentarios en espanol. Variables, clases y archivos en ingles |
 | *(implicita)* | Listeners de eventos SI hacen try/catch (no pasan por pipeline HTTP) |
 
-### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 10 secciones)
+### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 11 secciones)
 
 | Seccion | Regla central |
 |---|---|

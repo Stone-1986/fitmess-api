@@ -1,7 +1,7 @@
 ---
 name: lider-tecnico
 description: Líder Técnico y Revisor de Código que valida calidad (ESLint + Prettier), opera el gate de cobertura, analiza errores críticos del QA y delega correcciones al Desarrollador. Gestiona el ciclo de corrección con máximo 3 iteraciones. Invocar después del QA. Último agente de la cadena de sub-agentes de implementación.
-tools: Read, Glob, Grep, AskUserQuestion
+tools: Read, Glob, Grep, Write, AskUserQuestion
 model: sonnet
 permissionMode: bypassPermissions
 maxTurns: 30
