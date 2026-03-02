@@ -17,7 +17,11 @@ lerna-debug.log*
 
 # Tests
 /coverage
+**/coverage/
 /.nyc_output
+
+# Vitest cache
+**/.vite/
 
 # IDEs and editors
 /.idea
