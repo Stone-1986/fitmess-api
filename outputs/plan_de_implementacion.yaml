@@ -1,57 +1,47 @@
 plan_de_implementacion:
-  version: "1.1"
+  version: "1.0"
   epica_id: "EPICA-01"
   ciclo: 1
-  razonamiento: >
-    v1.1 — Incorpora feedback del Product Owner en CHECKPOINT 1: campos de identificacion
-    y telefono con indicativo para ambos roles, busqueda avanzada por POST en solicitudes,
-    datos completos del atleta confirmados, HEALTH_DATA_CONSENT diferido a EPICA-04,
-    unique constraints en email e identificationNumber a nivel de User.
   modulos_afectados:
     - "auth (modulo nuevo — src/modules/auth/)"
-    - "notifications (listener: coach.request.created, coach.request.approved, coach.request.rejected, user.registered)"
-    - "common (schema Prisma: nuevas entidades y enums)"
+    - "notifications (listeners para: coach.request.created, coach.request.approved, coach.request.rejected, user.registered)"
+    - "common (schema Prisma — nuevas entidades y enums)"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # PREREQUISITO BLOQUEANTE — MIGRACION PRISMA
-  # Antes de implementar cualquier endpoint, el humano debe ejecutar:
-  #   pnpm prisma migrate dev
-  # con los siguientes cambios en prisma/schema.prisma:
+  # El humano debe ejecutar pnpm prisma migrate dev con los siguientes cambios:
   #
-  # 1. Modificar enum UserRole: agregar ADMIN
-  # 2. Nuevo enum CoachRequestStatus: PENDING, APPROVED, REJECTED
-  # 3. Nuevo enum DocumentType: HABEAS_DATA, TERMS_OF_SERVICE,
+  # 1. enum UserRole: agregar ADMIN
+  # 2. nuevo enum CoachRequestStatus: PENDING, APPROVED, REJECTED
+  # 3. nuevo enum DocumentType: HABEAS_DATA, TERMS_OF_SERVICE,
   #    HEALTH_DATA_CONSENT, SPORT_CONSENT
-  # 4. Nuevo enum IdentificationType: CC, CE, NIT, PASAPORTE, PPT, PEP
-  # 5. Nuevo model User:
-  #    - id (UUID), email (unique), passwordHash, role (UserRole)
-  #    - name, phone, phoneCountryCode, identificationNumber (unique),
-  #      identificationType (IdentificationType)
-  #    - avatarUrl? (opcional), dateOfBirth? (Date, opcional para coach,
-  #      obligatorio para atleta via DTO)
-  #    - createdAt, updatedAt
-  # 6. Nuevo model CoachRequest:
-  #    - id (UUID), userId (FK → User), planDescription
-  #    - bannerUrl? (opcional)
-  #    - status (CoachRequestStatus), rejectionReason?
-  #    - reviewedAt?, reviewedBy? (FK → User), archivedAt?
-  #    - createdAt, updatedAt
-  # 7. Nuevo model LegalAcceptance:
-  #    - id (UUID), userId (FK → User), documentType (DocumentType)
-  #    - documentVersion, ip, userAgent, planId? (null en registro)
-  #    - acceptedAt
-  # 8. Nuevo model AuditLog:
-  #    - id (UUID), userId?, ip, userAgent, method, url
-  #    - statusCode?, duration, correlationId?, error?
-  #    - createdAt
-  # 9. Nuevo model RefreshToken:
-  #    - id (UUID), userId (FK → User), tokenHash
-  #    - expiresAt, revokedAt?, createdAt
+  # 4. nuevo enum IdentificationType: CC, CE, NIT, PASAPORTE, PPT, PEP
+  # 5. nuevo model User:
+  #    id (UUID), email (@@unique), passwordHash, role (UserRole),
+  #    name, phone, phoneCountryCode, identificationType (IdentificationType),
+  #    identificationNumber (@@unique), avatarUrl?, dateOfBirth?,
+  #    createdAt, updatedAt
+  # 6. nuevo model CoachRequest:
+  #    id (UUID), userId (FK User), planDescription, bannerUrl?,
+  #    status (CoachRequestStatus @default(PENDING)), rejectionReason?,
+  #    reviewedAt?, reviewedBy? (FK User), createdAt, updatedAt
+  # 7. nuevo model LegalAcceptance (inmutable — sin update ni delete):
+  #    id (UUID), userId (FK User), documentType (DocumentType),
+  #    documentVersion, ip, userAgent, planId?, acceptedAt (@default(now()))
+  # 8. nuevo model AuditLog:
+  #    id (UUID), userId?, ip, userAgent, method, url,
+  #    statusCode?, duration, correlationId?, error?, createdAt (@default(now()))
+  #    @@index([userId]) @@index([correlationId])
+  # 9. nuevo model RefreshToken:
+  #    id (UUID), userId (FK User), tokenHash,
+  #    expiresAt, revokedAt?, createdAt (@default(now()))
   #
-  # NOTA: Los campos personales (name, phone, phoneCountryCode,
-  # identificationNumber, identificationType, avatarUrl, dateOfBirth) van en
-  # User porque son compartidos por ambos roles (atleta y entrenador).
-  # CoachRequest solo contiene datos especificos de la solicitud del entrenador.
+  # NOTA DE DISENO:
+  # Los campos personales compartidos (name, phone, phoneCountryCode,
+  # identificationNumber, identificationType, avatarUrl, dateOfBirth) van en User.
+  # CoachRequest solo tiene datos propios de la solicitud (planDescription, bannerUrl).
+  # @@unique constraints en email e identificationNumber estan en User para garantizar
+  # unicidad global independientemente del rol.
   # ─────────────────────────────────────────────────────────────────────────────
 
   endpoints:
@@ -62,97 +52,47 @@ plan_de_implementacion:
       metodo: POST
       ruta: /auth/coaches/register
       proposito: >
-        Registrar solicitud de nuevo entrenador. Crea User con role COACH (bloqueado
-        hasta aprobacion) y CoachRequest en estado PENDING. Registra aceptacion de
-        TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances. Operacion atomica via
-        $transaction. Emite coach.request.created para notificar al administrador.
+        Registrar solicitud de nuevo entrenador. Crea User con role COACH en estado
+        no aprobado y CoachRequest en estado PENDING dentro de una $transaction atomica.
+        Registra dos LegalAcceptances: TERMS_OF_SERVICE y HABEAS_DATA como registros
+        separados e independientes (Ley 1581/2012). Emite coach.request.created para
+        que el modulo de notifications notifique al administrador. Ante email o
+        identificationNumber duplicado retorna 409 con mensaje neutro (anti-enumeracion).
       request_body: RegisterCoachDto
       response: "CoachRequestResponseDto (201)"
       errores: [400, 409]
       guards: []
-      notas_guards: >
-        Endpoint publico — sin JwtAuthGuard. Spectral: security: [].
-        ThrottlerGuard (rate limiter global 100 req/min) aplica automaticamente.
       eventos:
         - coach.request.created
       dependencias: []
-      guardrails_legales:
-        - "Ley 1581/2012: registrar TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances como dos registros separados con userId, documentVersion, ip, userAgent, acceptedAt"
-        - "Ley 1273/2009: password con bcrypt minimo 10 rondas, nunca en logs"
-        - "Ley 527/1999: registro inmutable de aceptaciones legales"
-        - "Ley 1273/2009: mensaje neutro ante email o identificationNumber duplicado (anti-enumeracion)"
-      campos_dto_entrada:
-        - name: "string (obligatorio)"
-        - email: "string email (obligatorio, unique en User)"
-        - password: "string minLength:8 (obligatorio)"
-        - phoneCountryCode: "string (obligatorio, ej: +57)"
-        - phone: "string (obligatorio)"
-        - identificationType: "IdentificationType enum (obligatorio, ej: CC, CE, NIT, PASAPORTE)"
-        - identificationNumber: "string (obligatorio, unique en User)"
-        - planDescription: "string (obligatorio — descripcion del plan de trabajo del entrenador)"
-        - avatarUrl: "string url (opcional)"
-        - bannerUrl: "string url (opcional)"
-        - acceptedTerms: "boolean isTrue (obligatorio — TERMS_OF_SERVICE)"
-        - acceptedPersonalDataPolicy: "boolean isTrue (obligatorio — HABEAS_DATA)"
-        - termsDocumentVersion: "string (obligatorio)"
-        - personalDataDocumentVersion: "string (obligatorio)"
-      campos_dto_respuesta:
-        - id: "string (UUID del CoachRequest)"
-        - status: "CoachRequestStatus (PENDING)"
-        - createdAt: "Date"
-        - message: "string (Solicitud recibida. El administrador revisara tu perfil.)"
-      business_errors_aplicables:
-        - "DUPLICATE_ENTITY (409) — email o identificationNumber ya registrado en User"
-      transaccion_prisma: true
-      nota_transaccion: >
-        Crear User + CoachRequest + LegalAcceptance(TERMS_OF_SERVICE) +
-        LegalAcceptance(HABEAS_DATA) en una sola $transaction.
-        Los datos personales (name, phone, phoneCountryCode, identificationNumber,
-        identificationType, avatarUrl) se persisten en User.
-        Los datos de solicitud (planDescription, bannerUrl) se persisten en CoachRequest.
 
-    # ── HU-002: Gestion de solicitudes por el Administrador ───────────────────
+    # ── HU-002: Aprobacion o rechazo de solicitud por el Administrador ─────────
 
     - hu_id: "HU-002"
       metodo: POST
       ruta: /coach-requests/search
       proposito: >
-        Buscar solicitudes de entrenadores con filtros opcionales y combinables.
-        Todos los filtros son opcionales — body vacio {} retorna todas las solicitudes.
-        Soporta arrays para uuid y status, y valores individuales para el resto.
-        Los filtros son combinables entre si (AND logico). Paginacion incluida.
-        Solo accesible para ADMIN.
+        Buscar y listar solicitudes de entrenadores con filtros opcionales y combinables
+        (AND logico). Body vacio retorna todas las solicitudes con paginacion por defecto.
+        Soporta filtros: uuid[] (lista de IDs), status[] (lista de estados),
+        email (exacto), nombre (parcial ILIKE), identificationNumber (exacto),
+        createdAt (fecha ISO). Exclusivo para ADMIN.
       request_body: SearchCoachRequestsDto
-      response: "CoachRequestResponseDto[] + PaginationMeta (200)"
+      response: "CoachRequestSummaryResponseDto[] + PaginationMeta (200)"
       errores: [400, 401, 403]
       guards:
         - JwtAuthGuard
         - RolesGuard(ADMIN)
       eventos: []
       dependencias: []
-      campos_dto_entrada:
-        - uuid: "string[] (opcional — lista de UUIDs de solicitudes)"
-        - status: "CoachRequestStatus[] (opcional — lista de estados: PENDING, APPROVED, REJECTED)"
-        - mail: "string (opcional — email del solicitante)"
-        - nombre: "string (opcional — nombre del solicitante, busqueda parcial)"
-        - identificationNumber: "string (opcional — numero de identificacion)"
-        - createdAt: "string fecha (opcional — formato ISO, solicitudes de esa fecha)"
-        - page: "number (opcional, default 1)"
-        - limit: "number (opcional, default 10, max 100)"
-      nota_filtros: >
-        - Body vacio {} retorna todas las solicitudes con paginacion por defecto.
-        - Un solo filtro: {"status": ["PENDING"]} retorna solo las pendientes.
-        - Multiples filtros: {"status": ["PENDING"], "mail": "ejemplo@mail.com"}
-          retorna pendientes de ese email (AND logico).
-        - uuid y status aceptan arrays: {"uuid": ["id1", "id2"]} retorna esas dos.
-        - nombre: busqueda parcial (ILIKE %valor% en la query).
 
     - hu_id: "HU-002"
       metodo: GET
       ruta: /coach-requests/:id
       proposito: >
-        Obtener detalle completo de una solicitud por UUID. Incluye todos los campos
-        del formulario (incluidos avatarUrl, bannerUrl) para revision del administrador.
+        Obtener detalle completo de una solicitud de entrenador por UUID. Incluye
+        todos los datos del coach solicitante (nombre, email, avatarUrl, bannerUrl,
+        planDescription, identificationNumber, status) para revision del administrador.
         ParseUUIDPipe en :id.
       request_body: null
       response: "CoachRequestDetailResponseDto (200)"
@@ -167,9 +107,11 @@ plan_de_implementacion:
       metodo: POST
       ruta: /coach-requests/:id/approve
       proposito: >
-        Transicionar solicitud de PENDING a APPROVED. State machine: solo PENDING
-        puede aprobar. Habilita al entrenador para operar en la plataforma.
-        Emite coach.request.approved para notificacion al coach. ParseUUIDPipe en :id.
+        Transicionar CoachRequest de PENDING a APPROVED. State machine: solo PENDING
+        puede aprobarse — APPROVED o REJECTED lanzan INVALID_STATE_TRANSITION (409).
+        Registra reviewedAt y reviewedBy (id del admin). Habilita al entrenador para
+        operar en la plataforma. Emite coach.request.approved para notificar al coach.
+        ParseUUIDPipe en :id.
       request_body: null
       response: "CoachRequestResponseDto (200)"
       errores: [401, 403, 404, 409]
@@ -180,20 +122,16 @@ plan_de_implementacion:
         - coach.request.approved
       dependencias:
         - GET /coach-requests/:id
-      state_machine:
-        entidad: CoachRequest
-        transicion: "PENDING → APPROVED"
-        error_si_estado_invalido: "BusinessError.INVALID_STATE_TRANSITION (409)"
 
     - hu_id: "HU-002"
       metodo: POST
       ruta: /coach-requests/:id/reject
       proposito: >
-        Transicionar solicitud de PENDING a REJECTED con motivo obligatorio.
-        State machine: solo PENDING puede rechazar. El coach no puede acceder.
-        Emite coach.request.rejected con motivo para notificacion. ParseUUIDPipe en :id.
-        El motivo es texto libre — no debe incluir info tecnica interna ni datos
-        de otros solicitantes.
+        Transicionar CoachRequest de PENDING a REJECTED con motivo obligatorio.
+        State machine: solo PENDING puede rechazarse — APPROVED o REJECTED lanzan
+        INVALID_STATE_TRANSITION (409). Persiste el motivo de rechazo (texto libre,
+        sin incluir informacion tecnica interna). Emite coach.request.rejected con
+        motivo para notificar al coach. ParseUUIDPipe en :id.
       request_body: RejectCoachRequestDto
       response: "CoachRequestResponseDto (200)"
       errores: [400, 401, 403, 404, 409]
@@ -204,12 +142,6 @@ plan_de_implementacion:
         - coach.request.rejected
       dependencias:
         - GET /coach-requests/:id
-      state_machine:
-        entidad: CoachRequest
-        transicion: "PENDING → REJECTED"
-        error_si_estado_invalido: "BusinessError.INVALID_STATE_TRANSITION (409)"
-      campos_dto_entrada:
-        - reason: "string minLength:10 (obligatorio — motivo del rechazo)"
 
     # ── HU-003: Registro inicial del atleta ────────────────────────────────────
 
@@ -217,54 +149,19 @@ plan_de_implementacion:
       metodo: POST
       ruta: /auth/register
       proposito: >
-        Registrar nuevo atleta (Fase 1 — exploracion). Crea User con role ATHLETE.
-        Registra HABEAS_DATA y TERMS_OF_SERVICE en legal_acceptances como dos
-        registros separados e independientes (Ley 1581/2012 — checkbox separado).
-        NO registra HEALTH_DATA_CONSENT — se difiere a la inscripcion al plan (EPICA-04)
-        porque en Fase 1 el atleta no proporciona datos de salud.
-        Operacion atomica via $transaction. Emite user.registered.
+        Registrar nuevo atleta en Fase 1 (exploracion). Crea User con role ATHLETE
+        dentro de una $transaction atomica junto con dos LegalAcceptances: HABEAS_DATA
+        y TERMS_OF_SERVICE como registros separados e independientes (Ley 1581/2012 —
+        checkbox separado). HEALTH_DATA_CONSENT NO aplica en Fase 1 — se difiere a la
+        inscripcion al plan (EPICA-04). Ante email o identificationNumber duplicado
+        retorna 409 con mensaje neutro (anti-enumeracion). Emite user.registered.
       request_body: RegisterAthleteDto
       response: "AthleteRegistrationResponseDto (201)"
       errores: [400, 409]
       guards: []
-      notas_guards: >
-        Endpoint publico — sin JwtAuthGuard. Spectral: security: [].
-        ThrottlerGuard (rate limiter global 100 req/min) aplica automaticamente.
       eventos:
         - user.registered
       dependencias: []
-      guardrails_legales:
-        - "Ley 1581/2012: checkbox separado para HABEAS_DATA y TERMS_OF_SERVICE. Ambos obligatorios."
-        - "Ley 1581/2012: registrar AMBAS aceptaciones en legal_acceptances con userId, documentVersion, ip, userAgent, acceptedAt"
-        - "Ley 1273/2009: password con bcrypt minimo 10 rondas"
-        - "Ley 527/1999: registro inmutable — cada aceptacion es un registro separado"
-        - "HEALTH_DATA_CONSENT NO aplica en Fase 1 — se difiere a inscripcion al plan (EPICA-04, HU-014)"
-        - "Ley 1273/2009: mensaje neutro ante email o identificationNumber duplicado (anti-enumeracion)"
-      campos_dto_entrada:
-        - name: "string (obligatorio)"
-        - email: "string email (obligatorio, unique en User)"
-        - password: "string minLength:8 (obligatorio)"
-        - phoneCountryCode: "string (obligatorio, ej: +57)"
-        - phone: "string (obligatorio)"
-        - identificationType: "IdentificationType enum (obligatorio, ej: CC, CE, NIT, PASAPORTE)"
-        - identificationNumber: "string (obligatorio, unique en User)"
-        - dateOfBirth: "Date ISO (obligatorio — fecha de nacimiento)"
-        - avatarUrl: "string url (opcional)"
-        - acceptedPersonalDataPolicy: "boolean isTrue (obligatorio — HABEAS_DATA)"
-        - acceptedTermsOfService: "boolean isTrue (obligatorio — TERMS_OF_SERVICE)"
-        - personalDataDocumentVersion: "string (obligatorio)"
-        - termsDocumentVersion: "string (obligatorio)"
-      campos_dto_respuesta:
-        - id: "string (UUID del User)"
-        - email: "string"
-        - role: "UserRole (ATHLETE)"
-        - createdAt: "Date"
-      business_errors_aplicables:
-        - "DUPLICATE_ENTITY (409) — email o identificationNumber ya registrado"
-      transaccion_prisma: true
-      nota_transaccion: >
-        Crear User + LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE)
-        en una sola $transaction. Tres registros atomicos.
 
     # ── HU-004: Inicio de sesion ────────────────────────────────────────────────
 
@@ -272,221 +169,191 @@ plan_de_implementacion:
       metodo: POST
       ruta: /auth/login
       proposito: >
-        Autenticar usuario por email + password via Passport LocalStrategy.
-        Retorna accessToken JWT y refreshToken. Verifica credenciales primero
-        (INVALID_CREDENTIALS 401 si incorrectas), luego verifica estado del coach
-        (COACH_NOT_APPROVED 403 si PENDING o REJECTED). Mensaje de error identico
-        para email inexistente y password incorrecto (anti-enumeracion).
+        Autenticar usuario registrado (atleta, entrenador o administrador) por email
+        + password via Passport LocalStrategy. Valida credenciales primero — si son
+        incorrectas lanza INVALID_CREDENTIALS (401) con mensaje identico para email
+        inexistente y password incorrecto (anti-enumeracion). Si el entrenador tiene
+        CoachRequest en estado PENDING o REJECTED lanza COACH_NOT_APPROVED (403).
+        Implementa bloqueo por cuenta: tras 5 intentos fallidos consecutivos, la cuenta
+        se bloquea temporalmente durante 15 minutos y retorna ACCOUNT_TEMPORARILY_LOCKED
+        (429) con mensaje informativo. El contador de intentos se resetea tras un login
+        exitoso o al expirar el periodo de bloqueo. ThrottlerGuard global se mantiene
+        como capa adicional de proteccion por IP. Retorna accessToken JWT y refreshToken.
       request_body: LoginDto
       response: "AuthTokenResponseDto (200)"
-      errores: [400, 401, 403]
+      errores: [400, 401, 403, 429]
       guards:
         - LocalAuthGuard
-      notas_guards: >
-        Endpoint publico — usa LocalAuthGuard (Passport local strategy) en lugar
-        de JwtAuthGuard. LocalStrategy valida email+password y popula request.user.
-        Spectral: security: [].
-        ThrottlerGuard (rate limiter global 100 req/min) aplica automaticamente —
-        es la medida contra fuerza bruta requerida por Ley 1273/2009.
       eventos: []
       dependencias:
         - POST /auth/register
         - POST /auth/coaches/register
-      campos_dto_entrada:
-        - email: "string email (obligatorio)"
-        - password: "string (obligatorio)"
-      campos_dto_respuesta:
-        - accessToken: "string (JWT firmado, expiracion configurable via ConfigService)"
-        - refreshToken: "string (token opaco, almacenado hasheado en RefreshToken)"
-        - expiresIn: "number (segundos)"
-        - user:
-            id: "string"
-            email: "string"
-            role: "UserRole"
-      business_errors_aplicables:
-        - "INVALID_CREDENTIALS (401) — email no existe o password incorrecto"
-        - "COACH_NOT_APPROVED (403) — entrenador con solicitud PENDING o REJECTED"
-      nota_seguridad: >
-        NUNCA loggear password, accessToken ni refreshToken.
-        El mensaje de error para credenciales incorrectas debe ser identico
-        tanto si el email no existe como si el password es incorrecto
-        (evitar enumeracion de usuarios — Ley 1273/2009).
 
-  # ─────────────────────────────────────────────────────────────────────────
   orden_de_implementacion:
-    - "1. [PREREQUISITO] Migracion Prisma — el humano ejecuta pnpm prisma migrate dev con todos los modelos nuevos"
-    - "2. POST /auth/register (HU-003) — fundacion: crea User + LegalAcceptances para atleta"
-    - "3. POST /auth/coaches/register (HU-001) — crea User + CoachRequest + LegalAcceptances para coach"
-    - "4. POST /auth/login (HU-004) — requiere User existentes; implementar LocalStrategy y JwtStrategy"
-    - "5. POST /coach-requests/search (HU-002) — busqueda avanzada con filtros; requiere User con role ADMIN en BD para testear"
-    - "6. GET /coach-requests/:id (HU-002) — detalle individual"
+    - "1. [PREREQUISITO BLOQUEANTE] Migracion Prisma — el humano ejecuta pnpm prisma migrate dev"
+    - "2. POST /auth/register (HU-003) — fundacion: crea el modelo User para atletas; primera entidad del modulo"
+    - "3. POST /auth/coaches/register (HU-001) — extiende User para el rol COACH; agrega CoachRequest"
+    - "4. POST /auth/login (HU-004) — requiere Users existentes; implementa LocalStrategy y JwtStrategy"
+    - "5. POST /coach-requests/search (HU-002) — listado con filtros; requiere User con role ADMIN en BD para testear"
+    - "6. GET /coach-requests/:id (HU-002) — detalle individual; base para las acciones de estado"
     - "7. POST /coach-requests/:id/approve (HU-002) — state machine PENDING→APPROVED"
     - "8. POST /coach-requests/:id/reject (HU-002) — state machine PENDING→REJECTED"
 
   decisiones_arquitectonicas:
 
     - decision: >
-        Los campos personales (name, phone, phoneCountryCode, identificationNumber,
-        identificationType, avatarUrl, dateOfBirth) van en el modelo User, no en
-        CoachRequest. CoachRequest solo tiene planDescription y bannerUrl.
+        Modulo auth/ contiene dos controllers: AuthController (/auth) y
+        CoachRequestsController (/coach-requests).
       justificacion: >
-        Ambos roles (atleta y entrenador) comparten estos campos personales.
-        Mantenerlos en User evita duplicacion y simplifica las constraints de
-        unicidad (email e identificationNumber como @@unique en User).
+        /auth/* son endpoints publicos de autenticacion (sin JwtAuthGuard).
+        /coach-requests/* son endpoints privados administrativos (JwtAuthGuard + RolesGuard(ADMIN)).
+        Separar controllers mantiene cohesion. Ambos pertenecen a EPICA-01 y al dominio
+        de acceso, por lo que viven en el mismo modulo auth/.
+
+    - decision: >
+        Campos personales compartidos (name, phone, phoneCountryCode,
+        identificationNumber, identificationType, avatarUrl, dateOfBirth) van en
+        el modelo User, no en CoachRequest.
+      justificacion: >
+        Atletas y coaches comparten los mismos campos de identificacion personal.
+        Mantenerlos en User evita duplicacion y garantiza las constraints de unicidad
+        global (@@unique([email]), @@unique([identificationNumber])) independientemente
+        del rol. CoachRequest solo tiene datos propios de la solicitud del entrenador:
+        planDescription y bannerUrl.
 
     - decision: >
         Nuevo enum IdentificationType en Prisma: CC, CE, NIT, PASAPORTE, PPT, PEP.
       justificacion: >
-        Feedback del Product Owner: el tipo de documento es obligatorio junto con
-        el numero de identificacion. Los valores cubren los tipos de documento
-        principales en Colombia y para extranjeros.
+        La restriccion conocida de la epica exige tipo de documento obligatorio.
+        Los valores cubren los tipos de documento principales en Colombia (CC, CE, NIT)
+        y para extranjeros residentes (PPT, PEP) y viajeros (PASAPORTE).
 
     - decision: >
-        phoneCountryCode es un campo string separado de phone.
+        HEALTH_DATA_CONSENT no se registra en el registro del atleta (HU-003).
+        Se difiere a la inscripcion al plan (EPICA-04).
       justificacion: >
-        Feedback del Product Owner: el indicativo de pais (ej: +57 para Colombia)
-        debe almacenarse para saber de que pais es el numero. Se persiste como
-        campo separado en User para facilitar validacion y formato en el frontend.
+        Restriccion explicita de la epica: en Fase 1 el atleta NO proporciona datos
+        de salud. El consentimiento para RPE, dolor muscular y motivacion aplica cuando
+        el atleta se suscribe a un plan. Solo HABEAS_DATA y TERMS_OF_SERVICE son
+        obligatorios en el registro inicial.
 
     - decision: >
-        Unique constraints en User: @@unique([email]) y @@unique([identificationNumber]).
+        POST /coach-requests/search con body JSON en lugar de GET con query params.
       justificacion: >
-        Feedback del Product Owner: email e identificationNumber son los
-        identificadores unicos de cada usuario. No puede haber 2 usuarios con
-        el mismo email ni con el mismo identificationNumber, independientemente
-        del rol. Ambas constraints van a nivel de BD para evitar condiciones de
-        carrera. El service detecta duplicados con findFirst previo y maneja
-        P2002 como fallback.
+        Los filtros requeridos incluyen arrays (uuid[], status[]) y combinaciones
+        multiples. Query params no soportan arrays de forma estandarizada y limpia.
+        El body JSON permite expresar la complejidad sin ambiguedad. POST para busqueda
+        es valido cuando la complejidad de los filtros excede la capacidad de la URL.
 
     - decision: >
-        HEALTH_DATA_CONSENT NO se registra en el registro del atleta (HU-003).
-        Se difiere a la inscripcion al plan (EPICA-04, HU-014).
+        State machine de CoachRequest: tres estados (PENDING, APPROVED, REJECTED).
+        Las transiciones son endpoints POST separados: /approve y /reject.
       justificacion: >
-        Feedback del Product Owner: en Fase 1 el atleta no proporciona datos de
-        salud — solo datos personales de identificacion. La autorizacion de datos
-        sensibles de salud aplica cuando el atleta se inscribe a un plan y
-        comienza a registrar sesiones (RPE, dolor muscular, motivacion).
-        Solo HABEAS_DATA y TERMS_OF_SERVICE se registran en el registro.
+        Semantica REST clara: cada transicion tiene sus propias validaciones, errores y
+        eventos. Una transicion desde estado ya resuelto (APPROVED→APPROVED o
+        REJECTED→APPROVED) lanza BusinessError.INVALID_STATE_TRANSITION (409).
+        Enum en Prisma + metodo por transicion en service (patron del proyecto).
 
     - decision: >
-        POST /coach-requests/search con body en lugar de GET /coach-requests
-        con query params para el listado/busqueda de solicitudes.
-      justificacion: >
-        Feedback del Product Owner: los filtros son complejos (arrays de UUIDs,
-        arrays de status, combinaciones AND de multiples campos). Query params
-        no soportan arrays de forma limpia. El body JSON permite expresar la
-        complejidad de forma clara. POST para busqueda es un patron valido
-        cuando los filtros exceden la capacidad de query strings.
-
-    - decision: >
-        Agregar ADMIN al enum UserRole en prisma/schema.prisma.
-      justificacion: >
-        El pipeline RolesGuard usa UserRole. La adicion es la minima necesaria
-        para RolesGuard(ADMIN) en HU-002.
-
-    - decision: >
-        Nuevo enum CoachRequestStatus en Prisma: PENDING, APPROVED, REJECTED.
-      justificacion: >
-        La state machine de HU-002 requiere un estado propio para CoachRequest.
-        Tres estados son suficientes.
-
-    - decision: >
-        Dos controllers en el modulo auth/: AuthController (/auth) y
-        CoachRequestsController (/coach-requests).
-      justificacion: >
-        /auth/* son endpoints publicos de autenticacion. /coach-requests/* son
-        privados y administrativos. Separarlos mantiene cohesion. Ambos en auth/
-        porque pertenecen a EPICA-01.
-
-    - decision: >
-        POST /auth/login usa LocalAuthGuard (Passport LocalStrategy), no JwtAuthGuard.
-        La verificacion de COACH_NOT_APPROVED ocurre en AuthService.login(),
+        POST /auth/login usa LocalAuthGuard (Passport LocalStrategy) en lugar de
+        JwtAuthGuard. La verificacion de COACH_NOT_APPROVED ocurre en AuthService,
         no en un guard separado.
       justificacion: >
-        Passport LocalStrategy valida email+password y popula request.user.
-        La verificacion de estado del coach requiere saber primero que el usuario
-        existe — no puede hacerse en un guard previo sin revelar existencia del
-        email (anti-enumeracion). El service decide: validar credenciales primero,
-        luego verificar estado.
+        Passport LocalStrategy valida email+password y popula request.user antes de
+        llegar al controller. La verificacion del estado del coach requiere que el
+        usuario exista y sea identificado primero — no puede delegarse a un guard
+        sin revelar informacion (anti-enumeracion). El service maneja la secuencia:
+        (1) validar credenciales, (2) verificar estado del coach.
 
     - decision: >
-        Las transacciones Prisma ($transaction) en los registros (atleta y coach)
-        agrupan User + LegalAcceptances en una operacion atomica.
+        Las transacciones $transaction de Prisma agrupan User + LegalAcceptances
+        en una operacion atomica en ambos endpoints de registro.
       justificacion: >
         Si el registro del usuario falla despues de crear las aceptaciones legales,
-        quedarian huerfanas sin userId valido. Critico para Ley 527/1999.
+        quedarian registros LegalAcceptance huerfanos sin userId valido. La atomicidad
+        es critica para Ley 527/1999 (integridad del documento legal). Si alguna
+        operacion falla, ningun registro persiste.
 
     - decision: >
-        RefreshToken se almacena hasheado en la tabla refresh_tokens.
-        No se incluye endpoint POST /auth/refresh en este plan.
+        Los eventos coach.request.approved y coach.request.rejected no existen en el
+        catalogo de design-patterns y deben ser agregados antes de la documentacion.
       justificacion: >
-        El mecanismo de refresh no tiene HU en EPICA-01. Se incluye RefreshToken
-        en el schema para no requerir migracion adicional.
+        HU-002 requiere notificacion al coach en ambas transiciones de estado.
+        El catalogo existente tiene coach.request.created pero no los eventos de
+        resolucion. El Documentador no puede proceder sin estas entradas en el catalogo.
 
     - decision: >
-        avatarUrl y bannerUrl se almacenan como URLs. La API no gestiona uploads.
+        avatarUrl y bannerUrl se almacenan como URLs string. La API no gestiona uploads.
       justificacion: >
-        El cliente hace el upload externo y envia la URL resultante.
-        Si el producto requiere uploads directos, se necesita una HU adicional.
+        El cliente realiza el upload a un servicio externo (storage) y envia la URL
+        resultante al API. Si el producto requiere uploads directos, se necesita una
+        HU adicional en una epica de infraestructura.
 
     - decision: >
-        Los eventos coach.request.approved y coach.request.rejected deben
-        agregarse al catalogo de design-patterns §7 antes de implementar.
+        RefreshToken se incluye en el schema Prisma con campo tokenHash pero el endpoint
+        POST /auth/refresh no tiene HU en EPICA-01 y no se planifica.
       justificacion: >
-        El catalogo tiene coach.request.created pero no los eventos de resolucion.
-        HU-002 requiere notificacion al coach en ambos casos.
+        El modelo se incluye en la migracion inicial para no requerir una migracion
+        adicional cuando se defina la HU de refresh. El endpoint no se implementa
+        hasta que tenga HU con criterios de aceptacion formales.
 
     - decision: >
-        El mensaje de error para credenciales incorrectas en /auth/login es
-        identico si el email no existe o si el password es incorrecto.
-        El mismo principio aplica al registro: email o identificationNumber
-        duplicado devuelve un mensaje generico.
+        Ante email o identificationNumber duplicado en el registro (atleta y coach),
+        la respuesta es 409 DUPLICATE_ENTITY con mensaje neutro. No se confirma
+        ni se niega si el dato especifico (email o numero) esta tomado.
       justificacion: >
-        Ley 1273/2009 — seguridad de la informacion. Mensajes distintos
-        permiten enumeracion de usuarios.
+        Los criterios de aceptacion de HU-001 y HU-003 lo exigen explicitamente.
+        Ley 1273/2009 — seguridad de la informacion: revelar que un email especifico
+        esta registrado permite enumeracion de usuarios. El mensaje es generico:
+        "Estos datos ya estan registrados en la plataforma."
 
   criterios_de_aceptacion_tecnicos:
     - "Cobertura de dominio (AuthService, CoachRequestsService) >= 80%"
     - "Cobertura de adaptadores (AuthController, CoachRequestsController) >= 70%"
     - "Todos los endpoints documentan sus errores con @ApiProblemResponse"
-    - "Endpoints publicos (/auth/coaches/register, /auth/register, /auth/login) tienen security: [] en OpenAPI"
-    - "Spectral: fitmess-auth-401-operation pasa en todos los endpoints autenticados"
-    - "legal_acceptances: el service no tiene metodos update ni delete (inmutabilidad por diseno)"
-    - "Passwords hasheados con bcrypt minimo 10 rondas antes de persistir"
-    - "LocalStrategy retorna BusinessError.INVALID_CREDENTIALS con el mismo detail para email inexistente y password incorrecto"
-    - "AuthService.login() no loggea password, accessToken ni refreshToken"
-    - "CoachRequest state machine: transicion desde APPROVED o REJECTED lanza BusinessError.INVALID_STATE_TRANSITION (409)"
+    - "Endpoints publicos (/auth/coaches/register, /auth/register, /auth/login) usan security: [] en el contrato OpenAPI"
+    - "Spectral: fitmess-auth-401-operation pasa en todos los endpoints con JwtAuthGuard"
+    - "LegalAcceptance: el service no expone metodos update ni delete (inmutabilidad por diseno)"
+    - "Passwords hasheados con bcrypt minimo 10 rondas antes de persistir en User.passwordHash"
+    - "LocalStrategy: mensaje de error identico para email inexistente y password incorrecto (INVALID_CREDENTIALS 401)"
+    - "AuthService.login() nunca loggea password, accessToken ni refreshToken"
+    - "State machine CoachRequest: transicion desde APPROVED o REJECTED lanza BusinessError.INVALID_STATE_TRANSITION (409)"
     - "Registro atomico del atleta: User + LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE) en $transaction"
     - "Registro atomico del coach: User + CoachRequest + LegalAcceptance(TERMS_OF_SERVICE) + LegalAcceptance(HABEAS_DATA) en $transaction"
-    - "coach.request.approved y coach.request.rejected agregados al catalogo de eventos en design-patterns §7"
-    - "RolesGuard(ADMIN) en todos los endpoints de /coach-requests"
-    - "Unique constraints en User: email e identificationNumber — validacion previa + manejo P2002"
-    - "HEALTH_DATA_CONSENT NO se registra en HU-003 — solo HABEAS_DATA y TERMS_OF_SERVICE"
-    - "SearchCoachRequestsDto: body vacio retorna todas las solicitudes; filtros combinables con AND logico"
+    - "Los eventos coach.request.approved y coach.request.rejected deben estar en el catalogo de design-patterns antes de que el Documentador inicie"
+    - "RolesGuard(ADMIN) en todos los endpoints bajo /coach-requests"
+    - "ParseUUIDPipe en todos los parametros :id"
+    - "HEALTH_DATA_CONSENT ausente del registro del atleta (HU-003) — solo HABEAS_DATA y TERMS_OF_SERVICE"
+    - "Bloqueo por cuenta en POST /auth/login: 5 intentos fallidos consecutivos bloquean la cuenta 15 minutos (ACCOUNT_TEMPORARILY_LOCKED 429)"
+    - "El contador de intentos fallidos se resetea tras login exitoso o al expirar el periodo de bloqueo"
+    - "Nuevo BusinessError requerido: ACCOUNT_TEMPORARILY_LOCKED (429) — agregar al catalogo en common/exceptions/"
 
   riesgos_identificados:
     - >
-      BLOQUEANTE — Schema Prisma sin entidades de dominio: El schema actual
-      tiene solo 3 enums y cero modelos de dominio. El Desarrollador no puede
-      iniciar ninguna implementacion hasta que el humano aplique la migracion
-      con User, CoachRequest, LegalAcceptance, AuditLog, RefreshToken,
-      UserRole (ADMIN), CoachRequestStatus, DocumentType e IdentificationType.
+      BLOQUEANTE — Schema Prisma sin entidades de dominio: el schema actual tiene
+      solo 3 enums y cero modelos de dominio. Ningun endpoint puede implementarse
+      hasta que el humano aplique la migracion con User, CoachRequest, LegalAcceptance,
+      AuditLog, RefreshToken y los 4 enums nuevos (UserRole+ADMIN, CoachRequestStatus,
+      DocumentType, IdentificationType).
 
     - >
-      MEDIO — Dos eventos nuevos no estan en el catalogo: coach.request.approved
-      y coach.request.rejected no existen en design-patterns §7. El Documentador
-      debe agregar estas entradas antes de documentar HU-002.
+      BLOQUEANTE PARCIAL — Dos eventos no estan en el catalogo de design-patterns:
+      coach.request.approved y coach.request.rejected. El Documentador requiere estas
+      entradas para generar los decoradores del contrato OpenAPI de HU-002. Deben
+      agregarse al catalogo antes de que el Documentador inicie.
 
     - >
-      MEDIO — Endpoint POST /auth/refresh sin HU: Tokens de acceso expiran.
-      Sin endpoint de refresh, los usuarios necesitan re-autenticarse cada vez.
-      La tabla RefreshToken esta en el schema pero el endpoint no tiene HU.
+      MEDIO — POST /auth/refresh sin HU: los tokens JWT expiran. Sin endpoint de
+      refresh, los usuarios deben re-autenticarse manualmente. La tabla RefreshToken
+      esta en el schema pero el endpoint no tiene HU en EPICA-01. Escalar al Product
+      Owner para definir si es una HU adicional en EPICA-01 o en una epica futura.
 
     - >
-      BAJO — Los uploads de imagen (avatar/banner) no tienen mecanismo definido.
-      La decision arquitectonica asume que el cliente genera las URLs externamente.
+      BAJO — Busqueda parcial por nombre en POST /coach-requests/search usa ILIKE
+      %valor%. Sin indice GIN en la columna name de User, puede ser lento en tablas
+      grandes. Evaluar cuando la base de entrenadores crezca.
 
     - >
-      BAJO — El campo nombre en SearchCoachRequestsDto usa busqueda parcial
-      (ILIKE %valor%). En tablas grandes, esto puede ser lento sin indice GIN.
-      Evaluar si se necesita un indice cuando la base crezca.
+      BAJO — avatarUrl y bannerUrl asumidos como URLs externas sin validacion de
+      dominio. Si el cliente envia URLs de dominios no autorizados, se persisten sin
+      verificacion. Considerar whitelist de dominios en una iteracion futura.

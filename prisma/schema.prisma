@@ -10,6 +10,7 @@ datasource db {
 // --- Enums base ---
 
 enum UserRole {
+  ADMIN
   COACH
   ATHLETE
 }
@@ -26,4 +27,125 @@ enum SubscriptionStatus {
   APPROVED
   REJECTED
   ACTIVE
+}
+
+// --- Enums EPICA-01 ---
+
+enum CoachRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  HABEAS_DATA
+  TERMS_OF_SERVICE
+  HEALTH_DATA_CONSENT
+  SPORT_CONSENT
+}
+
+enum IdentificationType {
+  CC
+  CE
+  NIT
+  PASAPORTE
+  PPT
+  PEP
+}
+
+// --- Modelos EPICA-01 ---
+
+model User {
+  id                     String             @id @default(uuid())
+  email                  String             @unique @map("email")
+  passwordHash           String             @map("password_hash")
+  role                   UserRole           @map("role")
+  name                   String             @map("name")
+  phone                  String             @map("phone")
+  phoneCountryCode       String             @map("phone_country_code")
+  identificationType     IdentificationType @map("identification_type")
+  identificationNumber   String             @unique @map("identification_number")
+  avatarUrl              String?            @map("avatar_url")
+  dateOfBirth            DateTime?          @map("date_of_birth")
+  failedLoginAttempts    Int                @default(0) @map("failed_login_attempts")
+  lockedUntil            DateTime?          @map("locked_until")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  coachRequest           CoachRequest?      @relation("CoachRequestUser")
+  reviewedCoachRequests  CoachRequest[]     @relation("CoachRequestReviewer")
+  legalAcceptances       LegalAcceptance[]
+  refreshTokens          RefreshToken[]
+
+  @@map("users")
+}
+
+model CoachRequest {
+  id              String             @id @default(uuid())
+  userId          String             @unique @map("user_id")
+  planDescription String             @map("plan_description")
+  bannerUrl       String?            @map("banner_url")
+  status          CoachRequestStatus @default(PENDING) @map("status")
+  rejectionReason String?            @map("rejection_reason")
+  reviewedAt      DateTime?          @map("reviewed_at")
+  reviewedBy      String?            @map("reviewed_by")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  user            User               @relation("CoachRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer        User?              @relation("CoachRequestReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@map("coach_requests")
+}
+
+// Registro inmutable — append-only (Ley 527/1999)
+// No tiene updatedAt por diseño: este registro nunca debe modificarse
+model LegalAcceptance {
+  id              String       @id @default(uuid())
+  userId          String       @map("user_id")
+  documentType    DocumentType @map("document_type")
+  documentVersion String       @map("document_version")
+  ip              String       @map("ip")
+  userAgent       String       @map("user_agent")
+  planId          String?      @map("plan_id")
+  acceptedAt      DateTime     @default(now()) @map("accepted_at")
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("legal_acceptances")
+}
+
+// Registro append-only — sin updatedAt
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  ip            String   @map("ip")
+  userAgent     String   @map("user_agent")
+  method        String   @map("method")
+  url           String   @map("url")
+  statusCode    Int?     @map("status_code")
+  duration      Int?     @map("duration")
+  correlationId String?  @map("correlation_id")
+  error         String?  @map("error")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([correlationId])
+  @@map("audit_logs")
+}
+
+// Registro append-only — sin updatedAt
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }

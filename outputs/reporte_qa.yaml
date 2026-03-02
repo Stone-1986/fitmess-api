@@ -1,0 +1,475 @@
+reporte_qa:
+  fecha: "2026-03-01"
+  ciclo: 2
+  razonamiento: >
+    QUE: Ciclo 2 post-correcciones del Desarrollador. Se verifican DTOs alineados con contrato,
+    linting pendiente de ejecucion real (sin acceso Bash), y cobertura reportada por referencia
+    al ciclo 1 con tests actualizados. POR QUE: El LT rechazo ciclo 1 por divergencias DTO
+    codigo-contrato y linting FAIL. REFERENCIA: revision_codigo.yaml divergencias_criticas_dto
+    y outputs/contrato_openapi/dto/*.
+
+  linting:
+    eslint: "PASS"
+    prettier: "PASS"
+    errores: 0
+    warnings: 32
+    detalle_warnings: >
+      Todos los 32 warnings son @typescript-eslint/no-unsafe-argument (nivel warn en eslint.config.mjs).
+      4 en guard specs, 1 en prisma-exception.filter.ts, 27 en test/auth.e2e-spec.ts.
+      No hay errores en codigo de produccion ni en tests.
+    medido_por: "orquestador (pnpm run lint + npx prettier --check)"
+
+  cobertura:
+    medido_por: "orquestador (npx vitest run --coverage)"
+    tests_totales: 93
+    tests_pass: 93
+    tests_fail: 0
+    test_files: 7
+    global:
+      stmts: 96.44
+      branch: 93.33
+      funcs: 88.57
+      lines: 96.38
+    dominio:
+      auth_service_stmts: 100
+      auth_service_branch: 89.79
+      coach_requests_service_stmts: 98.24
+      coach_requests_service_branch: 95.45
+      target: 80
+      cumple: true
+    adaptadores:
+      auth_controller_stmts: 100
+      coach_requests_controller_stmts: 100
+      roles_guard_stmts: 100
+      jwt_strategy_stmts: 100
+      jwt_auth_guard_stmts: 75
+      target: 70
+      cumple: true
+
+  # ─── VERIFICACION DE CORRECCIONES DEL CICLO 1 ──────────────────────────────────
+
+  divergencias_resueltas:
+    - dto: "RegisterAthleteDto"
+      campo_ciclo1: "acceptedPersonalDataPolicy"
+      campo_ciclo2: "acceptsHabeasData"
+      evidencia: "src/modules/auth/dto/register-athlete.dto.ts:174 — campo acceptsHabeasData presente"
+      alineado_con_contrato: true
+      contrato_referencia: "outputs/contrato_openapi/dto/register-athlete.dto.ts:167"
+
+    - dto: "RegisterAthleteDto"
+      campo_ciclo1: "dateOfBirth obligatorio"
+      campo_ciclo2: "dateOfBirth opcional (@IsOptional)"
+      evidencia: "src/modules/auth/dto/register-athlete.dto.ts:112-125 — @IsOptional() @IsDateString"
+      alineado_con_contrato: true
+
+    - dto: "RegisterAthleteDto"
+      campo_ciclo1: "Faltaban @MinLength/@MaxLength en name"
+      campo_ciclo2: "@MinLength(2) y @MaxLength(120) presentes en name"
+      evidencia: "src/modules/auth/dto/register-athlete.dto.ts:39-40"
+      alineado_con_contrato: true
+
+    - dto: "RegisterCoachDto"
+      campo_ciclo1: "acceptedTerms"
+      campo_ciclo2: "acceptsTermsOfService"
+      evidencia: "src/modules/auth/dto/register-coach.dto.ts:177"
+      alineado_con_contrato: true
+
+    - dto: "RegisterCoachDto"
+      campo_ciclo1: "acceptedPersonalDataPolicy"
+      campo_ciclo2: "acceptsHabeasData"
+      evidencia: "src/modules/auth/dto/register-coach.dto.ts:187"
+      alineado_con_contrato: true
+
+    - dto: "RegisterCoachDto"
+      campo_ciclo1: "Faltaba dateOfBirth opcional"
+      campo_ciclo2: "dateOfBirth opcional presente"
+      evidencia: "src/modules/auth/dto/register-coach.dto.ts:113-126"
+      alineado_con_contrato: true
+
+    - dto: "SearchCoachRequestsDto"
+      campo_ciclo1: "uuid"
+      campo_ciclo2: "ids"
+      evidencia: "src/modules/auth/dto/search-coach-requests.dto.ts:41"
+      alineado_con_contrato: true
+      contrato_referencia: "outputs/contrato_openapi/dto/search-coach-requests.dto.ts:39"
+
+    - dto: "SearchCoachRequestsDto"
+      campo_ciclo1: "mail (sin @IsEmail)"
+      campo_ciclo2: "email con @IsEmail"
+      evidencia: "src/modules/auth/dto/search-coach-requests.dto.ts:65 — @IsEmail presente"
+      alineado_con_contrato: true
+
+    - dto: "SearchCoachRequestsDto"
+      campo_ciclo1: "nombre"
+      campo_ciclo2: "name"
+      evidencia: "src/modules/auth/dto/search-coach-requests.dto.ts:76"
+      alineado_con_contrato: true
+
+    - dto: "SearchCoachRequestsDto"
+      campo_ciclo1: "limit default 10"
+      campo_ciclo2: "limit default 20"
+      evidencia: "src/modules/auth/dto/search-coach-requests.dto.ts:132 — limit?: number = 20"
+      alineado_con_contrato: true
+      nota: >
+        El contrato (outputs/contrato_openapi/dto/search-coach-requests.dto.ts) no tiene valor
+        por defecto en la propiedad de clase, pero el comentario Swagger dice default: 20.
+        La implementacion tiene = 20 como valor por defecto de la propiedad, lo cual es correcto.
+
+    - dto: "RejectCoachRequestDto"
+      campo_ciclo1: "reason"
+      campo_ciclo2: "rejectionReason"
+      evidencia: "src/modules/auth/dto/reject-coach-request.dto.ts:28"
+      alineado_con_contrato: true
+      contrato_referencia: "outputs/contrato_openapi/dto/reject-coach-request.dto.ts (campo rejectionReason)"
+
+    - dto: "RejectCoachRequestDto"
+      campo_ciclo1: "Faltaba @MaxLength(1000)"
+      campo_ciclo2: "@MaxLength(1000) presente"
+      evidencia: "src/modules/auth/dto/reject-coach-request.dto.ts:25-27"
+      alineado_con_contrato: true
+
+    - dto: "AthleteRegistrationResponseDto"
+      campo_ciclo1: "4 campos (id, email, role, createdAt)"
+      campo_ciclo2: "9 campos (id, name, email, role, identificationType, identificationNumber, dateOfBirth?, avatarUrl?, createdAt)"
+      evidencia: "src/modules/auth/dto/athlete-registration-response.dto.ts — 9 campos verificados"
+      alineado_con_contrato: true
+      contrato_referencia: "outputs/contrato_openapi/dto/athlete-registration-response.dto.ts — 9 campos"
+
+    - dto: "CoachRequestDetailResponseDto"
+      campo_ciclo1: "name, email (genéricos)"
+      campo_ciclo2: "coachName, coachEmail"
+      evidencia: "src/modules/auth/dto/coach-request-detail-response.dto.ts:32 y 39"
+      alineado_con_contrato: true
+
+    - dto: "CoachRequestDetailResponseDto"
+      campo_ciclo1: "Faltaba dateOfBirth?"
+      campo_ciclo2: "dateOfBirth? presente"
+      evidencia: "src/modules/auth/dto/coach-request-detail-response.dto.ts:66-71"
+      alineado_con_contrato: true
+
+    - dto: "AuthTokenResponseDto"
+      campo_ciclo1: "Estructura anidada con expiresIn - potencial divergencia con contrato plano"
+      campo_ciclo2: "Estructura anidada con expiresIn - CONTRATO ACTUALIZADO coincide"
+      evidencia: >
+        El contrato actualizado outputs/contrato_openapi/dto/auth-token-response.dto.ts tiene
+        la misma estructura: {accessToken, refreshToken, expiresIn, user: AuthUserDto}.
+        El LT resolvio la divergencia actualizando el contrato para reflejar la implementacion
+        mas rica funcionalmente.
+      alineado_con_contrato: true
+
+    - servicio: "coach-requests.service.ts"
+      campo_ciclo1: "dto.uuid, dto.mail, dto.nombre, dto.reason"
+      campo_ciclo2: "dto.ids, dto.email, dto.name, dto.rejectionReason"
+      evidencia: >
+        coach-requests.service.ts: linea 41 usa dto.ids, linea 60 usa dto.email,
+        linea 64 usa dto.name, linea 303 usa dto.rejectionReason.
+        Todos los campos estan correctamente renombrados en el service.
+      alineado_con_contrato: true
+
+    - spec: "auth.service.spec.ts"
+      descripcion: "Datos de prueba actualizados con campos renombrados"
+      evidencia: >
+        baseAthleteDto (linea 26-39): usa acceptsHabeasData, acceptsTermsOfService,
+        personalDataDocumentVersion, termsDocumentVersion.
+        baseCoachDto (linea 41-54): usa acceptsTermsOfService, acceptsHabeasData.
+        Todos los campos del ciclo 1 han sido corregidos.
+
+    - spec: "coach-requests.service.spec.ts"
+      descripcion: "Filtros actualizados: ids, email, name en tests de search()"
+      evidencia: >
+        search() tests usan dto.ids (linea 160), dto.email (linea 172), dto.name (linea 183).
+        Los tests de reject() usan rejectionReason en rejectDto (linea 404).
+
+  divergencias_pendientes:
+    - dto: "RegisterCoachDto"
+      descripcion: >
+        El contrato (outputs/contrato_openapi/dto/register-coach.dto.ts) NO tiene
+        'termsDocumentVersion' ni 'personalDataDocumentVersion' pero la implementacion SI los tiene.
+        RegisterAthleteDto en el contrato SI los tiene. Es una inconsistencia menor entre los
+        DTOs de registro de atleta y coach — ambos deberian tener los campos de version de
+        documento o ninguno.
+      impacto: "BAJO — campos adicionales en el body del request. No causa error de contrato."
+      recomendacion: >
+        Agregar termsDocumentVersion y personalDataDocumentVersion al contrato de RegisterCoachDto
+        para mantener consistencia con RegisterAthleteDto. Decision de diseno: el LT ya acepto
+        estos campos en el ciclo 1 como decision de trazabilidad legal (Ley 527/1999).
+      bloquea_flujo: false
+
+  criterios_de_aceptacion:
+    - id: "CAT-01"
+      descripcion: "Cobertura de dominio (AuthService, CoachRequestsService) >= 80%"
+      cumple: true
+      evidencia: >
+        Medido con npx vitest run --coverage. AuthService: 100% stmts / 89.79% branch.
+        CoachRequestsService: 98.24% stmts / 95.45% branch. Ambos superan el target de 80%.
+
+    - id: "CAT-02"
+      descripcion: "Cobertura de adaptadores (AuthController, CoachRequestsController) >= 70%"
+      cumple: true
+      evidencia: >
+        Medido con npx vitest run --coverage. AuthController 100%, CoachRequestsController 100%,
+        RolesGuard 100%, JwtStrategy 100%, JwtAuthGuard 75%. Todos superan target de 70%.
+
+    - id: "CAT-03"
+      descripcion: "Todos los endpoints documentan sus errores con @ApiProblemResponse"
+      cumple: true
+      evidencia: >
+        auth.controller.ts: registerAthlete @ApiProblemResponse(400, 409).
+        registerCoach @ApiProblemResponse(400, 409). login @ApiProblemResponse(400, 401, 403, 429).
+        coach-requests.controller.ts: search @ApiProblemResponse(400, 401, 403).
+        findOne @ApiProblemResponse(401, 403, 404). approve @ApiProblemResponse(401, 403, 404, 409).
+        reject @ApiProblemResponse(400, 401, 403, 404, 409). Cobertura completa.
+
+    - id: "CAT-04"
+      descripcion: "Endpoints publicos usan security: [] en el contrato OpenAPI"
+      cumple: true
+      evidencia: >
+        auth.controller.ts lineas 56, 93, 137: @ApiSecurity([]) en registerAthlete,
+        registerCoach y login. Los tres endpoints publicos tienen la marca correcta.
+        CoachRequestsController usa @ApiBearerAuth() a nivel de clase.
+
+    - id: "CAT-05"
+      descripcion: "Spectral: fitmess-auth-401-operation pasa en todos los endpoints con JwtAuthGuard"
+      cumple: "NO_VERIFICABLE"
+      evidencia: >
+        pnpm run openapi:validate no puede ejecutarse sin DATABASE_URL activa.
+        La regla Spectral fitmess-auth-401-operation verifica que endpoints con JwtAuthGuard
+        documenten 401. Inspeccion manual: todos los endpoints de coach-requests.controller.ts
+        tienen @ApiProblemResponse(401). El criterio es probable que pase pero no se puede confirmar
+        sin ejecucion del export OpenAPI.
+
+    - id: "CAT-06"
+      descripcion: "LegalAcceptance: el service no expone metodos update ni delete (inmutabilidad por diseno)"
+      cumple: true
+      evidencia: >
+        AuthService: ningun metodo updateLegalAcceptance ni deleteLegalAcceptance.
+        LegalAcceptances se crean SOLO dentro de $transaction en registerAthlete (lineas 73-93)
+        y registerCoach (lineas 178-198). No hay endpoint UPDATE/DELETE sobre LegalAcceptance.
+
+    - id: "CAT-07"
+      descripcion: "Passwords hasheados con bcrypt minimo 10 rondas antes de persistir"
+      cumple: true
+      evidencia: "auth.service.ts:27 BCRYPT_ROUNDS = 10. Lineas 52 y 145: bcrypt.hash(dto.password, BCRYPT_ROUNDS)."
+
+    - id: "CAT-08"
+      descripcion: "LocalStrategy: mensaje identico para email inexistente y password incorrecto"
+      cumple: true
+      evidencia: >
+        validateCredentials() siempre lanza BusinessError.INVALID_CREDENTIALS con el mismo
+        detail independientemente del motivo. auth.service.ts lineas 276-280.
+        Tests en auth.service.spec.ts lineas 451-463 lo verifican.
+
+    - id: "CAT-09"
+      descripcion: "AuthService.login() nunca loggea password, accessToken ni refreshToken"
+      cumple: true
+      evidencia: >
+        AuthService no instancia Logger. El metodo login() genera tokens sin loggearlos.
+        Documentacion explica la restriccion. Test en auth.service.spec.ts lineas 670-682.
+
+    - id: "CAT-10"
+      descripcion: "State machine: transicion desde APPROVED o REJECTED lanza INVALID_STATE_TRANSITION (409)"
+      cumple: true
+      evidencia: >
+        approve() y reject() verifican status !== PENDING y lanzan INVALID_STATE_TRANSITION.
+        4 tests cubren los casos: approve-desde-APPROVED, approve-desde-REJECTED,
+        reject-desde-APPROVED, reject-desde-REJECTED.
+
+    - id: "CAT-11"
+      descripcion: "Registro atomico atleta: User + LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE)"
+      cumple: true
+      evidencia: "auth.service.ts lineas 57-96. Test verifica 2 llamadas a legalAcceptance.create con tipos correctos."
+
+    - id: "CAT-12"
+      descripcion: "Registro atomico coach: User + CoachRequest + LegalAcceptance(TERMS_OF_SERVICE) + LegalAcceptance(HABEAS_DATA)"
+      cumple: true
+      evidencia: "auth.service.ts lineas 154-200. Test verifica 2 llamadas a legalAcceptance.create con tipos correctos."
+
+    - id: "CAT-13"
+      descripcion: "Los eventos coach.request.approved y coach.request.rejected en catalogo de design-patterns"
+      cumple: "NO_VERIFICABLE"
+      evidencia: >
+        Los eventos se emiten en coach-requests.service.ts (lineas 254 y 318).
+        La verificacion del catalogo es documental — fuera del alcance del analisis de codigo.
+
+    - id: "CAT-14"
+      descripcion: "RolesGuard(ADMIN) en todos los endpoints bajo /coach-requests"
+      cumple: true
+      evidencia: "coach-requests.controller.ts lineas 49-51: @UseGuards(JwtAuthGuard, RolesGuard) @Roles(UserRole.ADMIN) a nivel de clase."
+
+    - id: "CAT-15"
+      descripcion: "ParseUUIDPipe en todos los parametros :id"
+      cumple: true
+      evidencia: >
+        coach-requests.controller.ts: findOne linea 118, approve linea 157, reject linea 203.
+        Los tres endpoints con :id usan ParseUUIDPipe.
+
+    - id: "CAT-16"
+      descripcion: "HEALTH_DATA_CONSENT ausente del registro del atleta"
+      cumple: true
+      evidencia: >
+        auth.service.ts lineas 73-93: solo HABEAS_DATA y TERMS_OF_SERVICE.
+        Test en auth.service.spec.ts lineas 186-203 lo verifica.
+
+    - id: "CAT-17"
+      descripcion: "Bloqueo por cuenta: 5 intentos consecutivos bloquean 15 minutos (ACCOUNT_TEMPORARILY_LOCKED 429)"
+      cumple: true
+      evidencia: >
+        MAX_FAILED_ATTEMPTS = 5 (linea 25), LOCK_DURATION_MS = 15*60*1000 (linea 26).
+        Logica en validateCredentials() lineas 262-274. Tests lineas 484-515.
+
+    - id: "CAT-18"
+      descripcion: "El contador se resetea tras login exitoso o al expirar el bloqueo"
+      cumple: true
+      evidencia: >
+        Reset en login exitoso: lineas 283-288. Reset por expiracion: lineas 247-252.
+        Tests lineas 409-426 y 517-541.
+
+    - id: "CAT-19"
+      descripcion: "ACCOUNT_TEMPORARILY_LOCKED en catalogo common/exceptions/"
+      cumple: true
+      evidencia: >
+        business-error.enum.ts lineas 150-154:
+        ACCOUNT_TEMPORARILY_LOCKED: { code, title, httpStatus: TOO_MANY_REQUESTS (429) }.
+
+  vulnerabilidades:
+    - severidad: "BAJA"
+      descripcion: >
+        BusinessException expone 'context.requestStatus' en COACH_NOT_APPROVED (auth.service.ts:329)
+        con valor 'PENDING', 'REJECTED' o 'NO_REQUEST'. Si ProblemDetailFilter serializa el campo
+        'context' en la respuesta HTTP, este dato revela el estado interno de la solicitud del coach.
+        Aunque no es exploitable directamente, viola el principio de minima exposicion de informacion.
+      ubicacion: "src/modules/auth/auth.service.ts:326-330"
+      recomendacion: >
+        Verificar que ProblemDetailFilter excluye el campo 'context' de la respuesta cliente
+        para errores de autorizacion (403). Si se incluye, considerar eliminar el campo
+        requestStatus del context en esta excepcion especifica.
+
+    - severidad: "BAJA"
+      descripcion: >
+        LocalAuthGuard no sobrescribe handleRequest() como lo hace JwtAuthGuard. Si LocalStrategy
+        lanza una excepcion de tipo no-BusinessException, Passport podria retornar un 401 generico
+        de NestJS en lugar del formato RFC 9457 del proyecto.
+      ubicacion: "src/modules/auth/guards/local-auth.guard.ts"
+      recomendacion: >
+        Agregar override de handleRequest() en LocalAuthGuard que capture el error y lo relance
+        como BusinessException con INVALID_CREDENTIALS, garantizando el formato RFC 9457 consistente.
+
+  escaneo_automatico:
+    ejecutado: false
+    motivo_no_ejecucion: >
+      El repositorio git tiene todos los archivos como untracked (sin commits). No existe
+      rama previa ni remote origin para ejecutar git diff y alimentar /security-review.
+      Se realizo revision manual de seguridad contra todos los checklists del proceso QA.
+    hallazgos: []
+    resumen:
+      total: 0
+      high: 0
+      medium: 0
+      low: 0
+      descartados: 0
+
+  # ─── REVISION MANUAL DE SEGURIDAD (reemplaza escaneo automatico) ────────────────
+
+  revision_manual_seguridad:
+
+    endpoints_sin_jwt:
+      - endpoint: "POST /auth/register"
+        sin_guard: true
+        correcto: true
+        razon: "Endpoint publico de registro — correcto por diseno"
+      - endpoint: "POST /auth/coaches/register"
+        sin_guard: true
+        correcto: true
+        razon: "Endpoint publico de registro — correcto por diseno"
+      - endpoint: "POST /auth/login"
+        sin_guard: true
+        correcto: true
+        razon: "Usa LocalAuthGuard (Passport) — correcto por diseno"
+      - endpoint: "POST /coach-requests/search"
+        sin_guard: false
+        correcto: true
+        razon: "JwtAuthGuard + RolesGuard(ADMIN) a nivel de clase"
+      - endpoint: "GET /coach-requests/:id"
+        sin_guard: false
+        correcto: true
+        razon: "JwtAuthGuard + RolesGuard(ADMIN) a nivel de clase"
+      - endpoint: "POST /coach-requests/:id/approve"
+        sin_guard: false
+        correcto: true
+        razon: "JwtAuthGuard + RolesGuard(ADMIN) a nivel de clase"
+      - endpoint: "POST /coach-requests/:id/reject"
+        sin_guard: false
+        correcto: true
+        razon: "JwtAuthGuard + RolesGuard(ADMIN) a nivel de clase"
+
+    logs_datos_sensibles:
+      passwords_en_logs: false
+      tokens_en_logs: false
+      datos_salud_en_logs: false
+      evidencia: "AuthService no instancia Logger. LocalStrategy.validate() no loggea password."
+
+    dtos_respuesta_campos_sensibles:
+      passwordHash_expuesto: false
+      archivedAt_expuesto: false
+      tokens_expuestos: false
+      evidencia: >
+        AthleteRegistrationResponseDto: sin passwordHash ni tokens.
+        CoachRequestResponseDto: sin passwordHash ni tokens.
+        CoachRequestDetailResponseDto: excluye reviewedBy, passwordHash. Incluye rejectionReason
+        (intencionalmente — para revision del admin).
+        AuthTokenResponseDto: incluye accessToken y refreshToken (correcto — es el DTO de login).
+        AuthUserDto: solo id, email, role.
+
+    ownership_sin_filtro:
+      aplica: false
+      razon: >
+        Los endpoints de coach-requests son exclusivos de ADMIN. No hay concepto de ownership
+        sobre CoachRequest — cualquier ADMIN puede ver/aprobar/rechazar cualquier solicitud.
+        El ResourcePolicyGuard no aplica en este modulo.
+
+    originalError_expuesto: false
+    evidencia_originalError: >
+      TechnicalException almacena originalError internamente pero no lo expone en el constructor
+      de HttpException. El ProblemDetailFilter loggea el error pero no lo serializa en la respuesta.
+
+    controllers_con_try_catch: false
+    controllers_con_prisma: false
+    services_con_http_exception: false
+    evidencia_arquitectura: >
+      Todos los services usan BusinessException y TechnicalException.
+      Los controllers son thin: solo delegan y retornan.
+      PrismaService solo es accedido desde services.
+
+    import_prisma_correcto: true
+    evidencia_import: >
+      auth.service.ts linea 12: from '../../../generated/prisma/index.js'.
+      coach-requests.service.ts linea 4: from '../../../generated/prisma/index.js'.
+      No hay imports desde '@prisma/client' en el modulo auth.
+
+    supabase_en_backend: false
+    tests_e2e_llaman_supabase: false
+
+  validacion_openapi:
+    ejecutado: false
+    motivo_no_ejecucion: >
+      El comando 'pnpm run openapi:validate' requiere que la app NestJS arranque para exportar
+      el schema. La app requiere DATABASE_URL activa (PostgreSQL). Sin base de datos disponible
+      en el entorno QA, el export no puede completarse.
+      El usuario puede ejecutar la validacion con: pnpm run openapi:validate 2>&1
+    errores: 0
+    warnings: 0
+    detalle: []
+
+  errores_criticos: []
+
+  estado: "APROBADO"
+  nota_estado: >
+    El agente QA no tuvo acceso a Bash, pero el orquestador ejecuto los tres comandos obligatorios
+    y complemento el reporte con las metricas reales:
+      - pnpm run lint: 0 errores, 32 warnings (todos @typescript-eslint/no-unsafe-argument nivel warn)
+      - npx prettier --check "src/**/*.ts": All matched files use Prettier code style
+      - npx vitest run --coverage: 93 tests pass, cobertura global 96.44% stmts
+
+    RESULTADO: Todos los gates duros PASAN. Todas las divergencias del ciclo 1 RESUELTAS (17/17).
+    Criterios de aceptacion: 17/19 cumplidos (2 no verificables por infraestructura).
+    Vulnerabilidades: 0 ALTA/CRITICA, 2 BAJA. Listo para revision del Lider Tecnico.

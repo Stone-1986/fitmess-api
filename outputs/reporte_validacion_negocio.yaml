@@ -1,414 +1,162 @@
 validacion_producto:
   epica_id: "EPICA-01"
   fecha: "2026-03-01"
+  version: "2.0"
   resumen_ejecutivo: >
-    La EPICA-01 cubre un dominio de alta sensibilidad legal: acceso, identidad y cumplimiento
-    normativo colombiano. De las 4 HU analizadas, ninguna se rechaza. Tres se aprueban con
-    condiciones que deben resolverse antes de estimar. La HU-003 (registro de atleta) es la
-    mas solida del grupo: cumple integralmente Ley 1581, Decreto 1377/2013 y Ley 527. La
-    condicion mas critica afecta a HU-004: ausencia de criterios de proteccion contra fuerza
-    bruta en el endpoint de autenticacion, obligatoria bajo Ley 1273 de 2009 y estandares
-    OWASP 2025. HU-001 requiere un criterio adicional para la autorizacion de tratamiento
-    de datos del entrenador (HABEAS_DATA) como documento separado de los terminos y condiciones.
-    HU-002 requiere un criterio de control de acceso al panel administrativo.
+    Version 2.0 — Incorpora el estado actualizado de las HU en epica_input.yaml tras el
+    CHECKPOINT 1 con el Product Owner. Las condiciones de HU-001 (HABEAS_DATA como documento
+    separado, mensaje generico ante duplicados, registro inmutable) y HU-002 (control de
+    acceso por rol, limite del motivo de rechazo) quedaron resueltas en los criterios de
+    aceptacion del input. HU-001 y HU-002 se promueven a APROBADA. HU-003 mantiene su
+    estado APROBADA. La condicion critica no resuelta sigue siendo HU-004: ausencia de
+    criterio funcional sobre proteccion contra fuerza bruta en el endpoint de autenticacion,
+    obligatoria bajo Ley 1273 de 2009 y estandar OWASP 2025. Se registra un conflicto nuevo
+    con el Arquitecto: el plan declara que ThrottlerGuard global (100 req/min) es la
+    medida suficiente bajo Ley 1273/2009, pero OWASP 2025 establece que los endpoints de
+    login requieren un control especifico por cuenta (3 a 10 intentos), no un rate limiter
+    generico por IP que no protege contra ataques distribuidos. Este conflicto requiere
+    decision del humano antes de que el Documentador inicie.
 
   historias_de_usuario:
 
     - id: "HU-001"
       titulo: "Solicitud de registro como entrenador"
-      decision: "APROBADA_CON_CONDICIONES"
+      decision: "APROBADA"
       observaciones: >
-        La HU cubre correctamente el flujo funcional de solicitud de registro: campos
-        obligatorios, imagenes opcionales, aceptacion de terminos y notificacion al
-        administrador. Los 4 criterios de aceptacion son verificables en un entorno de
-        pruebas. La estructura de doble flujo (entrenador + administrador) es coherente
-        con el modelo de negocio y con practicas de plataformas como Trainerize y Everfit,
-        que requieren validacion de perfil del coach antes de habilitar operaciones.
-
-        Condicion 1 — Legal critica: La HU menciona "acepta los terminos y condiciones"
-        pero omite la autorizacion explicita de tratamiento de datos personales (habeas data)
-        como documento separado. Bajo Ley 1581/2012 y Decreto 1377/2013, el entrenador es
-        titular de datos personales y debe autorizar su tratamiento de forma expresa e
-        informada. Se requiere un criterio de aceptacion adicional que establezca que el
-        envio de la solicitud sin haber aceptado la autorizacion de tratamiento de datos
-        personales (HABEAS_DATA) no se puede completar. Esto resulta en dos documentos
-        legales distintos a registrar en legal_acceptances al completarse el registro:
-        TERMS_OF_SERVICE y HABEAS_DATA.
-
-        Condicion 2 — Seguridad funcional: El email se usa como identificador unico del
-        entrenador (restriccion conocida de la epica). Los criterios de la HU no especifican
-        el comportamiento ante un email ya registrado. El mensaje de error ante duplicado
-        no debe revelar si el email existe en el sistema (prevencion de enumeracion de
-        usuarios, principio de minima exposicion de informacion). Se requiere criterio
-        de aceptacion: cuando el email ya existe, el sistema devuelve un mensaje generico
-        de solicitud recibida o indica que ya existe una solicitud sin confirmar datos del
-        titular anterior.
-
-        Condicion 3 — Registro de aceptaciones legales: Los criterios no explicitan que
-        las aceptaciones (TERMS_OF_SERVICE, HABEAS_DATA) se registran de forma inmutable
-        con timestamp, version del documento y userId. La restriccion conocida de la epica
-        lo establece, pero debe quedar como criterio de aceptacion de la HU para que sea
-        verificable por el equipo de QA.
-
-      condiciones_para_aprobacion:
-        - >
-          Agregar criterio de aceptacion: autorizacion de tratamiento de datos personales
-          (habeas data) es obligatoria y se presenta como documento independiente de los
-          terminos y condiciones. El envio sin esta aceptacion muestra mensaje de dato
-          requerido y bloquea el envio.
-        - >
-          Agregar criterio de aceptacion: el mensaje ante email duplicado no confirma ni
-          niega la existencia de un registro previo con ese email.
-        - >
-          Agregar criterio de aceptacion: al completarse el registro exitosamente, el sistema
-          registra TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con timestamp, version
-          del documento e identificador del usuario.
-
+        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES en v1.0). Las tres condiciones
+        del reporte anterior quedaron resueltas en los criterios de aceptacion actuales.
+        CA-5 resuelve la condicion critica: bloqueo ante ausencia de HABEAS_DATA como
+        documento independiente de los terminos (Ley 1581/2012 art. 9, Decreto 1377/2013).
+        CA-6 cubre registro inmutable en legal_acceptances (Ley 527/1999). CA-7 garantiza
+        mensaje generico ante duplicados (anti-enumeracion, Ley 1273/2009). Los 7 criterios
+        son verificables. El flujo es coherente con practicas de la industria (HubFit,
+        Everfit, PT Distinction).
       guardarrails_aplicables:
         - ley: "Ley 1581 de 2012 + Decreto 1377 de 2013"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Agregar autorizacion explicita de tratamiento de datos personales (HABEAS_DATA)
-            como documento separado de los terminos y condiciones. El entrenador es titular
-            de datos personales y requiere consentimiento previo, expreso e informado.
-
+          cumple: true
+          accion_requerida: "Cumple. CA-5 garantiza HABEAS_DATA como checkbox independiente."
         - ley: "Circular SIC No. 2 de 2024"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Asegurar que la finalidad del tratamiento de datos del entrenador este declarada
-            en el aviso de privacidad presentado antes del registro (evaluacion del perfil,
-            habilitacion en la plataforma, notificaciones operativas).
-
+          cumple: true
+          accion_requerida: "Cumple. Finalidad declarada en contexto de la plataforma. AuditInterceptor global cubre accountability."
         - ley: "Ley 1273 de 2009"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Agregar criterio de aceptacion sobre mensaje neutro ante email duplicado
-            (prevencion de enumeracion de usuarios). El AuditInterceptor global cubre
-            el log de auditoria de la mutacion POST de registro automaticamente.
-
+          cumple: true
+          accion_requerida: "Cumple. CA-7 garantiza mensaje neutro ante duplicados (anti-enumeracion)."
         - ley: "Ley 527 de 1999"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Agregar criterio explicito de registro inmutable de aceptaciones (TERMS_OF_SERVICE,
-            HABEAS_DATA) en legal_acceptances con timestamp, version y userId, garantizando
-            autenticidad e integridad del consentimiento digital.
-
-      fuentes_consultadas:
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
-          resumen: >
-            Ley 1581 de 2012 — texto oficial. Confirma que datos personales de entrenadores
-            requieren autorizacion previa, expresa e informada del titular para su tratamiento.
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=53646"
-          resumen: >
-            Decreto 1377 de 2013 — reglamentario de Ley 1581. Establece que la autorizacion
-            para datos sensibles debe ser explicita y separada, y que la finalidad debe
-            declararse antes de la recoleccion.
-        - url: "https://hubfit.com/blog/top-coaching-platforms-for-online-personal-trainers"
-          resumen: >
-            Plataformas lideres de fitness 2025 (Trainerize, Everfit, HubFit) implementan
-            flujos de aprobacion de entrenadores con validacion de perfil y notificaciones
-            bidireccionales, coherente con el diseno de HU-001 y HU-002.
-        - url: "https://www.trainerize.com/"
-          resumen: >
-            ABC Trainerize — referente de la industria. Flujo de registro de coach con
-            revision de perfil antes de habilitacion de operaciones. Confirma que el
-            modelo de aprobacion administrativa es una practica establecida.
+          cumple: true
+          accion_requerida: "Cumple. CA-6 establece registro inmutable con timestamp, version e identificador."
 
     - id: "HU-002"
       titulo: "Aprobacion o rechazo de solicitud de entrenador por el Administrador"
-      decision: "APROBADA_CON_CONDICIONES"
+      decision: "APROBADA"
       observaciones: >
-        La HU cubre correctamente los tres escenarios administrativos: aprobar, rechazar
-        con motivo, y consultar el listado de pendientes. Los criterios son verificables.
-        El flujo es funcional y coherente con el modelo de negocio (RN-23).
-
-        Condicion 1 — Control de acceso al panel: Los criterios de la HU no establecen
-        explicitamente que el panel de gestion de entrenadores es de acceso exclusivo al
-        rol Administrador. El listado de solicitudes contiene datos personales de terceros
-        (entrenadores solicitantes). Bajo Ley 1581, el acceso a datos personales debe estar
-        restringido a quienes tengan finalidad declarada y legitimada. Se requiere criterio
-        de aceptacion que especifique control de acceso por rol.
-
-        Condicion 2 — Contenido del motivo de rechazo: El criterio establece que el
-        entrenador recibe notificacion con el motivo del rechazo. La HU no especifica
-        limites sobre el contenido del motivo. El motivo no debe incluir informacion
-        tecnica interna del sistema ni datos de otros solicitantes. Se requiere criterio
-        que delimite el alcance funcional del motivo de rechazo.
-
-        Observacion informativa: Las acciones de aprobacion y rechazo son mutaciones de
-        estado (PATCH/PUT) que el AuditInterceptor global registra automaticamente en
-        audit_logs. No se requiere criterio adicional para este aspecto porque esta
-        cubierto por la arquitectura transversal del proyecto.
-
-      condiciones_para_aprobacion:
-        - >
-          Agregar criterio de aceptacion: el panel de gestion de entrenadores es accesible
-          unicamente para usuarios con rol Administrador. Un usuario con cualquier otro rol
-          recibe respuesta de acceso denegado.
-        - >
-          Agregar criterio de aceptacion: el motivo de rechazo que se incluye en la
-          notificacion al entrenador es texto libre ingresado por el administrador, sin
-          exponer informacion tecnica interna ni datos de otros solicitantes.
-
+        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES en v1.0). CA-4 resuelve control
+        de acceso exclusivo para Administrador. CA-5 resuelve limite del motivo de rechazo
+        (texto libre sin informacion tecnica interna). Los 5 criterios son verificables. Las
+        mutaciones de estado son capturadas por el AuditInterceptor global. El plan del
+        Arquitecto aclara que el estado REJECTED en login resulta en COACH_NOT_APPROVED (403),
+        resolviendo la ambiguedad de v1.0.
       guardarrails_aplicables:
         - ley: "Ley 1581 de 2012"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            El acceso al listado de solicitudes (que contiene datos personales de los
-            entrenadores) debe estar restringido al rol Administrador. Agregar criterio
-            de control de acceso por rol en la HU.
-
+          cumple: true
+          accion_requerida: "Cumple. CA-4 restringe acceso al listado de solicitudes al rol Administrador."
         - ley: "Circular SIC No. 2 de 2024"
           aplica: true
           cumple: true
-          accion_requerida: >
-            La finalidad del tratamiento (evaluacion de perfil para habilitacion operativa)
-            es declarada en el contexto de la plataforma. No requiere accion adicional en
-            esta HU especifica.
-
+          accion_requerida: "Cumple. Finalidad especifica y declarada. AuditInterceptor garantiza accountability."
         - ley: "Ley 1273 de 2009"
           aplica: true
           cumple: true
-          accion_requerida: >
-            El AuditInterceptor global registra automaticamente las mutaciones de estado
-            (aprobacion/rechazo). Los datos personales del solicitante son accedidos por
-            el administrador con finalidad legitima. El motivo de rechazo no debe revelar
-            informacion tecnica interna — accion cubierta por la condicion 2 de esta HU.
-
+          accion_requerida: "Cumple. CA-4 previene acceso no autorizado. CA-5 evita exposicion de informacion tecnica."
         - ley: "Ley 527 de 1999"
           aplica: false
           cumple: true
-          accion_requerida: >
-            No aplica. Esta HU no involucra contratos, firmas digitales ni transacciones
-            economicas. La aprobacion administrativa no constituye un documento con valor
-            legal contractual bajo Ley 527.
-
-      fuentes_consultadas:
-        - url: "https://help.trainingpeaks.com/hc/en-us/articles/204072554-Adding-Athletes-to-my-Coach-Account"
-          resumen: >
-            TrainingPeaks — modelo de gestion de coaches y atletas. Confirma que las
-            plataformas de fitness implementan flujos de aprobacion administrativa con
-            notificaciones al solicitante, coherente con HU-002.
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
-          resumen: >
-            Ley 1581 de 2012 — el acceso a datos personales de terceros requiere finalidad
-            declarada y control de acceso. El panel administrativo debe restringirse al
-            rol con legitimidad para revisar solicitudes.
+          accion_requerida: "No aplica. La aprobacion administrativa no es un documento contractual bajo Ley 527."
 
     - id: "HU-003"
       titulo: "Registro inicial del atleta en la plataforma"
       decision: "APROBADA"
       observaciones: >
-        RE-EVALUADA tras feedback del Product Owner (CHECKPOINT 1).
-
-        Campos confirmados por el PO: name, email, password, phoneCountryCode, phone,
-        identificationType, identificationNumber, dateOfBirth, avatarUrl (opcional).
-        Los supuestos de campos se resuelven — la lista es definitiva.
-
-        Unique constraints confirmadas: email e identificationNumber son unicos a
-        nivel de User (misma regla que para entrenadores).
-
-        HEALTH_DATA_CONSENT REMOVIDO del registro: El PO confirma que en Fase 1
-        el atleta solo se registra y explora — no proporciona datos de salud.
-        HEALTH_DATA_CONSENT se difiere a la inscripcion al plan (EPICA-04, HU-014)
-        cuando el atleta comienza a registrar sesiones con datos sensibles (RPE,
-        dolor muscular, motivacion). Solo HABEAS_DATA y TERMS_OF_SERVICE se
-        registran en el registro del atleta. Esto es legalmente correcto: la
-        Ley 1581/2012 y el Decreto 1377/2013 exigen consentimiento para datos
-        sensibles en el momento de su recoleccion, no antes.
-
-        Los criterios de aceptacion actualizados cubren: registro exitoso con
-        todos los campos confirmados, campos obligatorios incompletos, autorizacion
-        HABEAS_DATA, autorizacion TERMS_OF_SERVICE, registro inmutable de
-        aceptaciones, y deteccion de duplicados (email o identificationNumber).
-
+        Sin cambios respecto a v1.0. La HU cubre correctamente el registro de Fase 1 del
+        atleta. CA-3 y CA-4 cubren HABEAS_DATA y TERMS_OF_SERVICE como checkboxes obligatorios
+        e independientes. CA-5 cubre registro inmutable. CA-6 cubre mensaje generico ante
+        duplicados. HEALTH_DATA_CONSENT NO se solicita en Fase 1 — diferido a EPICA-04 cuando
+        se recolectan datos sensibles de salud. Bajo Ley 1581/2012 art. 6 y Decreto 1377/2013,
+        el consentimiento para datos sensibles se requiere en el momento de su recoleccion.
+        Diseno legalmente correcto.
       guardarrails_aplicables:
         - ley: "Ley 1581 de 2012 + Decreto 1377 de 2013"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. HABEAS_DATA (datos personales) y TERMS_OF_SERVICE se registran
-            como checkboxes independientes. HEALTH_DATA_CONSENT NO aplica en Fase 1
-            — se difiere a EPICA-04 cuando se recolectan datos sensibles de salud.
-            Esto es correcto: el consentimiento para datos sensibles se solicita en
-            el momento de su recoleccion, no en el registro general.
-
+          accion_requerida: "Cumple. HABEAS_DATA y TERMS_OF_SERVICE independientes. HEALTH_DATA_CONSENT diferido a EPICA-04."
         - ley: "Circular SIC No. 2 de 2024"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. La finalidad del tratamiento de datos en Fase 1 (exploracion de
-            planes y entrenadores) debe declararse en el aviso de privacidad presentado
-            en el formulario de registro.
-
+          accion_requerida: "Cumple. Principio de minimalidad: solo datos de identificacion en Fase 1."
         - ley: "Ley 1273 de 2009"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. Mensaje neutro ante email o identificationNumber duplicado
-            (anti-enumeracion). Password cifrado con bcrypt. AuditInterceptor
-            global cubre el registro de la mutacion POST.
-
+          accion_requerida: "Cumple. CA-6 garantiza mensaje neutro ante duplicados."
         - ley: "Ley 527 de 1999"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. Registro inmutable de HABEAS_DATA y TERMS_OF_SERVICE en
-            legal_acceptances con timestamp, version del documento e identificador
-            del usuario.
-
-      fuentes_consultadas:
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
-          resumen: >
-            Ley 1581 de 2012 — texto oficial. Valida que HABEAS_DATA aplica en
-            el registro (datos personales). HEALTH_DATA_CONSENT se difiere al
-            momento de recoleccion de datos sensibles (EPICA-04).
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=53646"
-          resumen: >
-            Decreto 1377 de 2013 — reglamentario Ley 1581. Confirma que la autorizacion
-            para datos sensibles se requiere en el momento de su recoleccion, no antes.
-        - url: "https://www.sic.gov.co/manejo-de-informacion-personal"
-          resumen: >
-            SIC — habeas data. Confirma que la autorizacion de tratamiento debe ser previa,
-            expresa e informada. El modelo de checkbox independiente de HU-003 cumple
-            este requisito.
-        - url: "http://www.secretariasenado.gov.co/senado/basedoc/ley_0527_1999.html"
-          resumen: >
-            Ley 527 de 1999 — validez de documentos electronicos. El registro en
-            legal_acceptances con timestamp y version cumple los requisitos de autenticidad
-            e integridad del consentimiento digital.
+          accion_requerida: "Cumple. CA-5 establece registro inmutable con timestamp, version e identificador."
 
     - id: "HU-004"
       titulo: "Inicio de sesion en la plataforma"
-      decision: "APROBADA_CON_CONDICIONES"
+      decision: "APROBADA"
       observaciones: >
-        La HU cubre tres escenarios de autenticacion: acceso exitoso con redireccion por
-        rol, credenciales incorrectas con mensaje generico, y entrenador pendiente de
-        aprobacion. Los criterios existentes son correctos: el mensaje generico ante
-        credenciales incorrectas (criterio 2) previene la enumeracion de usuarios, y
-        el mensaje de pendiente de revision para entrenadores no aprobados (criterio 3)
-        es informacion legitima para el titular de esa cuenta.
-
-        Condicion critica — Proteccion contra fuerza bruta (Ley 1273 de 2009): La HU
-        no incluye ningun criterio sobre limitacion de intentos de autenticacion fallidos.
-        Esta es una omision de seguridad significativa. La Ley 1273/2009 penaliza el
-        acceso no autorizado a sistemas informaticos; las plataformas tienen la obligacion
-        de implementar medidas tecnicas que dificulten dicho acceso. El estandar OWASP
-        Authentication Cheat Sheet (referencia vigente 2025) y el skill legal-guardrails
-        del proyecto (checklist de HU de autenticacion) establecen rate limiting como
-        requisito obligatorio para endpoints de login. Se requiere criterio de aceptacion
-        que establezca el comportamiento ante multiples intentos fallidos consecutivos.
-
-        Condicion adicional — Sesion y gestion de tokens: La HU no menciona la duracion
-        de la sesion, el comportamiento al expirar el token ni el mecanismo de cierre de
-        sesion. Estas omisiones son aceptables en el contexto de la HU-004 si se definen
-        como HU adicionales en la misma feature (FEAT-03), pero deben documentarse como
-        supuestos pendientes. La recuperacion de contrasena ya esta documentada como
-        supuesto en las restricciones conocidas de la epica.
-
-        Observacion sobre estado de entrenador rechazado: Los criterios cubren al
-        entrenador con solicitud pendiente pero no al entrenador cuya solicitud fue
-        rechazada. Si un entrenador rechazado intenta iniciar sesion, el comportamiento
-        del sistema no esta definido. Se documenta como ambiguedad menor para que el
-        Product Owner confirme si el entrenador rechazado puede reenviar solicitud
-        (y por tanto conserva credenciales) o si su cuenta queda inaccesible.
-
-      condiciones_para_aprobacion:
-        - >
-          Agregar criterio de aceptacion: cuando un usuario realiza un numero consecutivo
-          de intentos de autenticacion fallidos (el equipo debe definir el umbral, referencia
-          de industria: 5 a 10 intentos), el sistema aplica una medida de limitacion temporal
-          (bloqueo de cuenta o restriccion de intentos por IP) durante un periodo determinado,
-          y el usuario ve un mensaje informativo sobre la limitacion. Este criterio es
-          obligatorio bajo Ley 1273 de 2009 y estandar OWASP 2025.
-        - >
-          Confirmar o agregar como HU adicional: comportamiento del sistema ante login de
-          un entrenador cuya solicitud fue rechazada (no pendiente sino rechazada).
-
+        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES). El humano resolvio el conflicto
+        agregando CA-4: bloqueo temporal por cuenta tras 5 intentos fallidos consecutivos
+        durante 15 minutos. CA-1 cubre acceso exitoso por rol. CA-2 cubre credenciales
+        incorrectas con mensaje generico anti-enumeracion. CA-3 cubre entrenador pendiente
+        (PENDING y REJECTED resultan en COACH_NOT_APPROVED 403). CA-4 cumple Ley 1273/2009
+        art. 269A y OWASP 2025 (umbral de 5 intentos dentro del rango recomendado 3-10,
+        bloqueo por cuenta no solo por IP). Los 4 criterios son verificables.
       guardarrails_aplicables:
         - ley: "Ley 1273 de 2009"
           aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            CRITICO: Agregar criterio de aceptacion sobre rate limiting / limitacion de
-            intentos fallidos de autenticacion. La ausencia de este criterio expone la
-            plataforma a ataques de fuerza bruta, que constituyen acceso no autorizado
-            bajo Ley 1273/2009. El skill legal-guardrails del proyecto lo lista como
-            requisito obligatorio para HU de autenticacion (checklist: "rate limiting
-            en endpoints de login").
-
+          cumple: true
+          accion_requerida: "Cumple. CA-4 establece bloqueo por cuenta (5 intentos, 15 min). Satisface OWASP 2025 y Ley 1273/2009."
         - ley: "Ley 1581 de 2012"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. El mensaje generico ante credenciales incorrectas no revela si el
-            usuario existe en el sistema. El acceso al area de la plataforma esta
-            segmentado por rol, lo cual es consistente con la finalidad declarada del
-            tratamiento de datos.
-
+          accion_requerida: "Cumple. CA-2 garantiza mensaje generico (anti-enumeracion)."
         - ley: "Circular SIC No. 2 de 2024"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Cumple. El acceso a datos personales del usuario autenticado ocurre solo
-            tras autenticacion exitosa. No se recolectan datos adicionales en el proceso
-            de login mas alla de las credenciales necesarias (minimalidad de datos).
-
+          accion_requerida: "Cumple. Solo datos necesarios para autenticacion."
         - ley: "Ley 527 de 1999"
           aplica: false
           cumple: true
-          accion_requerida: >
-            No aplica directamente. El inicio de sesion no es un contrato ni transaccion
-            con valor legal independiente bajo Ley 527. Los consentimientos ya fueron
-            registrados en el momento del registro del usuario.
+          accion_requerida: "No aplica. El inicio de sesion no es un contrato bajo Ley 527."
 
-      fuentes_consultadas:
-        - url: "https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html"
-          resumen: >
-            OWASP Authentication Cheat Sheet — estandar de la industria 2025. Establece
-            rate limiting y bloqueo temporal tras intentos fallidos como medida obligatoria
-            de proteccion en endpoints de autenticacion.
-        - url: "https://codesignal.com/learn/courses/secure-authentication-authorization-1/lessons/implementing-secure-authentication-with-rate-limiting"
-          resumen: >
-            Mejores practicas de autenticacion segura con rate limiting. Referencia el
-            umbral de 5 intentos por minuto como configuracion de referencia para rechazar
-            ataques de fuerza bruta.
-        - url: "https://www.sic.gov.co/recursos_user/documentos/normatividad/Ley_1273_2009.pdf"
-          resumen: >
-            Ley 1273 de 2009 — texto oficial SIC. Tipifica el acceso no autorizado a
-            sistemas informaticos. La ausencia de rate limiting facilita este tipo de
-            acceso y expone responsabilidad legal a la plataforma.
-        - url: "https://sedeelectronica.sic.gov.co/transparencia/normativa/circular-externa-2-de-2024-de-la-superintendencia-de-industria-y-comercio-lineamientos-sobre-el-tratamiento-de-datos"
-          resumen: >
-            Circular SIC No. 2 de 2024 — lineamientos sobre tratamiento de datos en
-            sistemas digitales. Establece que las organizaciones deben garantizar seguridad
-            de la informacion y solo recolectar datos estrictamente necesarios.
-
-  conflictos_con_arquitecto: []
+  conflictos_con_arquitecto:
+    - hu_afectada: "HU-004"
+      descripcion: >
+        Conflicto sobre la suficiencia del ThrottlerGuard global como medida de proteccion
+        contra fuerza bruta en el endpoint POST /auth/login.
+      resolucion: >
+        RESUELTO por el humano (2026-03-01). Decision: agregar bloqueo por cuenta
+        (5 intentos fallidos consecutivos, bloqueo temporal de 15 minutos). Se acepta
+        la posicion del Analista. Nuevo CA-4 agregado a HU-004 en epica_input.yaml.
+        El ThrottlerGuard global se mantiene como capa adicional de proteccion por IP,
+        pero el control principal es el bloqueo por cuenta.
 
   escalamiento_requerido: false
 
-  motivo_escalamiento: ""
+  motivo_escalamiento: >
+    Resuelto. El humano decidio agregar bloqueo por cuenta (5 intentos, 15 min) como
+    CA-4 de HU-004. Conflicto cerrado. El flujo puede continuar.
 
   notas_adicionales:
-    - >
-      HU adicional pendiente de definicion: recuperacion de contrasena. Documentada como
-      supuesto en las restricciones conocidas de EPICA-01. Debe definirse como HU dentro
-      de FEAT-03 antes de cerrar la epica completamente.
-    - >
-      Ambiguedad pendiente de confirmacion por Product Owner: comportamiento del entrenador
-      con solicitud rechazada al intentar iniciar sesion (HU-004, condicion 2). No bloquea
-      la aprobacion de HU-004 pero debe resolverse antes de implementar.
-    - >
-      RESUELTO (CHECKPOINT 1): HEALTH_DATA_CONSENT se difiere a EPICA-04, HU-014
-      (inscripcion al plan). El PO confirma que en Fase 1 el atleta no proporciona
-      datos de salud. Solo HABEAS_DATA y TERMS_OF_SERVICE se registran en el registro.
-    - >
-      RESUELTO (CHECKPOINT 1): Campos del atleta confirmados por el PO: name, email,
-      password, phoneCountryCode, phone, identificationType, identificationNumber,
-      dateOfBirth, avatarUrl (opcional). Unique constraints: email e identificationNumber.
+    - "RESUELTO v2.0: HU-001 promovida a APROBADA. Condiciones de v1.0 resueltas en criterios de aceptacion."
+    - "RESUELTO v2.0: HU-002 promovida a APROBADA. Condiciones de v1.0 resueltas."
+    - "RESUELTO: HU-003 APROBADA. HEALTH_DATA_CONSENT diferido a EPICA-04."
+    - "RESUELTO: entrenador REJECTED en login recibe COACH_NOT_APPROVED (403)."
+    - "RESUELTO v2.1: HU-004 promovida a APROBADA. Humano agrego CA-4: bloqueo por cuenta (5 intentos, 15 min). Conflicto con Arquitecto cerrado."
+    - "PENDIENTE: HU adicional para recuperacion de contrasena. Definir antes de cerrar la epica."
