@@ -5,6 +5,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
 import { CorrelationIdMiddleware } from './modules/common/middlewares/correlation-id.middleware.js';
 
 @Module({
@@ -29,6 +30,7 @@ import { CorrelationIdMiddleware } from './modules/common/middlewares/correlatio
     EventEmitterModule.forRoot(),
     PrismaModule,
     HealthModule,
+    AuthModule,
   ],
 })
 export class AppModule implements NestModule {

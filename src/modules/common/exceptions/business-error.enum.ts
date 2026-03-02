@@ -146,6 +146,12 @@ export const BusinessError = {
     title: 'Credenciales inválidas',
     httpStatus: HttpStatus.UNAUTHORIZED, // 401
   },
+
+  ACCOUNT_TEMPORARILY_LOCKED: {
+    code: 'ACCOUNT_TEMPORARILY_LOCKED',
+    title: 'Cuenta bloqueada temporalmente',
+    httpStatus: HttpStatus.TOO_MANY_REQUESTS, // 429 — Ley 1273/2009, OWASP 2025
+  },
 } as const satisfies Record<string, ErrorCatalogEntry>;
 
 // Tipo derivado para autocompletado
