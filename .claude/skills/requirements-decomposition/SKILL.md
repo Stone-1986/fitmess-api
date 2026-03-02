@@ -149,9 +149,13 @@ Marcar en cada HU:
    la excepción documentada
 4. Nunca incluir una HU con ❌ en el entregable final sin aprobación del usuario
 
-### Paso 6: Presentación y Review
+### Paso 6: Presentación, Persistencia y Review
 
-Presentar el entregable completo con esta estructura:
+Este paso tiene dos salidas: **chat** (para el humano) y **archivo** (para la pipeline).
+
+#### 6a. Presentar en el chat
+
+Mostrar al usuario en el chat (NO en archivo):
 
 ```
 ## Resumen Ejecutivo
@@ -167,15 +171,21 @@ Presentar el entregable completo con esta estructura:
   └── FEAT-02: [nombre]
       └── HU-003: [título]
 
-## Detalle de Historias de Usuario
-[Cada HU con su detalle completo]
-
 ## Supuestos y Pendientes
 [Ítems que quedaron sin confirmar]
-
-## Dependencias entre HUs
-[Mapa de dependencias si existen]
 ```
+
+#### 6b. Escribir `outputs/epica_input.yaml`
+
+Escribir la épica completa en formato YAML siguiendo el schema `.claude/schemas/epica.schema.json`.
+El archivo incluye:
+- Campos obligatorios: `id`, `titulo`, `objetivo_de_negocio`, `contexto_de_aplicacion`, `historias_de_usuario`
+- Campos opcionales cuando aplique: `restricciones_conocidas`, `supuestos`, `glosario`, `dependencias`
+- Cada HU con campos opcionales cuando aplique: `reglas_de_negocio`, `notas`
+
+Informar al usuario que puede validar con: `pnpm run validate:epica outputs/epica_input.yaml`
+
+#### 6c. Confirmar con el usuario
 
 Preguntar: "¿Necesitas ajustar algo? Puedo modificar, dividir, fusionar o
 eliminar cualquier historia. ¿Quieres que priorice las HUs?"
@@ -248,8 +258,18 @@ Si hay HUs que se **solapan**:
 
 ### Paso R5: Entregable de Refinamiento
 
-Generar el archivo con la estructura definida en el skill `refinar-hu`,
-incluyendo tabla comparativa (original → refinada) y registro de cambios.
+Este paso tiene dos salidas: **chat** (para el humano) y **archivo** (para la pipeline).
+
+#### En el chat:
+- Resumen de hallazgos (qué se encontró por categoría)
+- Tabla comparativa: HU original vs HU refinada (para cada cambio)
+- Recomendaciones adicionales si las hay
+
+#### En archivo:
+Escribir `outputs/epica_input.yaml` con las HUs refinadas (schema: `.claude/schemas/epica.schema.json`).
+Si la entrada fue un YAML existente, preservar los campos de la épica (`id`, `titulo`,
+`objetivo_de_negocio`, etc.) y reemplazar las HUs con las versiones refinadas.
+Informar al usuario que puede validar con: `pnpm run validate:epica outputs/epica_input.yaml`
 
 Preguntar: "¿Necesitas ajustar algo de las correcciones?"
 

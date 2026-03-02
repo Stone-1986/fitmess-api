@@ -35,6 +35,37 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "supuestos": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Supuestos documentados durante el analisis que no fueron confirmados por el usuario"
+        },
+        "glosario": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Terminos clave del dominio con su definicion"
+        },
+        "dependencias": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["desde", "hacia", "descripcion"],
+            "properties": {
+              "desde": {
+                "type": "string",
+                "pattern": "^HU-\\d+$"
+              },
+              "hacia": {
+                "type": "string",
+                "pattern": "^HU-\\d+$"
+              },
+              "descripcion": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Dependencias entre Historias de Usuario"
+        },
         "historias_de_usuario": {
           "type": "array",
           "minItems": 1,
@@ -64,6 +95,16 @@
                 "type": "array",
                 "minItems": 1,
                 "items": { "type": "string", "minLength": 10 }
+              },
+              "reglas_de_negocio": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Reglas de negocio funcionales aplicables a esta HU"
+              },
+              "notas": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Notas y supuestos especificos de esta HU"
               }
             }
           }

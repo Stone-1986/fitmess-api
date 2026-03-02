@@ -33,7 +33,7 @@ Ejecutar el workflow completo de análisis de requerimientos.
    inicial del proyecto (saltar a confirmación rápida del Paso 0)
 3. Si no hay contexto adicional, ejecutar el Paso 0 completo (descubrimiento)
 4. Seguir el workflow completo definido en el skill `requirements-decomposition`
-5. Generar el entregable final como archivo Markdown en una carpeta `docs/analisis/` en la raíz del proyecto (crearla si no existe)
+5. Generar el entregable final en `outputs/epica_input.yaml` siguiendo el schema `epica.schema.json`
 
 ### Múltiples documentos
 
@@ -49,10 +49,11 @@ Si el usuario proporciona varios archivos separados por espacio o coma:
 - Ser interactivo: preguntar antes de asumir
 - Adoptar el vocabulario del documento
 - Mantenerse en el plano funcional (nunca técnico)
-- Generar el archivo de salida con la estructura completa:
-  Resumen → Mapa → Detalle HUs → Supuestos → Dependencias
+- Presentar en el chat: Resumen Ejecutivo, Mapa de Descomposición (árbol visual), Supuestos
+- Escribir en archivo: la épica estructurada en YAML con todas las HUs
 
 ## Salida
 
-Generar un archivo `docs/analisis/analisis-[nombre-documento].md` con el resultado completo.
-Presentar un resumen en chat y ofrecer el archivo para descarga.
+Escribir `outputs/epica_input.yaml` con la estructura completa de la épica (schema: `.claude/schemas/epica.schema.json`).
+Presentar en el chat el resumen ejecutivo, el mapa de descomposición y los supuestos.
+Informar al usuario que puede validar el archivo con `pnpm run validate:epica outputs/epica_input.yaml`.
