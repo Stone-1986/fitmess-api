@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { UserRole } from '../../../generated/prisma/index.js';
-import { IdentificationType } from '../enums/identification-type.enum.js';
+import {
+  UserRole,
+  IdentificationType,
+} from '../../../../generated/prisma/index.js';
 
 /**
  * DTO de respuesta para HU-003: POST /auth/register

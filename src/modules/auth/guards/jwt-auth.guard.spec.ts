@@ -1,4 +1,3 @@
-import { ExecutionContext } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { BusinessException } from '../../common/exceptions/business.exception.js';
 import { BusinessError } from '../../common/exceptions/business-error.enum.js';
@@ -25,12 +24,7 @@ describe('JwtAuthGuard', () => {
       };
 
       // Act
-      const result = guard.handleRequest(
-        null,
-        mockUser,
-        null,
-        {} as ExecutionContext,
-      );
+      const result = guard.handleRequest(null, mockUser);
 
       // Assert
       expect(result).toBe(mockUser);
@@ -39,20 +33,10 @@ describe('JwtAuthGuard', () => {
     it('lanza BusinessException INVALID_CREDENTIALS cuando hay un error', () => {
       // Act & Assert
       expect(() =>
-        guard.handleRequest(
-          new Error('Token invalid'),
-          null,
-          null,
-          {} as ExecutionContext,
-        ),
+        guard.handleRequest(new Error('Token invalid'), null),
       ).toThrow(BusinessException);
       expect(() =>
-        guard.handleRequest(
-          new Error('Token invalid'),
-          null,
-          null,
-          {} as ExecutionContext,
-        ),
+        guard.handleRequest(new Error('Token invalid'), null),
       ).toThrowError(
         expect.objectContaining({
           errorEntry: BusinessError.INVALID_CREDENTIALS,
@@ -62,12 +46,8 @@ describe('JwtAuthGuard', () => {
 
     it('lanza BusinessException INVALID_CREDENTIALS cuando el usuario es false (token ausente)', () => {
       // Act & Assert
-      expect(() =>
-        guard.handleRequest(null, false, null, {} as ExecutionContext),
-      ).toThrow(BusinessException);
-      expect(() =>
-        guard.handleRequest(null, false, null, {} as ExecutionContext),
-      ).toThrowError(
+      expect(() => guard.handleRequest(null, false)).toThrow(BusinessException);
+      expect(() => guard.handleRequest(null, false)).toThrowError(
         expect.objectContaining({
           errorEntry: BusinessError.INVALID_CREDENTIALS,
         }),
@@ -78,7 +58,7 @@ describe('JwtAuthGuard', () => {
       // Act
       let errorDetail = '';
       try {
-        guard.handleRequest(null, false, null, {} as ExecutionContext);
+        guard.handleRequest(null, false);
       } catch (e) {
         if (e instanceof BusinessException) {
           errorDetail = e.detail;

@@ -27,7 +27,7 @@
 ## Mapa de Descomposicion
 
 ```
-EPICA-01: Gestion de Acceso y Cumplimiento Legal
+  : Gestion de Acceso y Cumplimiento Legal
   ├── FEAT-01: Registro y aprobacion de entrenadores
   │   ├── HU-001: Solicitud de registro como entrenador
   │   └── HU-002: Aprobacion o rechazo de solicitud de entrenador por el Administrador

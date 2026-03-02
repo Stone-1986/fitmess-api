@@ -21,7 +21,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RolesGuard } from './guards/roles.guard.js';
 import { Roles } from './decorators/roles.decorator.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
-import { AuthUser } from './strategies/jwt.strategy.js';
+import type { AuthUser } from './strategies/jwt.strategy.js';
 import { UserRole } from '../../../generated/prisma/index.js';
 import { SearchCoachRequestsDto } from './dto/search-coach-requests.dto.js';
 import { RejectCoachRequestDto } from './dto/reject-coach-request.dto.js';

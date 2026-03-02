@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { UserRole } from '../../../generated/prisma/index.js';
+import { UserRole } from '../../../../generated/prisma/index.js';
 
 /**
  * DTO anidado con datos minimos del usuario autenticado.

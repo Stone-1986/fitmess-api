@@ -12,7 +12,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { IdentificationType } from '../enums/identification-type.enum.js';
+import { IdentificationType } from '../../../../generated/prisma/index.js';
 
 /**
  * DTO de entrada para HU-001: Solicitud de registro como entrenador.

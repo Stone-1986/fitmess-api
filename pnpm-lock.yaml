@@ -159,6 +159,9 @@ importers:
       lint-staged:
         specifier: ^16.2.7
         version: 16.2.7
+      ms:
+        specifier: ^2.1.3
+        version: 2.1.3
       pino-pretty:
         specifier: ^13.1.3
         version: 13.1.3

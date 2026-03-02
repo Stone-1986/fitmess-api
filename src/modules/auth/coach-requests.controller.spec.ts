@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CoachRequestsController } from './coach-requests.controller.js';
 import { CoachRequestsService } from './coach-requests.service.js';
-import { CoachRequestStatus } from '../../../generated/prisma/index.js';
-import { UserRole } from '../../../generated/prisma/index.js';
+import {
+  CoachRequestStatus,
+  UserRole,
+  IdentificationType,
+} from '../../../generated/prisma/index.js';
 import { SearchCoachRequestsDto } from './dto/search-coach-requests.dto.js';
 import { RejectCoachRequestDto } from './dto/reject-coach-request.dto.js';
 import { AuthUser } from './strategies/jwt.strategy.js';
-import { IdentificationType } from './enums/identification-type.enum.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 

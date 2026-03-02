@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CoachRequestsService } from './coach-requests.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { CoachRequestStatus } from '../../../generated/prisma/index.js';
+import {
+  CoachRequestStatus,
+  IdentificationType,
+} from '../../../generated/prisma/index.js';
 import { BusinessError } from '../common/exceptions/business-error.enum.js';
 import { TechnicalException } from '../common/exceptions/technical.exception.js';
 import { RejectCoachRequestDto } from './dto/reject-coach-request.dto.js';
-import { IdentificationType } from './enums/identification-type.enum.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 

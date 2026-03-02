@@ -7,13 +7,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiResponse,
-  ApiSecurity,
-  ApiTags,
-} from '@nestjs/swagger';
-import { Request } from 'express';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { ApiProblemResponse } from '../common/swagger/error-responses.js';
 import { AuthService } from './auth.service.js';
 import { LocalAuthGuard } from './guards/local-auth.guard.js';
@@ -53,8 +48,8 @@ export class AuthController {
    */
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiSecurity([])
   @ApiOperation({
+    security: [],
     summary: 'Registrar nuevo atleta en la plataforma',
     description:
       'Crea un nuevo usuario con rol ATHLETE. Registra HABEAS_DATA y TERMS_OF_SERVICE ' +
@@ -94,8 +89,8 @@ export class AuthController {
    */
   @Post('coaches/register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiSecurity([])
   @ApiOperation({
+    security: [],
     summary: 'Enviar solicitud de registro como entrenador',
     description:
       'Crea una solicitud de registro para entrenador en estado PENDING. ' +
@@ -142,8 +137,8 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @UseGuards(LocalAuthGuard)
-  @ApiSecurity([])
   @ApiOperation({
+    security: [],
     summary: 'Iniciar sesion en la plataforma',
     description:
       'Autentica al usuario con email y password via Passport LocalStrategy. ' +

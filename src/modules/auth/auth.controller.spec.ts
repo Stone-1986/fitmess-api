@@ -25,8 +25,8 @@ vi.mock('class-validator', async (importOriginal) => {
 import {
   UserRole,
   CoachRequestStatus,
+  IdentificationType,
 } from '../../../generated/prisma/index.js';
-import { IdentificationType } from './enums/identification-type.enum.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 

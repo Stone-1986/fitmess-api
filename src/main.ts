@@ -1,7 +1,8 @@
 import * as Sentry from '@sentry/nestjs';
 import { SentryGlobalFilter } from '@sentry/nestjs/setup';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import { HttpAdapterHost } from '@nestjs/core';
 import { ValidationError } from 'class-validator';
 import { BadRequestException } from '@nestjs/common';

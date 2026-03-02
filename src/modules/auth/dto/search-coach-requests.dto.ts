@@ -13,7 +13,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CoachRequestStatus } from '../enums/coach-request-status.enum.js';
+import { CoachRequestStatus } from '../../../../generated/prisma/index.js';
 
 /**
  * DTO de entrada para HU-002: Busqueda avanzada de solicitudes de entrenadores.

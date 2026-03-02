@@ -33,6 +33,11 @@ vitest.config.e2e.ts  → root: './test', include: ['**/*.e2e-spec.ts']  ← E2e
 
 Ambas usan `unplugin-swc` para compilacion rapida de TypeScript.
 
+**Comandos:**
+- `pnpm run test` — ejecuta tests unitarios sin cobertura
+- `pnpm run test:cov` — ejecuta tests unitarios CON reporte de cobertura (usa config de `coverage` en `vitest.config.ts`)
+- `pnpm run test:e2e` — ejecuta tests e2e
+
 ---
 
 ## 3. Estructura de archivos

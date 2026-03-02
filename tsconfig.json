@@ -1,4 +1,5 @@
 {
+  "exclude": ["outputs"],
   "compilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",

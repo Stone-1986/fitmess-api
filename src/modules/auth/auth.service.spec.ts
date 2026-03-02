@@ -8,13 +8,13 @@ import {
   UserRole,
   DocumentType,
   CoachRequestStatus,
+  IdentificationType,
 } from '../../../generated/prisma/index.js';
 import { BusinessException } from '../common/exceptions/business.exception.js';
 import { BusinessError } from '../common/exceptions/business-error.enum.js';
 import { TechnicalException } from '../common/exceptions/technical.exception.js';
 import { RegisterAthleteDto } from './dto/register-athlete.dto.js';
 import { RegisterCoachDto } from './dto/register-coach.dto.js';
-import { IdentificationType } from './enums/identification-type.enum.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 
@@ -138,7 +138,7 @@ describe('AuthService', () => {
     it('registra atleta exitosamente con User + HABEAS_DATA + TERMS_OF_SERVICE en $transaction → emite user.registered', async () => {
       // Arrange
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockUser) },
             legalAcceptance: { create: vi.fn().mockResolvedValue({}) },
@@ -169,7 +169,7 @@ describe('AuthService', () => {
       // Arrange
       const legalCreateMock = vi.fn().mockResolvedValue({});
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockUser) },
             legalAcceptance: { create: legalCreateMock },
@@ -203,7 +203,7 @@ describe('AuthService', () => {
       // Arrange
       const legalCreateMock = vi.fn().mockResolvedValue({});
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockUser) },
             legalAcceptance: { create: legalCreateMock },
@@ -229,7 +229,7 @@ describe('AuthService', () => {
         .fn()
         .mockResolvedValue({ ...mockUser, email: 'atleta@test.com' });
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: userCreateMock },
             legalAcceptance: { create: vi.fn().mockResolvedValue({}) },
@@ -314,7 +314,7 @@ describe('AuthService', () => {
       // Arrange
       const userCreateMock = vi.fn().mockResolvedValue(mockUser);
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: userCreateMock },
             legalAcceptance: { create: vi.fn().mockResolvedValue({}) },
@@ -348,7 +348,7 @@ describe('AuthService', () => {
         createdAt: new Date('2026-03-01'),
       };
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockCoachUser) },
             coachRequest: {
@@ -387,7 +387,7 @@ describe('AuthService', () => {
         createdAt: new Date(),
       });
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockCoachUser) },
             coachRequest: { create: coachRequestCreateMock },
@@ -412,7 +412,7 @@ describe('AuthService', () => {
       // Arrange
       const legalCreateMock = vi.fn().mockResolvedValue({});
       prismaMock.$transaction.mockImplementation(
-        async (fn: (tx: typeof prismaMock) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           const txMock = {
             user: { create: vi.fn().mockResolvedValue(mockCoachUser) },
             coachRequest: {
@@ -531,7 +531,9 @@ describe('AuthService', () => {
         .validateCredentials('atleta@test.com', 'WrongPassword!')
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(BusinessException);
-      expect(error.errorEntry).toEqual(BusinessError.INVALID_CREDENTIALS);
+      expect((error as BusinessException).errorEntry).toEqual(
+        BusinessError.INVALID_CREDENTIALS,
+      );
     });
 
     it('INVALID_CREDENTIALS tiene el mismo mensaje para usuario inexistente y password incorrecto (anti-enumeracion)', async () => {
@@ -554,7 +556,9 @@ describe('AuthService', () => {
         .catch((e) => e as BusinessException);
 
       // Assert — mismo mensaje
-      expect(errorNoUser.detail).toBe(errorWrongPass.detail);
+      expect((errorNoUser as BusinessException).detail).toBe(
+        (errorWrongPass as BusinessException).detail,
+      );
     });
 
     it('incrementa failedLoginAttempts tras password incorrecta', async () => {

@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { CoachRequestStatus } from '../../../generated/prisma/index.js';
+import {
+  CoachRequestStatus,
+  IdentificationType,
+} from '../../../generated/prisma/index.js';
 import { BusinessException } from '../common/exceptions/business.exception.js';
 import { BusinessError } from '../common/exceptions/business-error.enum.js';
 import { TechnicalException } from '../common/exceptions/technical.exception.js';
@@ -84,7 +87,7 @@ export class CoachRequestsService {
       user: {
         name: string;
         email: string;
-        identificationType: string;
+        identificationType: IdentificationType;
         identificationNumber: string;
       };
     }>;
