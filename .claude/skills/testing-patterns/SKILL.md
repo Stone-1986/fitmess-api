@@ -24,6 +24,8 @@ Si la cobertura no se alcanza el flujo de implementacion se bloquea y regresa al
 
 ## 2. Configuracion Vitest
 
+**⚠ SWC NO verifica tipos.** Vitest usa SWC (`unplugin-swc`) para transpilar TypeScript. SWC elimina las anotaciones de tipo sin verificarlas, lo que significa que los tests pueden pasar aunque el código tenga errores de tipo (enums incompatibles, argumentos de más, variables `unknown` sin cast). La verificación de tipos se hace con `pnpm run build` o `npx tsc --noEmit`, NO con los tests. Esto es un gate duro definido en `.claude/rules/rulesArquitectura.md § Compilación`.
+
 Ambas configs usan `globals: true` — `vi`, `describe`, `it`, `expect`, `beforeEach`, `afterEach` estan disponibles sin import.
 
 ```

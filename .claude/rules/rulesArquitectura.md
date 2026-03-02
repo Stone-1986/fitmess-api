@@ -62,6 +62,14 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - El QA ejecuta `pnpm run lint` y `npx prettier --check` e incluye los resultados en su reporte
 - El Líder Técnico analiza los resultados de linting sin ejecutar comandos
 
+## Compilación
+
+- `pnpm run build` DEBE pasar sin errores — es un gate duro equivalente a linting
+- Los tests con Vitest/SWC NO sustituyen la verificación de tipos — SWC transpila sin type-checking
+- El Desarrollador verifica con `npx tsc --noEmit` antes de entregar; el QA verifica con `pnpm run build` como parte de su proceso
+- `tsconfig.build.json` define su propio `exclude` que REEMPLAZA (no hereda) el `exclude` del `tsconfig.json` padre — si se agrega una exclusión a `tsconfig.json`, TAMBIÉN debe agregarse a `tsconfig.build.json`
+- Cualquier archivo `.ts` en la raíz del proyecto (ej: `prisma.config.ts`, `vitest.config.ts`) DEBE estar excluido en `tsconfig.build.json`, de lo contrario TypeScript usa la raíz como `rootDir` y genera `dist/src/` en vez de `dist/`
+
 ## Escaneo de seguridad automatizado
 
 - El QA invoca `/security-review` como parte del paso de detección de vulnerabilidades

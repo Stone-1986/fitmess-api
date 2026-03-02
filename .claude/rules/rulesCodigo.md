@@ -21,6 +21,13 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - Solo los services acceden a `PrismaService`
 - El import del cliente Prisma SIEMPRE desde `generated/prisma` (raíz del proyecto), NUNCA desde `@prisma/client` — la ruta relativa varía según la profundidad del archivo
 
+## Enums
+
+- NUNCA crear enums locales que dupliquen enums definidos en el schema de Prisma — usar siempre los enums generados en `generated/prisma`
+- Los enums SIEMPRE se importan desde `generated/prisma` (con ruta relativa según profundidad del archivo), igual que el resto del cliente Prisma
+- Si un DTO necesita un enum que existe en Prisma, importar el de Prisma — no crear una copia local
+- Motivo: TypeScript usa tipado nominal — dos enums con los mismos valores pero en archivos distintos son tipos incompatibles, lo que causa errores de compilación silenciosos que SWC/Vitest no detecta
+
 ## Comunicación entre módulos
 
 - Los módulos NUNCA importan services de otros módulos directamente
@@ -54,6 +61,12 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - Los controllers retornan solo `data`, `{ data, meta }` o `{ data, message }` — el `ResponseInterceptor` hace el envelope
 - NUNCA construir manualmente el envelope `{ success, statusCode, data, timestamp }` en un controller o service
 - Los errores SIEMPRE usan `Content-Type: application/problem+json` (RFC 9457) — esto lo manejan los filters automáticamente
+
+## Variables de entorno
+
+- Los nombres en `.env` DEBEN coincidir EXACTAMENTE con los usados en `configService.getOrThrow()` y `configService.get()` — si el código usa `JWT_SECRET`, el `.env` debe tener `JWT_SECRET`, nunca variantes como `JWT_ACCESS_SECRET`
+- El archivo `.env.example` es la fuente de verdad para los nombres de variables — mantenerlo sincronizado con el código
+- NUNCA hardcodear valores de configuración que deberían venir de `.env` — usar siempre `ConfigService`
 
 ## Lenguaje
 

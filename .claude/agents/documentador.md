@@ -1,7 +1,7 @@
 ---
 name: documentador
 description: Documentador que genera el contrato OpenAPI de fitmess-api a partir del Plan de Implementación del Arquitecto, usando decoradores NestJS/Swagger. Invocar cuando el plan técnico esté cerrado y aprobado. Opera en secuencia después del Analista de Producto y el Arquitecto dentro del Agent Team de Planificación.
-tools: Read, Glob, Grep, Write, AskUserQuestion
+tools: Read, Glob, Grep, Write, Bash, AskUserQuestion
 model: sonnet
 permissionMode: bypassPermissions
 maxTurns: 30
@@ -132,6 +132,21 @@ Antes de cerrar, verificar:
 - [ ] ¿Ningún DTO de respuesta expone campos internos?
 - [ ] ¿Los guards del plan están aplicados (controller-level o method-level)?
 - [ ] ¿Los imports son correctos (Prisma desde `generated/prisma`, no desde `@prisma/client`)?
+
+### 4.5. Verificar que los stubs compilan
+
+Después de generar todos los archivos del contrato, verificar que compilan:
+
+```bash
+npx tsc --noEmit 2>&1
+```
+
+Si hay errores de compilación en los archivos generados (DTOs, controllers, enums), corregirlos antes de cerrar. Errores comunes:
+- Imports de enums locales en vez de `generated/prisma` (ver `rulesCodigo.md § Enums`)
+- Tipos faltantes o mal referenciados en DTOs
+- Decoradores con parámetros incorrectos
+
+Si los errores de compilación son de archivos existentes (no generados por ti), reportarlos pero no bloquear tu output.
 
 ## Restricciones Absolutas
 

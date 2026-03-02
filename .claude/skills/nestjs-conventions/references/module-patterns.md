@@ -18,13 +18,24 @@ Leer este archivo cuando se necesite implementar cualquiera de estos patrones.
 
 ### PrismaService
 
+Prisma 7 requiere un adapter explícito — NO se usa `url` en el bloque `datasource` del schema.
+La conexión se configura en el constructor via `PrismaPg`.
+
 ```typescript
 // src/modules/prisma/prisma.service.ts
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient } from '../../../generated/prisma';
+import { PrismaClient } from '../../../generated/prisma/index.js';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+    constructor() {
+        const adapter = new PrismaPg({
+            connectionString: process.env.DATABASE_URL!,
+        });
+        super({ adapter });
+    }
+
     // Para middleware de soft-delete (archivedAt) → ver skill `design-patterns` → data-patterns.md
     async onModuleInit(): Promise<void> {
         await this.$connect();
@@ -35,6 +46,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     }
 }
 ```
+
+**Notas:**
+- El import de `PrismaClient` usa `/index.js` por la resolución `nodenext` de TypeScript
+- `@prisma/adapter-pg` se instala como dependencia del proyecto (`pnpm add @prisma/adapter-pg`)
+- El `datasource` en `prisma/schema.prisma` solo declara `provider = "postgresql"` — sin `url`
+- La URL de conexión se pasa al adapter via `process.env.DATABASE_URL`
 
 ### PrismaModule
 

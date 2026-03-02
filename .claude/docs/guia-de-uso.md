@@ -102,8 +102,8 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 ### Fase 2 — Implementacion
 
 6. **Lanzar implementacion.** Escribe `/implementar-epica`. El sistema ejecuta automaticamente:
-   - Desarrollador implementa services, completa controllers, registra modules
-   - QA escribe tests, valida cobertura (80% dominio, 70% adaptadores), revisa seguridad
+   - Desarrollador implementa services, completa controllers, registra modules. Verifica compilacion con `tsc --noEmit` antes de entregar
+   - QA escribe tests, valida cobertura (80% dominio, 70% adaptadores), verifica compilacion con `pnpm run build`, revisa seguridad
    - Lider Tecnico revisa linting, patrones y consistencia con el contrato
 
 7. **Ciclos de correccion.** Si hay errores, el sistema repite automaticamente (max 3 ciclos). Si llega al ciclo 3 sin resolucion, escala al humano.
@@ -191,7 +191,26 @@ Cada ejecucion genera un archivo `outputs/execution-log.md` que registra paso a 
 | Ciclo 3 sin resolucion | El flujo escala al humano | Revisar el reporte de escalamiento con errores persistentes |
 | El LT dice que se necesita cambiar el contrato | El flujo se detiene | Re-ejecutar `/planificar-epica` con las correcciones |
 | Un agente no puede escribir su output | El orquestador lo escribe | No deberia pasar — todos los agentes tienen Write |
+| El codigo no compila (`pnpm run build` falla) | QA lo reporta como error critico de compilacion | El Desarrollador corrige los errores de tipo. Si persiste, revisar `tsconfig.build.json` (exclude reemplaza padre) |
+| Tests pasan pero `tsc --noEmit` falla | SWC transpila sin type-checking — los tests ignoran errores de tipo | Corregir los errores de tipo que `tsc` reporta. Los mas comunes: enums locales vs Prisma, casts faltantes, argumentos de mas |
+| `dist/src/` nesting (imports rotos en runtime) | Un archivo `.ts` en la raiz del proyecto no esta excluido en `tsconfig.build.json` | Agregar el archivo a `tsconfig.build.json` exclude |
+| Variables de entorno no encontradas al iniciar | Nombre en `.env` no coincide con `configService.getOrThrow()` | Verificar `.env.example` como fuente de verdad y sincronizar nombres |
 | El schema no tiene los modelos necesarios | `/implementar-epica` no inicia | Ejecutar `/disenar-schema` o re-ejecutar `/planificar-epica` |
+
+---
+
+## Gates automaticos
+
+El proyecto tiene 4 niveles de verificacion de compilacion:
+
+| Nivel | Quien | Comando | Cuando |
+|-------|-------|---------|--------|
+| 1 | Documentador | `npx tsc --noEmit` | Al generar stubs del contrato (Fase 1) |
+| 2 | Desarrollador | `npx tsc --noEmit` | Antes de entregar implementacion (Fase 2) |
+| 3 | QA | `pnpm run build` | Como paso de validacion (Fase 2) |
+| 4 | Hook pre-commit | `npx tsc --noEmit` | Antes de cada `git commit` del humano |
+
+**¿Por que tantos niveles?** Vitest usa SWC para transpilar, que NO verifica tipos. Los tests pueden pasar aunque el codigo tenga errores de tipo. Solo `tsc` (via `tsc --noEmit` o `pnpm run build`) verifica tipos realmente.
 
 ---
 

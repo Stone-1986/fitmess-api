@@ -85,6 +85,22 @@ npx prettier --check "src/**/*.ts" 2>&1
 
 Documentar cada error con archivo, línea y regla. Estos resultados se incluyen en el reporte para que el Líder Técnico los analice.
 
+### 3.5. Verificar compilación TypeScript
+
+```bash
+pnpm run build 2>&1
+```
+
+Este paso verifica que el código compila con el type-checker de TypeScript (tsc). Es **obligatorio** y no tiene sustituto.
+
+**¿Por qué no basta con que los tests pasen?** Vitest usa SWC para transpilar, lo cual NO verifica tipos — solo elimina las anotaciones de tipo y ejecuta el JavaScript resultante. Esto significa que los tests pueden pasar aunque existan:
+- Tipos incompatibles (ej: enum local vs enum de Prisma)
+- Argumentos de más o de menos en llamadas a funciones
+- Variables de tipo `unknown` accedidas sin cast
+- Módulos faltantes en los imports de tipo
+
+Si `pnpm run build` falla → agregar cada error como `error_critico` de tipo `"error_de_compilacion"` con el mensaje exacto del compilador.
+
 ### 4. Verificar criterios de aceptación técnicos del plan
 
 Por cada criterio en `criterios_de_aceptacion_tecnicos` del plan:

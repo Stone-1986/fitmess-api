@@ -91,8 +91,12 @@ export class PlansService {
 - [ ] ¿Usa `BusinessException` + `BusinessError` para errores de dominio?
 - [ ] ¿Usa `TechnicalException` + `TechnicalError` para errores de infraestructura?
 - [ ] ¿Importa Prisma desde `generated/prisma` (ruta relativa según profundidad del archivo)?
+- [ ] ¿Los enums usados son los de `generated/prisma`, no copias locales?
 - [ ] ¿Emite eventos cuando el plan de implementación lo indica (`eventos: []`)?
 - [ ] ¿Usa `$transaction` cuando modifica múltiples tablas?
+
+**Checklist final (antes de entregar):**
+- [ ] ¿`npx tsc --noEmit` pasa sin errores?
 
 ### 4. Completar el controller stub
 
@@ -144,6 +148,22 @@ async handlePlanPublished(event: PlanPublishedEvent): Promise<void> {
   }
 }
 ```
+
+### 7. Verificar compilación
+
+Antes de declarar la implementación completa, ejecutar:
+
+```bash
+npx tsc --noEmit 2>&1
+```
+
+Si hay errores de tipo, corregirlos antes de entregar. Los tests con Vitest/SWC NO sustituyen la verificación de tipos de TypeScript — SWC transpila sin type-checking, por lo que los tests pueden pasar aunque el código tenga errores de tipo.
+
+Errores comunes que solo `tsc` detecta:
+- Enums locales incompatibles con enums de Prisma (tipado nominal)
+- Argumentos de más/menos en llamadas a funciones mockeadas
+- Variables `unknown` accedidas sin cast
+- Módulos de tipo faltantes (ej: `ms` para `StringValue`)
 
 ## Restricciones Absolutas
 

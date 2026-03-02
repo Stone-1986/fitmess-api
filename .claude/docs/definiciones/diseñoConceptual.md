@@ -60,9 +60,9 @@ Todo el sistema vive dentro de `.claude/` y `src/`:
     commit/                     Slash command — commits estandarizados
     skill-creator/              Herramienta para crear skills nuevos
 
-  rules/                     ← 17 reglas absolutas en 2 archivos
-    rulesCodigo.md              7 secciones: excepciones, datos, controllers, respuestas, lenguaje
-    rulesArquitectura.md        12 secciones: modulos, patrones, API, Supabase, seguridad, testing, commits, git
+  rules/                     ← reglas absolutas en 2 archivos
+    rulesCodigo.md              11 secciones: excepciones, datos, enums, controllers, DTOs, interceptores, respuestas, variables de entorno, lenguaje
+    rulesArquitectura.md        13 secciones: modulos, patrones, API, Supabase, secretos, seguridad, testing, calidad, compilacion, escaneo, commits, git
 
   schemas/
     epica.schema.json           JSON Schema para validar epicas de entrada
@@ -141,7 +141,7 @@ Tres agentes que operan sobre una epica YAML validada:
 |---|---|---|---|---|
 | **Analista de Producto** | Read, Glob, Grep, WebSearch, WebFetch, AskUserQuestion | legal-guardrails | Lectura | Paralelo |
 | **Arquitecto** | Read, Glob, Grep, AskUserQuestion | nestjs-conventions, design-patterns, api-first | Lectura | Paralelo |
-| **Documentador** | Read, Glob, Grep, Write, AskUserQuestion | api-first, nestjs-conventions | Ninguno | Secuencial |
+| **Documentador** | Read, Glob, Grep, Write, Bash, AskUserQuestion | api-first, nestjs-conventions | Ninguno | Secuencial |
 
 **Reglas de ejecucion:**
 - Analista y Arquitecto corren **en paralelo** sobre la misma epica
@@ -212,19 +212,23 @@ Los skills son documentos de conocimiento especializado que se cargan segun nece
 
 Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin excepciones.
 
-### 5.1 Rules — Codigo (`rulesCodigo.md`, 9 secciones)
+### 5.1 Rules — Codigo (`rulesCodigo.md`, 11 secciones)
 
 | Seccion | Regla central |
 |---|---|
 | Manejo de excepciones | Services usan `BusinessException`/`TechnicalException`, NUNCA excepciones HTTP nativas. Controllers NUNCA hacen try/catch |
 | Acceso a datos | Controllers NUNCA acceden a PrismaService. Import desde `generated/prisma`, NUNCA desde `@prisma/client` |
+| Enums | NUNCA crear enums locales que dupliquen enums de Prisma. TypeScript usa tipado nominal — dos enums con mismos valores en archivos distintos son incompatibles |
 | Comunicacion entre modulos | NUNCA importar services de otros modulos. Comunicacion solo via `@nestjs/event-emitter`. Excepciones: `prisma` y `common` |
 | Controllers | Thin: reciben, delegan al service, retornan. Sin logica de negocio |
+| DTOs y Validadores | DTOs separados por operacion. Respuesta NUNCA expone campos internos. Validacion de estructura en DTO, de negocio en service |
+| Interceptores, Middlewares y Pipes | Sin logica de negocio. Solo cross-cutting concerns. NUNCA acceden a PrismaService |
 | Respuestas | Controllers retornan `data` o `{ data, meta }`. El `ResponseInterceptor` hace el envelope. Errores en `application/problem+json` (RFC 9457) |
+| Variables de entorno | Nombres en `.env` DEBEN coincidir con `configService.getOrThrow()`. `.env.example` es fuente de verdad |
 | Lenguaje | Mensajes y comentarios en espanol. Variables, clases y archivos en ingles |
 | *(implicita)* | Listeners de eventos SI hacen try/catch (no pasan por pipeline HTTP) |
 
-### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 12 secciones)
+### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 13 secciones)
 
 | Seccion | Regla central |
 |---|---|
@@ -232,9 +236,11 @@ Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin exc
 | Patrones de diseno | Prohibidos: GenericRepository, CQRS, Event Sourcing, Saga, Winston, XState |
 | API | Patron API First. NUNCA exponer campos internos en DTOs. `@ApiProblemResponse` en cada endpoint |
 | Acceso a Supabase | Frontend NUNCA llama a PostgREST. Backend NO usa `@supabase/supabase-js`. Tablas sin permisos para `anon`/`authenticated` |
+| Gestion de secretos | NUNCA commitear `.env` reales. Secretos en produccion desde el hosting. NUNCA hardcodear en codigo |
 | Seguridad y privacidad | NUNCA loggear passwords, tokens, datos de salud ni datos personales completos |
 | Testing | 80% dominio, 70% adaptadores (gate duro). `.spec.ts` en `src/`, `.e2e-spec.ts` en `test/` |
 | Calidad de codigo | ESLint + Prettier como gate duro. QA ejecuta; LT analiza resultados |
+| **Compilacion** | **`pnpm run build` como gate duro. SWC/Vitest NO sustituye `tsc`. `tsconfig.build.json` exclude reemplaza padre** |
 | Escaneo de seguridad | QA invoca `/security-review`. HIGH confirmado bloquea. MEDIUM se documenta. LOW se omite |
 | Commits estandarizados | `/commit` crea commits Conventional Commits con tags. Excepcion permitida a la regla de git |
 | Control de versiones | Git operado exclusivamente por el humano. Agentes NUNCA ejecutan git |
@@ -275,9 +281,9 @@ Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin exc
 ║        FASE 2 — Cadena de Implementacion                 ║
 ║        (activada manualmente por el humano)               ║
 ║                                                          ║
-║  [Desarrollador] → codigo contra OpenAPI                 ║
+║  [Desarrollador] → codigo contra OpenAPI + tsc --noEmit   ║
 ║        ↓                                                 ║
-║  [QA] → tests + escaneo seguridad + Spectral             ║
+║  [QA] → tests + build + escaneo seguridad + Spectral     ║
 ║        ↓                                                 ║
 ║  [Lider Tecnico] → revision de codigo                    ║
 ║        ↓                                                 ║
@@ -413,14 +419,15 @@ Los agentes NUNCA ejecutan migraciones ni comandos Prisma CLI. El MCP se usa exc
 
 Tres mecanismos de validacion que operan en diferentes momentos del flujo:
 
-### 9.1 Hook pre-commit — ESLint + Prettier
+### 9.1 Hook pre-commit — Linting + Compilacion
 
 | Aspecto | Valor |
 |---|---|
-| Herramienta | Husky + lint-staged |
+| Herramienta | Husky + lint-staged + tsc |
 | Gatillo | Antes de cada `git commit` del humano |
-| Que valida | `eslint --fix` + `prettier --write` sobre `src/**/*.ts` y `test/**/*.ts` |
+| Que valida | 1) `eslint --fix` + `prettier --write` sobre `src/**/*.ts` y `test/**/*.ts` (via lint-staged) · 2) `npx tsc --noEmit` (verificacion de tipos completa) |
 | Quien lo activa | Solo el humano (los agentes no hacen commits) |
+| Por que tsc | SWC/Vitest transpila sin type-checking — los tests pueden pasar con errores de tipo. `tsc --noEmit` es la ultima linea de defensa |
 
 ### 9.2 Gate de cobertura — Vitest
 
@@ -709,6 +716,11 @@ Registro completo de decisiones tomadas y vigentes:
 | Cobertura adaptadores | 70% minimo (gate duro) |
 | Cobertura no alcanzada | Flujo regresa al QA |
 | Linting | ESLint + Prettier validado por hook pre-commit y por el QA |
+| Compilacion | `pnpm run build` como gate duro. Desarrollador verifica con `tsc --noEmit`; QA verifica con `pnpm run build`; hook pre-commit con `tsc --noEmit`. Documentador verifica stubs con `tsc --noEmit` |
+| SWC vs tsc | Vitest usa SWC (transpila sin type-checking). Los tests pueden pasar con errores de tipo. Solo `tsc` verifica tipos |
+| Enums | Siempre desde `generated/prisma`. Prohibidos enums locales que dupliquen los de Prisma (tipado nominal) |
+| Variables de entorno | Nombres en `.env` = `configService.getOrThrow()`. `.env.example` como fuente de verdad |
+| tsconfig.build.json | Su `exclude` reemplaza el padre (no hereda). Archivos `.ts` en raiz deben excluirse |
 | Revisor de Codigo | Es el mismo agente que el Lider Tecnico |
 | Ciclos maximos de correccion | 3 ciclos QA → LT → Dev; al tercero escala al humano con reporte |
 

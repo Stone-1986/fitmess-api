@@ -186,3 +186,29 @@ async handlePlanPublished(event: PlanPublishedEvent): Promise<void> {
 ## 8. Patrones detallados
 
 Para implementación de PrismaService, @CurrentUser(), PaginationDto, services CRUD, inyección de dependencias y registro de módulos en AppModule → ver [references/module-patterns.md](references/module-patterns.md)
+
+---
+
+## 9. tsconfig.build.json
+
+NestJS usa `tsconfig.build.json` para `nest build` y `nest start`. Su `exclude` **REEMPLAZA completamente** el del padre (`tsconfig.json`) — no se fusionan.
+
+```jsonc
+// tsconfig.build.json
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules", "test", "dist", "outputs",
+    "**/*spec.ts",
+    "prisma.config.ts", "vitest.config.ts", "vitest.config.e2e.ts",
+    "scripts"
+  ]
+}
+```
+
+**Reglas:**
+- Si agregas una exclusión a `tsconfig.json`, TAMBIÉN debes agregarla a `tsconfig.build.json`
+- Todos los archivos `.ts` en la raíz del proyecto DEBEN estar excluidos — si TypeScript los ve, usa `.` como `rootDir` y genera `dist/src/` en vez de `dist/`, rompiendo todos los imports relativos a `generated/prisma/`
+- El directorio `outputs/` (archivos del contrato OpenAPI) DEBE estar excluido — contiene TypeScript generado por el Documentador que no es parte del build
+
+**Síntoma si falta una exclusión:** imports como `../../../generated/prisma/index.js` resuelven a `dist/generated/prisma/` (no existe) en vez de `generated/prisma/` (raíz del proyecto)
