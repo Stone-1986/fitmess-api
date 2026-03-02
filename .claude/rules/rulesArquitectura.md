@@ -72,6 +72,13 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - El QA puede descartar falsos positivos pero debe justificar cada descarte
 - El Líder Técnico valida todos los descartes del QA
 
+## Commits estandarizados
+
+- `/commit` crea commits con formato Conventional Commits y tags de trazabilidad
+- `/commit` ejecuta comandos git (add, commit, tag) — esto es una excepción permitida a la regla de que los agentes no ejecutan comandos git, porque el humano lo invoca explícitamente
+- NUNCA stagear archivos `.env` con valores reales, `node_modules/`, `dist/` ni `coverage/`
+- Los tags de épica siguen el formato `EPICA-XX/checkpoint-N` (annotated tags)
+
 ## Control de versiones
 
 - Git es operado **exclusivamente por el desarrollador humano**

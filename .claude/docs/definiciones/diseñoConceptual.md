@@ -9,7 +9,7 @@
 
 ## 1. Que es La Colmena
 
-fitmess-api no es solo un backend NestJS. Es un **sistema de desarrollo asistido por IA** donde 8 agentes especializados, 15 skills de conocimiento, 17 reglas absolutas y 3 mecanismos de validacion automatica trabajan en coordinacion para producir codigo que cumple con un contrato OpenAPI aprobado, pasa gates de cobertura y respeta la legislacion colombiana.
+fitmess-api no es solo un backend NestJS. Es un **sistema de desarrollo asistido por IA** donde 8 agentes especializados, 16 skills de conocimiento, 17 reglas absolutas y 3 mecanismos de validacion automatica trabajan en coordinacion para producir codigo que cumple con un contrato OpenAPI aprobado, pasa gates de cobertura y respeta la legislacion colombiana.
 
 El humano actua como apicultor: no hace la miel, pero decide que flores se polinizan, aprueba la calidad del producto y abre la colmena al mundo (`git push`).
 
@@ -42,7 +42,7 @@ Todo el sistema vive dentro de `.claude/` y `src/`:
     qa.md                       Cadena — tests + vulnerabilidades
     lider-tecnico.md            Cadena — revision de codigo
 
-  skills/                    ← 15 skills (conocimiento especializado)
+  skills/                    ← 16 skills (conocimiento especializado)
     nestjs-conventions/         Modulos, controllers, services, DTOs
     error-handling/             Excepciones, filters, RFC 9457
     testing-patterns/           Vitest, mocks, cobertura
@@ -57,11 +57,12 @@ Todo el sistema vive dentro de `.claude/` y `src/`:
     disenar-schema/             Slash command standalone → dba
     validar-qa/                 Slash command standalone → qa
     revisar-codigo/             Slash command standalone → lider-tecnico
+    commit/                     Slash command — commits estandarizados
     skill-creator/              Herramienta para crear skills nuevos
 
   rules/                     ← 17 reglas absolutas en 2 archivos
     rulesCodigo.md              7 secciones: excepciones, datos, controllers, respuestas, lenguaje
-    rulesArquitectura.md        10 secciones: modulos, patrones, API, Supabase, seguridad, testing, git
+    rulesArquitectura.md        12 secciones: modulos, patrones, API, Supabase, seguridad, testing, commits, git
 
   schemas/
     epica.schema.json           JSON Schema para validar epicas de entrada
@@ -170,9 +171,9 @@ Tres agentes que ejecutan de forma estrictamente secuencial:
 
 ---
 
-## 4. Los 15 Skills
+## 4. Los 16 Skills
 
-Los skills son documentos de conocimiento especializado que los agentes cargan segun necesidad. Cada skill tiene un `SKILL.md` (<500 lineas) y opcionalmente `references/` con detalle extendido.
+Los skills son documentos de conocimiento especializado que se cargan segun necesidad. Cada skill tiene un `SKILL.md` (<500 lineas) y opcionalmente `references/` con detalle extendido.
 
 ### 4.1 Skills de dominio (6) — listados en CLAUDE.md
 
@@ -197,6 +198,7 @@ Los skills son documentos de conocimiento especializado que los agentes cargan s
 | `disenar-schema` | Slash command (`context: fork`, `agent: dba`) | dba |
 | `validar-qa` | Slash command (`context: fork`, `agent: qa`) | qa |
 | `revisar-codigo` | Slash command (`context: fork`, `agent: lider-tecnico`) | lider-tecnico |
+| `commit` | Slash command (inline) | — |
 
 ### 4.3 Skill de infraestructura (1)
 
@@ -222,7 +224,7 @@ Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin exc
 | Lenguaje | Mensajes y comentarios en espanol. Variables, clases y archivos en ingles |
 | *(implicita)* | Listeners de eventos SI hacen try/catch (no pasan por pipeline HTTP) |
 
-### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 11 secciones)
+### 5.2 Rules — Arquitectura (`rulesArquitectura.md`, 12 secciones)
 
 | Seccion | Regla central |
 |---|---|
@@ -234,8 +236,10 @@ Dos archivos en `.claude/rules/`. Aplican a todo agente, en toda sesion, sin exc
 | Testing | 80% dominio, 70% adaptadores (gate duro). `.spec.ts` en `src/`, `.e2e-spec.ts` en `test/` |
 | Calidad de codigo | ESLint + Prettier como gate duro. QA ejecuta; LT analiza resultados |
 | Escaneo de seguridad | QA invoca `/security-review`. HIGH confirmado bloquea. MEDIUM se documenta. LOW se omite |
+| Commits estandarizados | `/commit` crea commits Conventional Commits con tags. Excepcion permitida a la regla de git |
 | Control de versiones | Git operado exclusivamente por el humano. Agentes NUNCA ejecutan git |
-| *(excepcion documentada)* | `/security-review` usa git read-only internamente — unica excepcion a la regla de git |
+| *(excepcion documentada)* | `/security-review` usa git read-only internamente — excepcion a la regla de git |
+| *(excepcion documentada)* | `/commit` ejecuta git add/commit/tag — excepcion a la regla de git (invocacion explicita del humano) |
 
 ---
 

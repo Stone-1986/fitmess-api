@@ -89,6 +89,7 @@ Load the relevant skill when working on specialized tasks. Skills provide detail
 | `disenar-schema` | Standalone DBA invocation for Prisma schema design outside the planning flow | Active |
 | `validar-qa` | Standalone QA re-validation: tests, coverage, linting, security scan | Active |
 | `revisar-codigo` | Standalone Tech Lead code review: linting, patterns, contract consistency | Active |
+| `commit` | Standardized git commits with Conventional Commits, auto-staging, and epic tags | Active |
 
 ---
 

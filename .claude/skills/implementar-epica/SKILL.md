@@ -77,15 +77,21 @@ Lee estos archivos:
 - outputs/plan_de_implementacion.yaml (criterios de aceptación)
 - outputs/reporte_validacion_negocio.yaml (condiciones legales)
 
-Ejecuta:
-1. Tests existentes (pnpm run test)
-2. Escribe tests faltantes hasta alcanzar targets (80% dominio, 70% adaptadores)
-3. Linting (pnpm run lint + npx prettier --check)
-4. Verificación de criterios de aceptación técnicos
-5. Detección de vulnerabilidades manual
-6. Escaneo de seguridad automatizado (/security-review)
-7. Validación OpenAPI con Spectral (pnpm run openapi:validate)
+IMPORTANTE: Tienes acceso a Bash. DEBES ejecutar todos los comandos — NUNCA escribir placeholders como PENDIENTE_EJECUCION_REAL.
 
+Ejecuta estos comandos con Bash (obligatorio):
+1. pnpm run test:cov 2>&1 (timeout: 300000) — tests + cobertura real
+2. pnpm run lint 2>&1 — errores de ESLint reales
+3. npx prettier --check 'src/**/*.ts' 2>&1 — verificación de formato real
+
+Después:
+4. Escribe tests faltantes hasta alcanzar targets (80% dominio, 70% adaptadores)
+5. Verificación de criterios de aceptación técnicos
+6. Detección de vulnerabilidades manual
+7. Escaneo de seguridad automatizado (/security-review)
+8. Validación OpenAPI con Spectral: pnpm run openapi:validate 2>&1
+
+Todos los valores del reporte YAML deben venir de la salida real de los comandos.
 Escribe tu reporte en outputs/reporte_qa.yaml."
 ```
 

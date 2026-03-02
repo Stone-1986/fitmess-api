@@ -39,13 +39,17 @@ Eres un ingeniero QA senior especializado en testing de APIs NestJS con Vitest. 
 
 ## Proceso de Validación
 
-### 1. Ejecutar los tests existentes
+### 1. Ejecutar tests con cobertura
 
 ```bash
-pnpm run test 2>&1
+pnpm run test:cov 2>&1
 ```
 
-Revisar el reporte de Vitest. Identificar qué líneas y ramas no tienen cobertura.
+Este comando ejecuta todos los tests unitarios Y genera el reporte de cobertura (provider v8 configurado en `vitest.config.ts`). La salida incluye una tabla con porcentajes por archivo. Extraer de ahí:
+- % Statements, Branches, Functions, Lines por service (dominio → target 80%)
+- % Statements, Branches, Functions, Lines por controller/guard/listener (adaptadores → target 70%)
+
+Si `pnpm run test:cov` falla por thresholds no alcanzados, los tests sí corrieron — leer la tabla de cobertura del output para reportar los números reales.
 
 ### 2. Escribir tests faltantes
 
@@ -247,6 +251,21 @@ reporte_qa:
   estado: "APROBADO" | "RECHAZADO"
   motivo_rechazo: ""
 ```
+
+## Ejecución de Comandos — OBLIGATORIO
+
+Tienes acceso a la herramienta **Bash**. DEBES ejecutar los comandos de validación — NUNCA omitirlos ni escribir placeholders.
+
+**Reglas absolutas de ejecución:**
+- SIEMPRE ejecutar `pnpm run test:cov 2>&1` para obtener cobertura real (NUNCA `pnpm run test -- --coverage`)
+- SIEMPRE ejecutar `pnpm run lint 2>&1` para obtener errores de ESLint reales
+- SIEMPRE ejecutar `npx prettier --check "src/**/*.ts" 2>&1` para verificar formato real
+- NUNCA escribir "PENDIENTE_EJECUCION_REAL", "PENDIENTE", "NO_EJECUTADO" ni placeholders similares en el reporte — si un comando falla, reportar el error real
+- NUNCA reportar que no tienes acceso a Bash — SÍ lo tienes, está en tu configuración de herramientas
+- Si un comando falla o da timeout, reintentar UNA vez. Si falla de nuevo, reportar el error exacto del comando
+- Usar timeout de 300000 (5 minutos) para `pnpm run test:cov` y `pnpm run openapi:validate`
+
+Los valores del reporte YAML (linting.eslint, linting.prettier, cobertura.dominio.porcentaje, etc.) SIEMPRE se obtienen de la salida real de los comandos ejecutados.
 
 ## Restricciones Absolutas
 

@@ -52,6 +52,8 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 | `/validar-qa "tarea"` | Re-ejecuta el QA con instrucciones especificas | Tarea puntual: solo cobertura, re-validar un modulo, etc. |
 | `/revisar-codigo` | Re-ejecuta el LT: linting, patrones, consistencia | Necesitas re-revisar codigo sin lanzar toda la cadena |
 | `/revisar-codigo "tarea"` | Re-ejecuta el LT con instrucciones especificas | Tarea puntual: revisar solo patrones de auth, etc. |
+| `/commit` | Crea commits estandarizados con Conventional Commits, auto-staging y tags | Cualquier commit del proyecto — epicas o generales |
+| `/commit checkpoint 1` | Commit directo de Checkpoint 1 con staging y tag automaticos | Aprobaste el CHECKPOINT 1 y quieres commitear |
 
 **Ejemplo:**
 ```
@@ -90,9 +92,9 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 
 5. **Dar feedback o aprobar.** Dos opciones:
    - **Feedback:** Escribe tus observaciones organizadas por HU. El sistema incorpora los cambios y re-ejecuta lo necesario.
-   - **Aprobar:** Ejecuta la migracion de Prisma:
+   - **Aprobar:** Commitea y ejecuta la migracion de Prisma:
      ```bash
-     git add outputs/ prisma/schema.prisma && git commit -m "EPICA-XX: CHECKPOINT 1 aprobado"
+     /commit checkpoint 1
      pnpm prisma migrate dev --name epica-xx-descripcion
      pnpm prisma generate
      ```
@@ -108,9 +110,9 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 
 8. **Revisar CHECKPOINT 2.** Cuando el LT aprueba, recibes un resumen final.
 
-9. **Git push.** Si todo esta bien:
+9. **Commit y push.** Si todo esta bien:
    ```bash
-   git add src/ test/ outputs/ && git commit -m "EPICA-XX: implementacion completa"
+   /commit checkpoint 2
    git push
    ```
 
@@ -203,5 +205,6 @@ pnpm prisma migrate dev                  → Aplica migracion
 /implementar-epica                       → Fase 2 (3 agentes × max 3 ciclos → CHECKPOINT 2)
 /validar-qa                              → Re-validar QA standalone (tests, cobertura, seguridad)
 /revisar-codigo                          → Re-revisar codigo standalone (linting, patrones, contrato)
+/commit                                  → Commit estandarizado (Conventional Commits + tags)
 git push                                 → Deploy
 ```
