@@ -72,10 +72,11 @@ model User {
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
 
-  coachRequest           CoachRequest?      @relation("CoachRequestUser")
-  reviewedCoachRequests  CoachRequest[]     @relation("CoachRequestReviewer")
-  legalAcceptances       LegalAcceptance[]
-  refreshTokens          RefreshToken[]
+  coachRequest                CoachRequest?      @relation("CoachRequestUser")
+  reviewedCoachRequests       CoachRequest[]     @relation("CoachRequestReviewer")
+  legalAcceptances            LegalAcceptance[]
+  refreshTokens               RefreshToken[]
+  adminInvitationsCreated     AdminInvitation[]  @relation("AdminInvitationInvitedBy")
 
   @@map("users")
 }
@@ -148,4 +149,27 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// --- Modelos EPICA-09 ---
+
+// Registro append-only — sin updatedAt (Ley 1273/2009)
+// El estado es derivado en el service: USED si tokenUsedAt != null,
+// EXPIRED si expiresAt < now(), ACTIVE en caso contrario.
+// tokenUsedAt es la unica escritura posterior al INSERT — marca consumo atomico del token.
+model AdminInvitation {
+  id           String    @id @default(uuid())
+  email        String    @map("email")
+  tokenHash    String    @unique @map("token_hash")
+  invitedBy    String    @map("invited_by")
+  expiresAt    DateTime  @map("expires_at")
+  tokenUsedAt  DateTime? @map("token_used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  inviter      User      @relation("AdminInvitationInvitedBy", fields: [invitedBy], references: [id], onDelete: Restrict)
+
+  // Indice para la query de verificacion de invitacion activa:
+  // WHERE email = ? AND token_used_at IS NULL AND expires_at > now()
+  @@index([email])
+  @@map("admin_invitations")
 }

@@ -1,359 +1,314 @@
 plan_de_implementacion:
   version: "1.0"
-  epica_id: "EPICA-01"
+  epica_id: "EPICA-09"
   ciclo: 1
-  modulos_afectados:
-    - "auth (modulo nuevo — src/modules/auth/)"
-    - "notifications (listeners para: coach.request.created, coach.request.approved, coach.request.rejected, user.registered)"
-    - "common (schema Prisma — nuevas entidades y enums)"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # PREREQUISITO BLOQUEANTE — MIGRACION PRISMA
-  # El humano debe ejecutar pnpm prisma migrate dev con los siguientes cambios:
-  #
-  # 1. enum UserRole: agregar ADMIN
-  # 2. nuevo enum CoachRequestStatus: PENDING, APPROVED, REJECTED
-  # 3. nuevo enum DocumentType: HABEAS_DATA, TERMS_OF_SERVICE,
-  #    HEALTH_DATA_CONSENT, SPORT_CONSENT
-  # 4. nuevo enum IdentificationType: CC, CE, NIT, PASAPORTE, PPT, PEP
-  # 5. nuevo model User:
-  #    id (UUID), email (@@unique), passwordHash, role (UserRole),
-  #    name, phone, phoneCountryCode, identificationType (IdentificationType),
-  #    identificationNumber (@@unique), avatarUrl?, dateOfBirth?,
-  #    createdAt, updatedAt
-  # 6. nuevo model CoachRequest:
-  #    id (UUID), userId (FK User), planDescription, bannerUrl?,
-  #    status (CoachRequestStatus @default(PENDING)), rejectionReason?,
-  #    reviewedAt?, reviewedBy? (FK User), createdAt, updatedAt
-  # 7. nuevo model LegalAcceptance (inmutable — sin update ni delete):
-  #    id (UUID), userId (FK User), documentType (DocumentType),
-  #    documentVersion, ip, userAgent, planId?, acceptedAt (@default(now()))
-  # 8. nuevo model AuditLog:
-  #    id (UUID), userId?, ip, userAgent, method, url,
-  #    statusCode?, duration, correlationId?, error?, createdAt (@default(now()))
-  #    @@index([userId]) @@index([correlationId])
-  # 9. nuevo model RefreshToken:
-  #    id (UUID), userId (FK User), tokenHash,
-  #    expiresAt, revokedAt?, createdAt (@default(now()))
-  #
-  # NOTA DE DISENO:
-  # Los campos personales compartidos (name, phone, phoneCountryCode,
-  # identificationNumber, identificationType, avatarUrl, dateOfBirth) van en User.
-  # CoachRequest solo tiene datos propios de la solicitud (planDescription, bannerUrl).
-  # @@unique constraints en email e identificationNumber estan en User para garantizar
-  # unicidad global independientemente del rol.
-  # ─────────────────────────────────────────────────────────────────────────────
+  modulos_afectados:
+    - auth (nuevos endpoints HU-002 y HU-003 + script seed HU-001)
+    - notifications (tarea tecnica transversal — EmailService con Resend)
+
+  # ── Nota sobre HU-001 ───────────────────────────────────────────────────────
+  # HU-001 (seed) NO genera endpoints HTTP. Se implementa como script
+  # prisma/seed.ts invocado con `prisma db seed`. No hay controller ni service
+  # nuevo — el script instancia PrismaClient directamente (contexto standalone,
+  # no NestJS runtime). Los criterios de aceptacion se validan manualmente.
+  # El script se registra en package.json bajo prisma.seed.
+  # ──────────────────────────────────────────────────────────────────────────────
 
   endpoints:
 
-    # ── HU-001: Solicitud de registro como entrenador ──────────────────────────
-
-    - hu_id: "HU-001"
-      metodo: POST
-      ruta: /auth/coaches/register
-      proposito: >
-        Registrar solicitud de nuevo entrenador. Crea User con role COACH en estado
-        no aprobado y CoachRequest en estado PENDING dentro de una $transaction atomica.
-        Registra dos LegalAcceptances: TERMS_OF_SERVICE y HABEAS_DATA como registros
-        separados e independientes (Ley 1581/2012). Emite coach.request.created para
-        que el modulo de notifications notifique al administrador. Ante email o
-        identificationNumber duplicado retorna 409 con mensaje neutro (anti-enumeracion).
-      request_body: RegisterCoachDto
-      response: "CoachRequestResponseDto (201)"
-      errores: [400, 409]
-      guards: []
-      eventos:
-        - coach.request.created
-      dependencias: []
-
-    # ── HU-002: Aprobacion o rechazo de solicitud por el Administrador ─────────
-
+    # ── HU-002: Crear invitacion de administrador ──────────────────────────────
     - hu_id: "HU-002"
       metodo: POST
-      ruta: /coach-requests/search
+      ruta: /admin-invitations
       proposito: >
-        Buscar y listar solicitudes de entrenadores con filtros opcionales y combinables
-        (AND logico). Body vacio retorna todas las solicitudes con paginacion por defecto.
-        Soporta filtros: uuid[] (lista de IDs), status[] (lista de estados),
-        email (exacto), nombre (parcial ILIKE), identificationNumber (exacto),
-        createdAt (fecha ISO). Exclusivo para ADMIN.
-      request_body: SearchCoachRequestsDto
-      response: "CoachRequestSummaryResponseDto[] + PaginationMeta (200)"
-      errores: [400, 401, 403]
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(ADMIN)
-      eventos: []
-      dependencias: []
-
-    - hu_id: "HU-002"
-      metodo: GET
-      ruta: /coach-requests/:id
-      proposito: >
-        Obtener detalle completo de una solicitud de entrenador por UUID. Incluye
-        todos los datos del coach solicitante (nombre, email, avatarUrl, bannerUrl,
-        planDescription, identificationNumber, status) para revision del administrador.
-        ParseUUIDPipe en :id.
-      request_body: null
-      response: "CoachRequestDetailResponseDto (200)"
-      errores: [401, 403, 404]
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(ADMIN)
-      eventos: []
-      dependencias: []
-
-    - hu_id: "HU-002"
-      metodo: POST
-      ruta: /coach-requests/:id/approve
-      proposito: >
-        Transicionar CoachRequest de PENDING a APPROVED. State machine: solo PENDING
-        puede aprobarse — APPROVED o REJECTED lanzan INVALID_STATE_TRANSITION (409).
-        Registra reviewedAt y reviewedBy (id del admin). Habilita al entrenador para
-        operar en la plataforma. Emite coach.request.approved para notificar al coach.
-        ParseUUIDPipe en :id.
-      request_body: null
-      response: "CoachRequestResponseDto (200)"
-      errores: [401, 403, 404, 409]
+        Crea una AdminInvitation en base de datos con token unico (generado con
+        randomBytes(32), almacenado hasheado con sha256) y expiracion configurable
+        via ADMIN_INVITE_EXPIRATION_HOURS (default 48h). Verifica previamente que
+        no exista un User con ese email y que no exista una invitacion activa
+        (no expirada, no utilizada) para ese email. Emite admin.invitation.created
+        con el token RAW para que el listener de notifications construya y envie
+        el correo al invitado. Requiere rol ADMIN autenticado.
+      request_body: CreateAdminInvitationDto
+      response: AdminInvitationResponseDto (201)
+      errores:
+        - 400  # Validacion: email invalido o campo faltante
+        - 401  # No autenticado — token JWT ausente o invalido
+        - 403  # Rol insuficiente — no es ADMIN
+        - 409  # Ya existe un User con ese email O ya existe AdminInvitation activa para ese email
       guards:
         - JwtAuthGuard
         - RolesGuard(ADMIN)
       eventos:
-        - coach.request.approved
-      dependencias:
-        - GET /coach-requests/:id
+        - admin.invitation.created
+      dependencias: []
 
-    - hu_id: "HU-002"
-      metodo: POST
-      ruta: /coach-requests/:id/reject
-      proposito: >
-        Transicionar CoachRequest de PENDING a REJECTED con motivo obligatorio.
-        State machine: solo PENDING puede rechazarse — APPROVED o REJECTED lanzan
-        INVALID_STATE_TRANSITION (409). Persiste el motivo de rechazo (texto libre,
-        sin incluir informacion tecnica interna). Emite coach.request.rejected con
-        motivo para notificar al coach. ParseUUIDPipe en :id.
-      request_body: RejectCoachRequestDto
-      response: "CoachRequestResponseDto (200)"
-      errores: [400, 401, 403, 404, 409]
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(ADMIN)
-      eventos:
-        - coach.request.rejected
-      dependencias:
-        - GET /coach-requests/:id
-
-    # ── HU-003: Registro inicial del atleta ────────────────────────────────────
-
+    # ── HU-003: Consultar estado de invitacion por token ──────────────────────
     - hu_id: "HU-003"
       metodo: POST
-      ruta: /auth/register
+      ruta: /admin-invitations/verify
       proposito: >
-        Registrar nuevo atleta en Fase 1 (exploracion). Crea User con role ATHLETE
-        dentro de una $transaction atomica junto con dos LegalAcceptances: HABEAS_DATA
-        y TERMS_OF_SERVICE como registros separados e independientes (Ley 1581/2012 —
-        checkbox separado). HEALTH_DATA_CONSENT NO aplica en Fase 1 — se difiere a la
-        inscripcion al plan (EPICA-04). Ante email o identificationNumber duplicado
-        retorna 409 con mensaje neutro (anti-enumeracion). Emite user.registered.
-      request_body: RegisterAthleteDto
-      response: "AthleteRegistrationResponseDto (201)"
-      errores: [400, 409]
+        Permite al frontend verificar si un token de invitacion es valido y vigente
+        antes de mostrar el formulario de registro al invitado. El token se recibe
+        en el body (no en URL) para evitar exposicion en access logs del servidor,
+        historial del navegador y headers Referer — consistente con la decision
+        arquitectonica de POST /auth/admin/register y con OWASP. El service hashea
+        el token RAW con sha256 y busca por tokenHash. Endpoint publico — no requiere
+        JWT. Retorna informacion basica de la invitacion (email del invitado, estado
+        derivado) sin exponer el tokenHash ni datos del admin invitante. Patron
+        consistente con OAuth 2.0 Token Introspection (RFC 7662).
+      request_body: VerifyAdminInvitationDto
+      response: AdminInvitationStatusResponseDto (200)
+      errores:
+        - 400  # Validacion: token faltante o formato invalido (ValidationPipe + VerifyAdminInvitationDto)
+        - 404  # Token no encontrado (inexistente o adulterado — mismo error, anti-enumeracion)
+        - 409  # Invitacion ya utilizada (tokenUsedAt != null)
+        - 422  # Invitacion expirada (expiresAt < now())
+      guards: []
+      eventos: []
+      dependencias:
+        - POST /admin-invitations
+
+    # ── HU-003: Registro de administrador via token de invitacion ─────────────
+    - hu_id: "HU-003"
+      metodo: POST
+      ruta: /auth/admin/register
+      proposito: >
+        Endpoint publico (sin JWT). Crea User con role ADMIN usando un token de
+        invitacion valido y vigente. En una $transaction atomica: valida el token
+        (hash + expiracion + uso), crea User (ADMIN), registra
+        LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE), y marca
+        la AdminInvitation como utilizada (tokenUsedAt = now()). Emite user.registered
+        despues del commit. El admin creado inicia sesion con el flujo estandar
+        POST /auth/login.
+      request_body: RegisterAdminDto
+      response: AdminRegistrationResponseDto (201)
+      errores:
+        - 400  # Validacion de campos personales (nombre, email, password, etc.) o legales
+        - 404  # Token de invitacion no encontrado
+        - 409  # Email o identificationNumber ya registrados en la plataforma (mensaje neutro)
+        - 422  # Token expirado o ya utilizado
       guards: []
       eventos:
         - user.registered
-      dependencias: []
-
-    # ── HU-004: Inicio de sesion ────────────────────────────────────────────────
-
-    - hu_id: "HU-004"
-      metodo: POST
-      ruta: /auth/login
-      proposito: >
-        Autenticar usuario registrado (atleta, entrenador o administrador) por email
-        + password via Passport LocalStrategy. Valida credenciales primero — si son
-        incorrectas lanza INVALID_CREDENTIALS (401) con mensaje identico para email
-        inexistente y password incorrecto (anti-enumeracion). Si el entrenador tiene
-        CoachRequest en estado PENDING o REJECTED lanza COACH_NOT_APPROVED (403).
-        Implementa bloqueo por cuenta: tras 5 intentos fallidos consecutivos, la cuenta
-        se bloquea temporalmente durante 15 minutos y retorna ACCOUNT_TEMPORARILY_LOCKED
-        (429) con mensaje informativo. El contador de intentos se resetea tras un login
-        exitoso o al expirar el periodo de bloqueo. ThrottlerGuard global se mantiene
-        como capa adicional de proteccion por IP. Retorna accessToken JWT y refreshToken.
-      request_body: LoginDto
-      response: "AuthTokenResponseDto (200)"
-      errores: [400, 401, 403, 429]
-      guards:
-        - LocalAuthGuard
-      eventos: []
       dependencias:
-        - POST /auth/register
-        - POST /auth/coaches/register
+        - POST /admin-invitations
+        - POST /admin-invitations/verify
 
   orden_de_implementacion:
-    - "1. [PREREQUISITO BLOQUEANTE] Migracion Prisma — el humano ejecuta pnpm prisma migrate dev"
-    - "2. POST /auth/register (HU-003) — fundacion: crea el modelo User para atletas; primera entidad del modulo"
-    - "3. POST /auth/coaches/register (HU-001) — extiende User para el rol COACH; agrega CoachRequest"
-    - "4. POST /auth/login (HU-004) — requiere Users existentes; implementa LocalStrategy y JwtStrategy"
-    - "5. POST /coach-requests/search (HU-002) — listado con filtros; requiere User con role ADMIN en BD para testear"
-    - "6. GET /coach-requests/:id (HU-002) — detalle individual; base para las acciones de estado"
-    - "7. POST /coach-requests/:id/approve (HU-002) — state machine PENDING→APPROVED"
-    - "8. POST /coach-requests/:id/reject (HU-002) — state machine PENDING→REJECTED"
+    - "1. [TAREA TECNICA] Crear src/modules/notifications/ con EmailService (Resend) + NotificationsModule"
+    - "2. [SCHEMA] Agregar modelo AdminInvitation a prisma/schema.prisma + migracion"
+    - "3. [SEED HU-001] Crear prisma/seed.ts — logica idempotente del primer admin"
+    - "4. [CATALOGO] Agregar admin.invitation.created al catalogo de eventos en design-patterns §7"
+    - "5. POST /admin-invitations (HU-002)"
+    - "6. POST /admin-invitations/verify (HU-003)"
+    - "7. POST /auth/admin/register (HU-003)"
 
   decisiones_arquitectonicas:
 
     - decision: >
-        Modulo auth/ contiene dos controllers: AuthController (/auth) y
-        CoachRequestsController (/coach-requests).
+        Nuevo modelo AdminInvitation en Prisma:
+        id (uuid @id @default(uuid())), email (String), tokenHash (String @unique),
+        invitedBy (String @map("invited_by")), expiresAt (DateTime @map("expires_at")),
+        tokenUsedAt (DateTime? @map("token_used_at")), createdAt (DateTime @default(now())
+        @map("created_at")). Sin updatedAt por semantica append-only. Sin enum de estado
+        persistido — el estado es derivado en el service: USED si tokenUsedAt != null,
+        EXPIRED si expiresAt < now(), ACTIVE en caso contrario.
       justificacion: >
-        /auth/* son endpoints publicos de autenticacion (sin JwtAuthGuard).
-        /coach-requests/* son endpoints privados administrativos (JwtAuthGuard + RolesGuard(ADMIN)).
-        Separar controllers mantiene cohesion. Ambos pertenecen a EPICA-01 y al dominio
-        de acceso, por lo que viven en el mismo modulo auth/.
+        La epica especifica en HU-002 notas: "Se necesita un nuevo modelo AdminInvitation".
+        Estado derivado evita inconsistencias entre un campo de estado almacenado y las
+        fechas reales. El tokenHash sigue el patron ya establecido por RefreshToken en el
+        codebase. Sin enum de estado porque el estado no se persiste — se calcula.
 
     - decision: >
-        Campos personales compartidos (name, phone, phoneCountryCode,
-        identificationNumber, identificationType, avatarUrl, dateOfBirth) van en
-        el modelo User, no en CoachRequest.
+        Nuevo servicio AdminInvitationsService en src/modules/auth/admin-invitations.service.ts
+        y nuevo controller AdminInvitationsController en
+        src/modules/auth/admin-invitations.controller.ts. Ambos registrados en AuthModule
+        existente (no se crea un modulo nuevo).
       justificacion: >
-        Atletas y coaches comparten los mismos campos de identificacion personal.
-        Mantenerlos en User evita duplicacion y garantiza las constraints de unicidad
-        global (@@unique([email]), @@unique([identificationNumber])) independientemente
-        del rol. CoachRequest solo tiene datos propios de la solicitud del entrenador:
-        planDescription y bannerUrl.
+        La escala de la epica (1-3 admins, 2 endpoints HTTP) no justifica un modulo nuevo.
+        AuthModule ya maneja el ciclo de vida de usuarios y contiene los guards, strategies
+        y DTOs relevantes. Patron consistente con CoachRequestsController/CoachRequestsService
+        que ya viven en AuthModule. Un modulo nuevo solo implicaria exports/imports sin valor.
 
     - decision: >
-        Nuevo enum IdentificationType en Prisma: CC, CE, NIT, PASAPORTE, PPT, PEP.
+        La logica de validacion del token (hash + busqueda + verificacion de expiracion y uso)
+        vive en AdminInvitationsService, no en AuthService. El metodo registerAdmin de
+        AuthService recibe el email validado y el adminInvitationId para marcar la invitacion
+        como usada dentro de la misma $transaction.
       justificacion: >
-        La restriccion conocida de la epica exige tipo de documento obligatorio.
-        Los valores cubren los tipos de documento principales en Colombia (CC, CE, NIT)
-        y para extranjeros residentes (PPT, PEP) y viajeros (PASAPORTE).
+        Separacion de responsabilidades. AuthService ya tiene registerAthlete y registerCoach.
+        Agregar la logica de tokens lo sobrecarga y acopla dos responsabilidades distintas.
+        AdminInvitationsService encapsula la logica de tokens para poder reutilizarla desde
+        POST /admin-invitations/verify sin duplicar codigo.
 
     - decision: >
-        HEALTH_DATA_CONSENT no se registra en el registro del atleta (HU-003).
-        Se difiere a la inscripcion al plan (EPICA-04).
+        POST /admin-invitations/verify recibe el token en el body (VerifyAdminInvitationDto),
+        no como path param. Devuelve 404 para tokens inexistentes Y para tokens cuyo hash no
+        coincide (adulterados). El 422 aplica solo para token valido pero expirado. El 409
+        aplica para token valido pero ya utilizado.
       justificacion: >
-        Restriccion explicita de la epica: en Fase 1 el atleta NO proporciona datos
-        de salud. El consentimiento para RPE, dolor muscular y motivacion aplica cuando
-        el atleta se suscribe a un plan. Solo HABEAS_DATA y TERMS_OF_SERVICE son
-        obligatorios en el registro inicial.
+        Correccion de seguridad: el endpoint original era POST /admin-invitations/verify, pero
+        el token en URL aparece en access logs del servidor, historial del navegador y headers
+        Referer. Se aplica el mismo criterio de seguridad que POST /auth/admin/register
+        (decision #5). El patron POST para verificacion de tokens es consistente con
+        OAuth 2.0 Token Introspection (RFC 7662). Anti-enumeracion (Ley 1273/2009): el 404
+        no revela si un token existio. El 422 y 409 son estados distintos que el frontend
+        necesita para mensajes especificos al usuario.
 
     - decision: >
-        POST /coach-requests/search con body JSON en lugar de GET con query params.
+        POST /auth/admin/register recibe el invitationToken en el body (campo String en
+        RegisterAdminDto), no como path param ni como header Authorization.
       justificacion: >
-        Los filtros requeridos incluyen arrays (uuid[], status[]) y combinaciones
-        multiples. Query params no soportan arrays de forma estandarizada y limpia.
-        El body JSON permite expresar la complejidad sin ambiguedad. POST para busqueda
-        es valido cuando la complejidad de los filtros excede la capacidad de la URL.
+        Un token en path param aparece en logs de acceso del servidor (access logs de nginx,
+        load balancers, etc.), exponiendo el token RAW. En body, el AuditInterceptor nunca
+        loggea el body completo en produccion (rules: solo en debug en dev). Consistente con
+        el patron de registro existente (todo via body).
 
     - decision: >
-        State machine de CoachRequest: tres estados (PENDING, APPROVED, REJECTED).
-        Las transiciones son endpoints POST separados: /approve y /reject.
+        admin.invitation.created es emitido por AdminInvitationsService. El listener
+        AdminInvitationCreatedListener vive en src/modules/notifications/listeners/.
+        El listener construye el enlace de registro con el token RAW del evento y llama
+        a EmailService.sendAdminInvitation(). Los errores de envio se capturan en try/catch
+        del listener y se loggean sin propagar. El token RAW nunca se loggea.
       justificacion: >
-        Semantica REST clara: cada transicion tiene sus propias validaciones, errores y
-        eventos. Una transicion desde estado ya resuelto (APPROVED→APPROVED o
-        REJECTED→APPROVED) lanza BusinessError.INVALID_STATE_TRANSITION (409).
-        Enum en Prisma + metodo por transicion en service (patron del proyecto).
+        Restriccion explicita de la epica: "Los errores de envio nunca interrumpen el flujo
+        de negocio principal." El patron de listener con try/catch ya esta establecido en el
+        codebase (nestjs-conventions §7). Comunicacion entre modulos exclusivamente via
+        eventos (@nestjs/event-emitter) — las rules prohiben imports directos entre modulos
+        de dominio.
 
     - decision: >
-        POST /auth/login usa LocalAuthGuard (Passport LocalStrategy) en lugar de
-        JwtAuthGuard. La verificacion de COACH_NOT_APPROVED ocurre en AuthService,
-        no en un guard separado.
+        El script prisma/seed.ts accede a PrismaClient directamente (standalone, sin
+        levantar el runtime NestJS). Lee credenciales desde process.env. Si
+        ADMIN_SEED_EMAIL o ADMIN_SEED_PASSWORD no estan definidas, el seed imprime
+        un mensaje informativo y termina con exit(0) sin error. Si el email ya existe
+        en User, el seed se omite (idempotencia). Si la password no cumple requisitos
+        (minimo 8 chars, al menos una letra y un numero), termina con exit(1) y mensaje
+        descriptivo. La password se hashea con bcrypt 10 rondas.
       justificacion: >
-        Passport LocalStrategy valida email+password y popula request.user antes de
-        llegar al controller. La verificacion del estado del coach requiere que el
-        usuario exista y sea identificado primero — no puede delegarse a un guard
-        sin revelar informacion (anti-enumeracion). El service maneja la secuencia:
-        (1) validar credenciales, (2) verificar estado del coach.
+        El comando `prisma db seed` usa scripts standalone por convencion de Prisma.
+        No tiene sentido levantar NestJS para un seed. La idempotencia protege contra
+        ejecuciones repetidas en CI/CD. Variables de entorno alineadas con la restriccion
+        de la epica: "credenciales del seed provienen exclusivamente de variables de
+        entorno, nunca hardcodeadas."
 
     - decision: >
-        Las transacciones $transaction de Prisma agrupan User + LegalAcceptances
-        en una operacion atomica en ambos endpoints de registro.
+        Dos nuevos BusinessError se agregan al catalogo business-error.enum.ts:
+        INVITATION_EXPIRED (422 UNPROCESSABLE_ENTITY, title: "La invitacion ha expirado")
+        e INVITATION_ALREADY_USED (409 CONFLICT, title: "La invitacion ya fue utilizada").
       justificacion: >
-        Si el registro del usuario falla despues de crear las aceptaciones legales,
-        quedarian registros LegalAcceptance huerfanos sin userId valido. La atomicidad
-        es critica para Ley 527/1999 (integridad del documento legal). Si alguna
-        operacion falla, ningun registro persiste.
+        Las rules prohiben crear clases de excepcion por modulo — el catalogo centralizado
+        en business-error.enum.ts es la unica fuente de verdad. Estos dos errores son
+        semanticamente distintos de los existentes INVALID_STATE_TRANSITION y DUPLICATE_ENTITY.
+        El frontend necesita distinguirlos para mostrar mensajes de accion especificos al usuario.
 
     - decision: >
-        Los eventos coach.request.approved y coach.request.rejected no existen en el
-        catalogo de design-patterns y deben ser agregados antes de la documentacion.
+        AdminRegistrationResponseDto es un nuevo DTO que incluye: id, name, email, role.
+        No reutiliza AthleteRegistrationResponseDto aunque la estructura sea similar.
       justificacion: >
-        HU-002 requiere notificacion al coach en ambas transiciones de estado.
-        El catalogo existente tiene coach.request.created pero no los eventos de
-        resolucion. El Documentador no puede proceder sin estas entradas en el catalogo.
+        Los DTOs de respuesta son contratos de API. Compartir un DTO entre contextos distintos
+        acopla sus evoluciones futuras. El admin puede requerir campos distintos en iteraciones
+        futuras sin afectar el contrato del registro de atleta.
 
     - decision: >
-        avatarUrl y bannerUrl se almacenan como URLs string. La API no gestiona uploads.
+        RegisterAdminDto replica los campos de datos personales y legales de RegisterAthleteDto:
+        name, email, password, phone, phoneCountryCode, identificationType,
+        identificationNumber, acceptsTermsOfService, termsDocumentVersion,
+        acceptsHabeasData, personalDataDocumentVersion. Agrega el campo
+        invitationToken (String). dateOfBirth y avatarUrl son opcionales igual que en atleta.
       justificacion: >
-        El cliente realiza el upload a un servicio externo (storage) y envia la URL
-        resultante al API. Si el producto requiere uploads directos, se necesita una
-        HU adicional en una epica de infraestructura.
+        La restriccion de la epica: "El registro requiere los mismos datos personales que
+        cualquier usuario de la plataforma" y "La creacion de cuentas admin tambien debe
+        registrar aceptaciones legales" (Ley 1581/2012). La re-creacion del DTO (en lugar de
+        herencia) evita acoplamiento y es explicita sobre el contrato del endpoint.
 
     - decision: >
-        RefreshToken se incluye en el schema Prisma con campo tokenHash pero el endpoint
-        POST /auth/refresh no tiene HU en EPICA-01 y no se planifica.
+        CreateAdminInvitationDto contiene solo el campo email (String, @IsEmail).
+        AdminInvitationResponseDto contiene: id, email, expiresAt, createdAt.
+        NO expone tokenHash ni invitedBy. AdminInvitationStatusResponseDto contiene:
+        email, status (string derivado: ACTIVE | EXPIRED | USED), expiresAt.
       justificacion: >
-        El modelo se incluye en la migracion inicial para no requerir una migracion
-        adicional cuando se defina la HU de refresh. El endpoint no se implementa
-        hasta que tenga HU con criterios de aceptacion formales.
-
-    - decision: >
-        Ante email o identificationNumber duplicado en el registro (atleta y coach),
-        la respuesta es 409 DUPLICATE_ENTITY con mensaje neutro. No se confirma
-        ni se niega si el dato especifico (email o numero) esta tomado.
-      justificacion: >
-        Los criterios de aceptacion de HU-001 y HU-003 lo exigen explicitamente.
-        Ley 1273/2009 — seguridad de la informacion: revelar que un email especifico
-        esta registrado permite enumeracion de usuarios. El mensaje es generico:
-        "Estos datos ya estan registrados en la plataforma."
+        Rules: NUNCA exponer campos internos en DTOs de respuesta. tokenHash es un campo
+        interno de seguridad. invitedBy es un UUID de admin que no tiene valor para el
+        invitado. El status derivado permite al frontend tomar decisiones sin calcular fechas.
 
   criterios_de_aceptacion_tecnicos:
-    - "Cobertura de dominio (AuthService, CoachRequestsService) >= 80%"
-    - "Cobertura de adaptadores (AuthController, CoachRequestsController) >= 70%"
-    - "Todos los endpoints documentan sus errores con @ApiProblemResponse"
-    - "Endpoints publicos (/auth/coaches/register, /auth/register, /auth/login) usan security: [] en el contrato OpenAPI"
-    - "Spectral: fitmess-auth-401-operation pasa en todos los endpoints con JwtAuthGuard"
-    - "LegalAcceptance: el service no expone metodos update ni delete (inmutabilidad por diseno)"
-    - "Passwords hasheados con bcrypt minimo 10 rondas antes de persistir en User.passwordHash"
-    - "LocalStrategy: mensaje de error identico para email inexistente y password incorrecto (INVALID_CREDENTIALS 401)"
-    - "AuthService.login() nunca loggea password, accessToken ni refreshToken"
-    - "State machine CoachRequest: transicion desde APPROVED o REJECTED lanza BusinessError.INVALID_STATE_TRANSITION (409)"
-    - "Registro atomico del atleta: User + LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE) en $transaction"
-    - "Registro atomico del coach: User + CoachRequest + LegalAcceptance(TERMS_OF_SERVICE) + LegalAcceptance(HABEAS_DATA) en $transaction"
-    - "Los eventos coach.request.approved y coach.request.rejected deben estar en el catalogo de design-patterns antes de que el Documentador inicie"
-    - "RolesGuard(ADMIN) en todos los endpoints bajo /coach-requests"
-    - "ParseUUIDPipe en todos los parametros :id"
-    - "HEALTH_DATA_CONSENT ausente del registro del atleta (HU-003) — solo HABEAS_DATA y TERMS_OF_SERVICE"
-    - "Bloqueo por cuenta en POST /auth/login: 5 intentos fallidos consecutivos bloquean la cuenta 15 minutos (ACCOUNT_TEMPORARILY_LOCKED 429)"
-    - "El contador de intentos fallidos se resetea tras login exitoso o al expirar el periodo de bloqueo"
-    - "Nuevo BusinessError requerido: ACCOUNT_TEMPORARILY_LOCKED (429) — agregar al catalogo en common/exceptions/"
+    - "Cobertura de dominio (AdminInvitationsService, metodo registerAdmin en AuthService) >= 80%"
+    - "Cobertura de adaptadores (AdminInvitationsController, endpoint POST /auth/admin/register en AuthController) >= 70%"
+    - "Todos los endpoints documentan errores con @ApiProblemResponse segun tabla de errores del plan"
+    - "POST /auth/admin/register usa security: [] en @ApiOperation (endpoint publico — Spectral)"
+    - "POST /admin-invitations/verify usa security: [] en @ApiOperation (endpoint publico — Spectral)"
+    - "El token RAW nunca aparece en logs — tests verifican que el logger no recibe el token (Ley 1273/2009)"
+    - "La password del admin nunca aparece en logs — tests verifican ausencia en llamadas al logger"
+    - "La $transaction de POST /auth/admin/register cubre: User.create + LegalAcceptance.create (x2) + AdminInvitation.update(tokenUsedAt)"
+    - "El seed prisma/seed.ts es idempotente: ejecutarlo dos veces con el mismo email no lanza error ni crea duplicados"
+    - "El seed termina con exit(0) y mensaje informativo si ADMIN_SEED_EMAIL o ADMIN_SEED_PASSWORD no estan definidas"
+    - "El seed termina con exit(1) y mensaje descriptivo si la password no cumple los requisitos de seguridad"
+    - "Variables nuevas documentadas en .env.example: ADMIN_SEED_EMAIL, ADMIN_SEED_NAME, ADMIN_SEED_PASSWORD, ADMIN_INVITE_EXPIRATION_HOURS"
+    - "BusinessError.INVITATION_EXPIRED e INVITATION_ALREADY_USED agregados a business-error.enum.ts"
+    - "EmailService captura excepciones internamente — el listener nunca propaga errores al pipeline HTTP"
+    - "El listener de admin.invitation.created NO loggea el token RAW del evento"
+    - "pnpm run build pasa sin errores — gate duro"
+    - "npx tsc --noEmit pasa sin errores — gate duro"
 
   riesgos_identificados:
-    - >
-      BLOQUEANTE — Schema Prisma sin entidades de dominio: el schema actual tiene
-      solo 3 enums y cero modelos de dominio. Ningun endpoint puede implementarse
-      hasta que el humano aplique la migracion con User, CoachRequest, LegalAcceptance,
-      AuditLog, RefreshToken y los 4 enums nuevos (UserRole+ADMIN, CoachRequestStatus,
-      DocumentType, IdentificationType).
 
-    - >
-      BLOQUEANTE PARCIAL — Dos eventos no estan en el catalogo de design-patterns:
-      coach.request.approved y coach.request.rejected. El Documentador requiere estas
-      entradas para generar los decoradores del contrato OpenAPI de HU-002. Deben
-      agregarse al catalogo antes de que el Documentador inicie.
+    - riesgo: >
+        El seed accede a PrismaClient standalone sin el adapter pg configurado en NestJS
+        (prisma.config.ts usa @prisma/adapter-pg). La conexion directa de PrismaClient
+        funciona con DATABASE_URL pero puede no usar pooling. En produccion con Supabase
+        esto puede generar conexiones directas en exceso.
+      mitigacion: >
+        Usar la conexion directa de Prisma Client (sin adapter) solo en el seed — es una
+        operacion de setup puntual, no recurrente. Documentar en comentario del script.
+        No es un problema de correctitud, solo de performance en setup inicial.
+      nivel: LOW
 
-    - >
-      MEDIO — POST /auth/refresh sin HU: los tokens JWT expiran. Sin endpoint de
-      refresh, los usuarios deben re-autenticarse manualmente. La tabla RefreshToken
-      esta en el schema pero el endpoint no tiene HU en EPICA-01. Escalar al Product
-      Owner para definir si es una HU adicional en EPICA-01 o en una epica futura.
+    - riesgo: >
+        El EmailService usa Resend (dependencia de red externa). En tests unitarios del
+        listener, si Resend no esta mockeado, los tests realizaran llamadas reales y
+        fallaran en CI sin RESEND_API_KEY configurada.
+      mitigacion: >
+        Mockear el cliente Resend en todos los tests del listener y del EmailService.
+        El contrato del listener (captura errores, no propaga) debe tener test explicito
+        que verifique que un error de Resend no lanza excepcion al caller.
+      nivel: LOW
 
-    - >
-      BAJO — Busqueda parcial por nombre en POST /coach-requests/search usa ILIKE
-      %valor%. Sin indice GIN en la columna name de User, puede ser lento en tablas
-      grandes. Evaluar cuando la base de entrenadores crezca.
+    - riesgo: >
+        Ley 1581/2012: la creacion del admin via POST /auth/admin/register recolecta
+        datos personales. RegisterAdminDto debe incluir los checkboxes de aceptacion
+        legal identicos a RegisterAthleteDto. Si el frontend no envIA estos campos,
+        el registro falla con 400 por validacion. Riesgo de que el frontend asuma que
+        el admin no necesita aceptaciones legales.
+      mitigacion: >
+        Documentar explicitamente en los decoradores @ApiProperty del RegisterAdminDto
+        que los campos legales son obligatorios. Incluir en los criterios de aceptacion
+        del Documentador que el contrato OpenAPI muestre estos campos como required.
+        El $transaction rechaza si los campos legales no se registran.
+      nivel: MEDIUM
 
-    - >
-      BAJO — avatarUrl y bannerUrl asumidos como URLs externas sin validacion de
-      dominio. Si el cliente envia URLs de dominios no autorizados, se persisten sin
-      verificacion. Considerar whitelist de dominios en una iteracion futura.
+    - riesgo: >
+        La verificacion de invitacion activa en POST /admin-invitations requiere una
+        query con condicion compuesta: email = X AND tokenUsedAt IS NULL AND expiresAt > now().
+        Esta query no tiene indice compuesto en el schema propuesto. Con escala 1-3 admins
+        el impacto es nulo, pero si se reutiliza el modelo para otros flujos de invitacion
+        en el futuro, puede requerir indexacion.
+      mitigacion: >
+        Agregar @@index([email]) en AdminInvitation. Escala actual (1-3 admins) hace el
+        riesgo irrelevante en produccion. Documentar para evaluacion futura.
+      nivel: LOW
+
+    - riesgo: >
+        El modulo notifications no existe en el codebase. Crearlo como tarea tecnica
+        previa introduce una dependencia de implementacion que bloquea HU-002. Si la
+        tarea tecnica no esta completada, el listener de admin.invitation.created no existe
+        y el correo de invitacion no se envia (la invitacion se crea en DB pero el invitado
+        no recibe el enlace).
+      mitigacion: >
+        El orden de implementacion documenta explicitamente la tarea tecnica como paso 1.
+        El Desarrollador debe completar EmailService + NotificationsModule antes de
+        implementar POST /admin-invitations. El evento se emite independientemente del
+        listener — si el listener no existe, el evento se emite sin efecto (no bloquea).
+        Esto es un riesgo funcional (el invitado no recibe el correo), no tecnico.
+      nivel: MEDIUM

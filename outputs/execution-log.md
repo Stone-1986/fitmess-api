@@ -30,3 +30,20 @@
 | 1 | Correcciones | desarrollador | OK | 14 archivos modificados | 4 DTOs entrada, 4 DTOs respuesta, 2 services, 4 tests. Campos renombrados, validadores agregados, estructura alineada con contrato. |
 | 2 | QA | qa + orquestador | OK | reporte_qa.yaml (actualizado) | 93 tests PASS. Lint: 0 errores, 32 warnings. Prettier: OK. Cobertura: 96.44% global (dominio 98-100%, adaptadores 75-100%). 17/17 divergencias resueltas. Estado: APROBADO. |
 | 3 | Revisión de código | lider-tecnico | RECHAZADO → OK | revision_codigo.yaml | LT detectó LoginDto sin @MaxLength(72) y LocalAuthGuard sin handleRequest(). Orquestador aplicó ambas correcciones directamente (triviales). Tests: 93 pass. Lint: 0 errores. Estado final: APROBADO. |
+
+---
+
+# Execution Log — EPICA-09: Registro y Autenticacion de Administradores
+
+## Fase 1 — Planificación (v1.0)
+
+| # | Paso | Agente | Estado | Output | Notas |
+|---|------|--------|--------|--------|-------|
+| 1a | Validación de producto | product-analyst | OK | reporte_validacion_negocio.yaml | 3 HUs APROBADA_CON_CONDICIONES. 2 bloqueantes (legal): HU-001 y HU-003 sin CA de aceptaciones legales. escalamiento_requerido: false |
+| 1b | Plan técnico | arquitecto | OK | plan_de_implementacion.yaml | 3 endpoints (POST /admin-invitations, GET /admin-invitations/:token, POST /auth/admin/register) + 1 seed + 1 tarea técnica (EmailService). 10 decisiones arquitectónicas, 5 riesgos |
+| 2 | Verificar conflictos | orquestador | OK | epica_input.yaml (actualizado) | Sin conflictos Analista↔Arquitecto. 2 bloqueantes resueltas: agregados CA de aceptaciones legales en HU-001 y HU-003. Condiciones no bloqueantes cubiertas por el plan |
+| 3 | Contrato OpenAPI | documentador | OK | contrato_openapi/ (8 archivos: 2 controllers, 5 DTOs, 1 README) | Checklist plan↔contrato: 8/8 puntos APROBADOS. Campos legales obligatorios en RegisterAdminDto. security: [] en endpoints públicos. |
+| 4 | Schema Prisma | dba | OK | prisma/schema.prisma | 1 modelo nuevo (AdminInvitation), 0 enums nuevos (estado derivado). tokenHash @unique, @@index([email]), onDelete: Restrict. User: +relación inversa. prisma validate: OK |
+| 5 | Spot-check | orquestador | OK | — | Contrato: @ApiProperty+validadores en DTOs, endpoints completos, no expone campos internos, security: [] en públicos. Schema: AdminInvitation correcto, append-only, índice email justificado. Sin hallazgos. |
+| 6 | CHECKPOINT 1 v1.0 | orquestador | FEEDBACK | — | Presentado al humano. Feedback: GET /admin-invitations/:token → POST /admin-invitations/verify (token sensible no debe ir en URL). Plan, contrato y DTO actualizados. |
+| 7 | Corrección seguridad | orquestador | OK | plan + contrato actualizados | GET → POST /admin-invitations/verify. Nuevo DTO: VerifyAdminInvitationDto. Consistente con decisión #5 del plan y OWASP/RFC 7662. |

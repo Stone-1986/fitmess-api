@@ -1,74 +1,107 @@
 epica:
-  id: "EPICA-01"
-  titulo: "Gestion de Acceso y Cumplimiento Legal"
+  id: "EPICA-09"
+  titulo: "Registro y Autenticacion de Administradores"
   objetivo_de_negocio: >
-    Garantizar que todos los usuarios ingresen a la plataforma bajo condiciones legales
-    validas (Ley 1581/2012 Colombia), con identidades verificadas y roles correctamente
-    asignados.
+    Habilitar la creacion y gestion de cuentas de administrador para desbloquear
+    la operacion de la plataforma. Sin administradores, los endpoints de aprobacion
+    y rechazo de entrenadores son inaccesibles, impidiendo que los entrenadores
+    registrados puedan operar.
   contexto_de_aplicacion: >
-    Plataforma de entrenamiento deportivo personalizado con tres actores: Atleta, Entrenador
-    y Administrador. El entrenador se registra por auto-registro y requiere aprobacion
-    administrativa. El atleta pasa por dos fases: Fase 1 (registro y exploracion) y Fase 2
-    (inscripcion a un plan con aprobacion del entrenador). En Fase 1 el atleta NO proporciona
-    datos de salud — solo datos personales de identificacion. La autenticacion es por
-    credenciales (email + contrasena) con control de acceso por rol. Marco regulatorio
-    colombiano: Ley 1581 de 2012 (proteccion de datos personales y datos sensibles de salud).
+    Plataforma de entrenamiento deportivo personalizado (fitmess-api). Actualmente
+    se pueden registrar y autenticar atletas y entrenadores (EPICA-01), pero no
+    existe mecanismo para crear administradores. El rol ADMIN ya existe en el schema
+    de Prisma (enum UserRole) y los guards de autorizacion ya lo soportan. El login
+    existente (POST /auth/login) funciona para cualquier rol, incluyendo ADMIN.
+    El modelo User no requiere campos adicionales para administradores — solo cambia
+    el valor del campo role. Patron elegido: Seed para el primer admin + Invitacion
+    por email para administradores adicionales. Escala esperada: 1-3 administradores.
+    El paquete Resend (v6.9.2) esta instalado y la variable RESEND_API_KEY esta
+    en .env.example, pero no existe modulo de notificaciones ni servicio de email
+    implementado — se debe crear como tarea tecnica precondicion de HU-002.
   restricciones_conocidas:
-    - "email e identificationNumber son los identificadores unicos de cada usuario — no puede haber 2 usuarios con el mismo email ni con el mismo identificationNumber"
-    - "Todos los usuarios deben registrar tipo de documento (identificationType: CC, CE, NIT, PASAPORTE, etc.) y numero de identificacion (identificationNumber)"
-    - "El telefono debe incluir indicativo de pais (phoneCountryCode, ej: +57 para Colombia)"
-    - "Ley 1581 de 2012: la autorizacion de datos sensibles de salud requiere checkbox separado e independiente de la autorizacion general de datos personales"
-    - "Cada aceptacion legal debe registrarse con timestamp, version del documento y el identificador del usuario"
-    - "Un entrenador no aprobado por el administrador no puede acceder a las funcionalidades de la plataforma"
-    - "En Fase 1 (registro) el atleta NO proporciona datos de salud — la autorizacion de datos sensibles de salud (HEALTH_DATA_CONSENT) se difiere a la inscripcion al plan (EPICA-04)"
-    - "El mecanismo de recuperacion de contrasena no esta descrito en el documento fuente; se documenta como supuesto para confirmar y definir como HU adicional si aplica"
+    - "El administrador NO se puede auto-registrar publicamente — solo por seed o invitacion"
+    - "El login utiliza el flujo existente de EPICA-01 (POST /auth/login) — no se crea endpoint nuevo de login para admin"
+    - "El modelo User no requiere campos adicionales para el rol admin — solo cambia el valor de role a ADMIN"
+    - "Las credenciales del seed provienen exclusivamente de variables de entorno, nunca hardcodeadas"
+    - "El token de invitacion es de uso unico y su tiempo de expiracion es configurable via variable de entorno (por defecto 48 horas)"
+    - "Ley 1581 de 2012: la creacion de cuentas admin tambien debe registrar aceptaciones legales"
+    - "El servicio de email es una tarea tecnica transversal (no HU) que se implementa como precondicion de HU-002 en src/modules/notifications/ usando Resend. Los errores de envio nunca interrumpen el flujo de negocio principal. Fuera de alcance: templates HTML elaborados, colas de reintento, preferencias de notificacion"
+  supuestos:
+    - "El tiempo de expiracion por defecto (48 horas) es razonable para tokens de invitacion, pero es configurable via ADMIN_INVITE_EXPIRATION_HOURS"
+    - "No se necesita un CRUD completo de gestion de administradores dado que la escala es 1-3 admins"
+    - "El seed se ejecuta manualmente por el operador como parte del despliegue inicial"
+  glosario:
+    seed: "Script de inicializacion que pobla la base de datos con datos esenciales para el funcionamiento del sistema"
+    token_de_invitacion: "Codigo unico y temporal que permite a una persona invitada registrarse como administrador"
+    bootstrap: "Proceso de crear el primer administrador del sistema cuando no existe ninguno"
+    operador: "Persona con acceso al servidor o entorno de despliegue que ejecuta comandos de infraestructura"
+  dependencias:
+    - desde: "HU-002"
+      hacia: "HU-001"
+      descripcion: "Se necesita al menos un administrador existente (creado por seed) para poder enviar invitaciones"
+    - desde: "HU-003"
+      hacia: "HU-002"
+      descripcion: "Se necesita una invitacion vigente para completar el registro de un nuevo administrador"
   historias_de_usuario:
     - id: "HU-001"
-      titulo: "Solicitud de registro como entrenador"
-      como: "entrenador o representante de un centro de entrenamiento"
-      quiero: "completar un formulario de solicitud de registro en la plataforma"
-      para: "que el administrador evalue mi perfil y me habilite para operar"
+      titulo: "Crear administrador inicial mediante seed de base de datos"
+      como: "operador de la plataforma"
+      quiero: "crear el primer administrador mediante un script de seed"
+      para: "que la plataforma pueda ser gestionada desde el primer despliegue"
       criterios_de_aceptacion:
-        - "Dado que un entrenador accede al formulario de solicitud de registro, cuando completa nombre, email, indicativo de pais del telefono, telefono, tipo de documento, numero de identificacion y descripcion del plan, acepta los terminos y condiciones y la autorizacion de tratamiento de datos personales, y envia la solicitud, entonces ve un mensaje confirmando que su solicitud fue recibida y que sera revisada por el administrador, y el administrador recibe una notificacion de nueva solicitud pendiente"
-        - "Dado que un entrenador esta completando el formulario de solicitud, cuando intenta enviar sin haber completado uno o mas campos obligatorios, entonces ve indicados los campos faltantes con mensaje de dato requerido, y el envio no se realiza"
-        - "Dado que un entrenador esta completando el formulario de registro, cuando adjunta una imagen de avatar y una imagen de banner antes de enviar, entonces esas imagenes quedan asociadas a su solicitud para ser revisadas por el administrador"
-        - "Dado que un entrenador completo todos los campos obligatorios del formulario, cuando intenta enviar la solicitud sin haber aceptado los terminos y condiciones, entonces ve un mensaje indicando que la aceptacion de terminos es obligatoria, y el envio no se realiza"
-        - "Dado que un entrenador completo todos los campos obligatorios del formulario, cuando intenta enviar la solicitud sin haber aceptado la autorizacion de tratamiento de datos personales (habeas data), entonces ve un mensaje indicando que la aceptacion es obligatoria, y el envio no se realiza"
-        - "Dado que un entrenador completo el registro exitosamente, cuando el sistema registra las aceptaciones legales, entonces quedan almacenados TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con timestamp, version del documento e identificador del usuario"
-        - "Dado que un entrenador intenta registrarse con un email o numero de identificacion que ya existe en el sistema, cuando envia la solicitud, entonces el sistema devuelve un mensaje generico sin confirmar ni negar la existencia de un registro previo con esos datos"
+        - "Dado que el operador ha configurado los datos del administrador inicial en el entorno, cuando ejecuta el comando de seed de la base de datos, entonces se crea un usuario con rol administrador con los datos proporcionados"
+        - "Dado que el seed creo el administrador exitosamente, cuando el administrador inicia sesion con las credenciales configuradas, entonces accede a la plataforma con permisos de administrador"
+        - "Dado que las credenciales del administrador no estan configuradas en el entorno, cuando se ejecuta el comando de seed, entonces el seed se omite sin errores mostrando un mensaje informativo y no se crea ningun usuario administrador"
+        - "Dado que ya existe un administrador con el correo configurado, cuando se ejecuta el comando de seed nuevamente, entonces el seed se omite sin errores y el administrador existente no se modifica"
+        - "Dado que los datos del administrador no cumplen las validaciones (correo invalido o contrasena que no cumple requisitos minimos), cuando se ejecuta el seed, entonces falla con un mensaje indicando que validacion no se cumple y no se crea ningun usuario"
+        - "Dado que el seed crea el administrador exitosamente, cuando se verifican los registros legales, entonces existen registros inmutables de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con documentVersion, ip del entorno de despliegue y acceptedAt"
+      reglas_de_negocio:
+        - "La contrasena del administrador inicial se hashea con el mismo algoritmo que el registro normal (bcrypt)"
+        - "La contrasena debe cumplir los mismos requisitos de seguridad que cualquier usuario (minimo 8 caracteres, al menos una letra y un numero)"
+        - "El seed es idempotente: ejecutarlo multiples veces no crea duplicados"
+        - "Las credenciales provienen exclusivamente de variables de entorno, nunca hardcodeadas"
+        - "El administrador creado por seed requiere los mismos datos obligatorios que cualquier usuario"
+      notas:
+        - "El seed se integra con el mecanismo estandar de Prisma (prisma db seed)"
+        - "Se deben agregar variables al .env.example con placeholders para documentar los campos requeridos"
 
     - id: "HU-002"
-      titulo: "Aprobacion o rechazo de solicitud de entrenador por el Administrador"
-      como: "administrador"
-      quiero: "revisar las solicitudes de registro de entrenadores pendientes y aprobarlas o rechazarlas"
-      para: "controlar quienes pueden operar en la plataforma"
+      titulo: "Invitar nuevo administrador por correo electronico"
+      como: "administrador de la plataforma"
+      quiero: "invitar a una persona a ser administrador enviandole un correo electronico"
+      para: "incorporar nuevos administradores sin necesidad de acceso directo a la base de datos"
       criterios_de_aceptacion:
-        - "Dado que existe una solicitud de entrenador en estado pendiente, cuando el administrador revisa el perfil y aprueba la solicitud, entonces el entrenador queda habilitado para operar en la plataforma, y el entrenador recibe una notificacion indicando que su solicitud fue aprobada"
-        - "Dado que existe una solicitud de entrenador en estado pendiente, cuando el administrador rechaza la solicitud indicando el motivo, entonces la solicitud queda en estado rechazado, y el entrenador recibe una notificacion con el motivo del rechazo"
-        - "Dado que el administrador accede al panel de gestion de entrenadores, cuando busca solicitudes con criterios de filtrado opcionales (UUID, estado, email, nombre, numero de identificacion, fecha de creacion), entonces ve el listado filtrado que coincide con los criterios. Si no envia ningun filtro, ve todas las solicitudes. Los filtros son combinables entre si"
-        - "Dado que el administrador accede al panel de gestion de entrenadores, cuando un usuario con cualquier otro rol intenta acceder, entonces recibe respuesta de acceso denegado"
-        - "Dado que el administrador rechaza una solicitud, cuando el motivo de rechazo se incluye en la notificacion al entrenador, entonces el motivo es texto libre ingresado por el administrador sin exponer informacion tecnica interna ni datos de otros solicitantes"
+        - "Dado que el administrador esta autenticado, cuando envia una invitacion con el correo electronico de la persona, entonces la invitacion queda registrada con estado pendiente"
+        - "Dado que la invitacion fue registrada exitosamente, cuando el sistema procesa el envio, entonces la persona recibe un correo con un enlace de registro"
+        - "Dado que ya existe un usuario con el correo proporcionado, cuando el administrador intenta enviar la invitacion, entonces ve un mensaje indicando que ya existe un usuario con ese correo y la invitacion no se envia"
+        - "Dado que ya existe una invitacion pendiente y vigente para ese correo, cuando el administrador intenta enviar otra invitacion al mismo correo, entonces ve un mensaje indicando que ya existe una invitacion activa y la invitacion no se envia"
+        - "Dado que un usuario con rol diferente a administrador esta autenticado, cuando intenta enviar una invitacion, entonces ve un mensaje de acceso denegado y la invitacion no se envia"
+      reglas_de_negocio:
+        - "Solo usuarios con rol administrador pueden crear invitaciones"
+        - "No se permiten invitaciones duplicadas al mismo correo mientras haya una activa"
+        - "La invitacion registra quien la creo para auditoria"
+      notas:
+        - "Se necesita un nuevo modelo en Prisma (AdminInvitation) para persistir tokens de invitacion"
+        - "Precondicion tecnica: implementar servicio de email transversal en src/modules/notifications/ usando Resend (paquete instalado, sin codigo funcional)"
 
     - id: "HU-003"
-      titulo: "Registro inicial del atleta en la plataforma"
-      como: "persona interesada en entrenar"
-      quiero: "registrarme como atleta en la plataforma"
-      para: "poder explorar los planes y entrenadores disponibles"
+      titulo: "Completar registro de administrador mediante token de invitacion"
+      como: "persona invitada"
+      quiero: "completar mi registro como administrador usando el enlace que recibi por correo"
+      para: "acceder a las funciones de gestion de la plataforma"
       criterios_de_aceptacion:
-        - "Dado que un visitante accede al formulario de registro de atleta, cuando completa nombre, email, contrasena, indicativo de pais del telefono, telefono, tipo de documento, numero de identificacion, fecha de nacimiento y opcionalmente adjunta avatar, entonces queda registrado como atleta en Fase 1 con acceso de exploracion, y puede navegar el catalogo de entrenadores y planes publicados"
-        - "Dado que un visitante esta completando el formulario de registro, cuando intenta confirmar sin completar uno o mas campos obligatorios, entonces ve los campos faltantes indicados con mensaje de dato requerido, y el registro no se completa"
-        - "Dado que un visitante esta completando el formulario de registro de atleta, cuando intenta confirmar el registro sin haber aceptado la autorizacion de tratamiento de datos personales (habeas data), entonces ve un mensaje indicando que la aceptacion es obligatoria para continuar, y el registro no se completa"
-        - "Dado que un visitante esta completando el formulario de registro de atleta, cuando intenta confirmar el registro sin haber aceptado los terminos y condiciones, entonces ve un mensaje indicando que la aceptacion es obligatoria para continuar, y el registro no se completa"
-        - "Dado que un atleta completo el registro exitosamente, cuando el sistema registra la aceptacion de los documentos legales, entonces queda almacenado HABEAS_DATA y TERMS_OF_SERVICE en legal_acceptances con timestamp, version del documento e identificador del usuario"
-        - "Dado que un visitante intenta registrarse con un email o numero de identificacion que ya existe en el sistema, cuando envia el formulario, entonces el sistema devuelve un mensaje generico sin confirmar ni negar la existencia de un registro previo con esos datos"
-
-    - id: "HU-004"
-      titulo: "Inicio de sesion en la plataforma"
-      como: "usuario registrado (atleta, entrenador o administrador)"
-      quiero: "iniciar sesion con mis credenciales"
-      para: "acceder a las funcionalidades correspondientes a mi rol"
-      criterios_de_aceptacion:
-        - "Dado que un usuario registrado accede a la pantalla de inicio de sesion, cuando ingresa sus credenciales correctas y confirma, entonces accede al area de la plataforma correspondiente a su rol"
-        - "Dado que un usuario esta en la pantalla de inicio de sesion, cuando ingresa credenciales incorrectas, entonces ve un mensaje indicando que el usuario o la contrasena son incorrectos, y no se le concede acceso"
-        - "Dado que un entrenador cuya solicitud aun no ha sido aprobada intenta iniciar sesion, cuando ingresa sus credenciales, entonces ve un mensaje informando que su solicitud esta pendiente de revision por el administrador"
-        - "Dado que un usuario ha fallado 5 intentos consecutivos de inicio de sesion en su cuenta, cuando intenta iniciar sesion nuevamente, entonces el sistema bloquea temporalmente los intentos de autenticacion para esa cuenta durante 15 minutos y el usuario ve un mensaje informando que su cuenta esta temporalmente bloqueada por multiples intentos fallidos"
+        - "Dado que la persona tiene un enlace de invitacion valido y vigente, cuando completa sus datos personales y confirma el registro, entonces se crea su cuenta de administrador"
+        - "Dado que el registro fue exitoso, cuando la persona consulta el estado de la invitacion, entonces la invitacion aparece como utilizada"
+        - "Dado que el registro fue exitoso, cuando la persona inicia sesion con sus credenciales, entonces accede a la plataforma con permisos de administrador"
+        - "Dado que ha transcurrido el tiempo de expiracion configurado desde que se envio la invitacion, cuando la persona intenta registrarse con ese enlace, entonces ve un mensaje indicando que la invitacion ha expirado y se le sugiere solicitar una nueva invitacion"
+        - "Dado que la invitacion ya fue utilizada para crear una cuenta, cuando alguien intenta registrarse con el mismo enlace, entonces ve un mensaje indicando que la invitacion ya fue utilizada y el registro no se completa"
+        - "Dado que la persona tiene una invitacion valida, cuando intenta registrarse con datos incompletos o invalidos, entonces ve los errores de validacion correspondientes y puede corregir los datos y reintentar"
+        - "Dado que el registro fue exitoso, cuando se verifican los registros legales, entonces existen registros inmutables de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con userId, documentVersion, ip, userAgent y acceptedAt"
+      reglas_de_negocio:
+        - "El token de invitacion expira segun el tiempo configurado en la variable de entorno (por defecto 48 horas)"
+        - "Cada token es de uso unico — una vez utilizado no puede reutilizarse"
+        - "El registro requiere los mismos datos personales que cualquier usuario de la plataforma"
+        - "La contrasena del nuevo administrador debe cumplir los mismos requisitos de seguridad (minimo 8 caracteres, al menos una letra y un numero)"
+        - "El nuevo administrador inicia sesion con el flujo estandar de autenticacion existente"
+      notas:
+        - "El endpoint de registro por invitacion es publico (no requiere JWT) pero si requiere un token de invitacion valido"

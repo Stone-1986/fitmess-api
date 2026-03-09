@@ -1,162 +1,328 @@
 validacion_producto:
-  epica_id: "EPICA-01"
-  fecha: "2026-03-01"
-  version: "2.0"
+  epica_id: "EPICA-09"
+  fecha: "2026-03-08"
+  analista: "Analista de Producto — fitmess-api"
+
   resumen_ejecutivo: >
-    Version 2.0 — Incorpora el estado actualizado de las HU en epica_input.yaml tras el
-    CHECKPOINT 1 con el Product Owner. Las condiciones de HU-001 (HABEAS_DATA como documento
-    separado, mensaje generico ante duplicados, registro inmutable) y HU-002 (control de
-    acceso por rol, limite del motivo de rechazo) quedaron resueltas en los criterios de
-    aceptacion del input. HU-001 y HU-002 se promueven a APROBADA. HU-003 mantiene su
-    estado APROBADA. La condicion critica no resuelta sigue siendo HU-004: ausencia de
-    criterio funcional sobre proteccion contra fuerza bruta en el endpoint de autenticacion,
-    obligatoria bajo Ley 1273 de 2009 y estandar OWASP 2025. Se registra un conflicto nuevo
-    con el Arquitecto: el plan declara que ThrottlerGuard global (100 req/min) es la
-    medida suficiente bajo Ley 1273/2009, pero OWASP 2025 establece que los endpoints de
-    login requieren un control especifico por cuenta (3 a 10 intentos), no un rate limiter
-    generico por IP que no protege contra ataques distribuidos. Este conflicto requiere
-    decision del humano antes de que el Documentador inicie.
+    La epica EPICA-09 "Registro y Autenticacion de Administradores" define tres historias de
+    usuario que cubren el ciclo completo de incorporacion de administradores: seed inicial,
+    invitacion por email, y completar registro via token. El objetivo de negocio es claro y
+    necesario: sin administradores, los endpoints de aprobacion de entrenadores son inaccesibles
+    y la plataforma no puede operar. El patron elegido (Seed + Invitacion) es consistente con
+    las mejores practicas de la industria para plataformas de escala reducida (1-3 admins).
+    Las tres HU son aprobadas con condiciones. Existen dos condiciones bloqueantes de naturaleza
+    legal: (1) HU-001 no incluye ningun criterio de aceptacion que exija el registro de
+    aceptaciones legales en el seed, pese a que la propia restriccion de la epica lo declara
+    obligatorio; (2) HU-003 menciona las aceptaciones legales solo como nota, sin convertirlas
+    en criterio verificable. Ambas condiciones deben resolverse antes de que el Documentador
+    inicie. Las condiciones no bloqueantes son mejoras de seguridad y trazabilidad.
 
   historias_de_usuario:
 
     - id: "HU-001"
-      titulo: "Solicitud de registro como entrenador"
-      decision: "APROBADA"
+      titulo: "Crear administrador inicial mediante seed de base de datos"
+      decision: "APROBADA_CON_CONDICIONES"
       observaciones: >
-        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES en v1.0). Las tres condiciones
-        del reporte anterior quedaron resueltas en los criterios de aceptacion actuales.
-        CA-5 resuelve la condicion critica: bloqueo ante ausencia de HABEAS_DATA como
-        documento independiente de los terminos (Ley 1581/2012 art. 9, Decreto 1377/2013).
-        CA-6 cubre registro inmutable en legal_acceptances (Ley 527/1999). CA-7 garantiza
-        mensaje generico ante duplicados (anti-enumeracion, Ley 1273/2009). Los 7 criterios
-        son verificables. El flujo es coherente con practicas de la industria (HubFit,
-        Everfit, PT Distinction).
+        La HU cubre correctamente el caso de bootstrap del primer administrador. El criterio
+        de idempotencia (no duplicar si ya existe el correo) es funcional y verificable. La
+        restriccion de credenciales exclusivamente por variables de entorno elimina el riesgo
+        de hardcoding. Los cinco criterios de aceptacion cubren el happy path y los principales
+        casos de error: configuracion ausente, duplicado existente, y validaciones fallidas.
+        Las reglas de negocio (bcrypt, requisitos de contrasena, idempotencia) son correctas
+        y alineadas con lo implementado en EPICA-01.
+
+        Sin embargo, existe una omision legal relevante: la restriccion conocida de la epica
+        declara explicitamente que "la creacion de cuentas admin tambien debe registrar
+        aceptaciones legales" (Ley 1581/2012), pero ninguno de los cinco criterios de
+        aceptacion exige ni verifica el registro de aceptaciones legales (TERMS_OF_SERVICE y
+        HABEAS_DATA) al crear el administrador via seed. Esta omision deja sin mecanismo de
+        verificacion una obligacion declarada por el propio Product Owner.
+
+        Adicionalmente, el seed opera fuera del pipeline HTTP normal, por lo que el
+        AuditInterceptor global no captura automaticamente la operacion de creacion. No
+        existe ningun criterio que exija trazabilidad de auditoria para esta accion critica
+        de bootstrapping.
+
+        CONDICION BLOQUEANTE (legal): Agregar un criterio de aceptacion que exija el registro
+        inmutable de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances al momento de crear
+        el administrador por seed, con documentVersion, ip del entorno y acceptedAt.
+
+        CONDICION NO BLOQUEANTE (trazabilidad): Agregar un criterio que exija que el seed
+        registre en el log de auditoria (o mecanismo equivalente documentado) la creacion del
+        administrador con timestamp, sin exponer la contrasena.
+
       guardarrails_aplicables:
-        - ley: "Ley 1581 de 2012 + Decreto 1377 de 2013"
+        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
+          aplica: true
+          cumple: "pendiente"
+          accion_requerida: >
+            Agregar criterio de aceptacion que exija el registro de TERMS_OF_SERVICE y
+            HABEAS_DATA en legal_acceptances al crear el administrador por seed. La propia
+            restriccion de la epica lo declara obligatorio pero ningun criterio lo verifica.
+            Condicion bloqueante — el Documentador no puede iniciar hasta que este criterio
+            quede incorporado en epica_input.yaml.
+
+        - ley: "Ley 1273/2009 — Seguridad de la informacion"
           aplica: true
           cumple: true
-          accion_requerida: "Cumple. CA-5 garantiza HABEAS_DATA como checkbox independiente."
-        - ley: "Circular SIC No. 2 de 2024"
+          accion_requerida: >
+            Ningun criterio de aceptacion ni regla de negocio expone la contrasena. La
+            exigencia de bcrypt esta documentada en las reglas de negocio, alineada con el
+            patron de EPICA-01. Aceptable. La condicion de trazabilidad de auditoria es
+            una mejora no bloqueante.
+
+        - ley: "Ley 527/1999 — Validez de documentos digitales"
           aplica: true
-          cumple: true
-          accion_requerida: "Cumple. Finalidad declarada en contexto de la plataforma. AuditInterceptor global cubre accountability."
-        - ley: "Ley 1273 de 2009"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-7 garantiza mensaje neutro ante duplicados (anti-enumeracion)."
-        - ley: "Ley 527 de 1999"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-6 establece registro inmutable con timestamp, version e identificador."
+          cumple: "pendiente"
+          accion_requerida: >
+            Aplica porque el seed registra el consentimiento digital del administrador inicial,
+            que es un documento con valor legal. La autenticidad se garantiza porque el
+            operador esta autenticado en el entorno de despliegue. La integridad y disponibilidad
+            dependen de que el registro en legal_acceptances sea inmutable. Estas garantias
+            solo pueden verificarse si existe el criterio de aceptacion exigido en la condicion
+            bloqueante de Ley 1581. Queda pendiente hasta que dicha condicion se resuelva.
+
+      fuentes_consultadas:
+        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
+          resumen: >
+            Ley 1581 de 2012: el consentimiento para tratamiento de datos debe ser previo,
+            expreso e informado antes de incorporar los datos. La creacion de una cuenta de
+            administrador — incluso por seed — constituye una incorporacion de datos personales
+            y requiere registro de autorizacion.
+        - url: "https://medium.com/@musanziwilfried/nestjs-database-seeding-daa11f32e066"
+          resumen: >
+            Mejores practicas para seeding en NestJS: hashear contrasenas con bcrypt, asociar
+            roles explicitamente, usar variables de entorno para credenciales. La HU ya
+            incorpora estas practicas en sus reglas de negocio.
 
     - id: "HU-002"
-      titulo: "Aprobacion o rechazo de solicitud de entrenador por el Administrador"
-      decision: "APROBADA"
+      titulo: "Invitar nuevo administrador por correo electronico"
+      decision: "APROBADA_CON_CONDICIONES"
       observaciones: >
-        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES en v1.0). CA-4 resuelve control
-        de acceso exclusivo para Administrador. CA-5 resuelve limite del motivo de rechazo
-        (texto libre sin informacion tecnica interna). Los 5 criterios son verificables. Las
-        mutaciones de estado son capturadas por el AuditInterceptor global. El plan del
-        Arquitecto aclara que el estado REJECTED en login resulta en COACH_NOT_APPROVED (403),
-        resolviendo la ambiguedad de v1.0.
+        La HU cubre los flujos principales de invitacion con buena cobertura de casos de
+        error: usuario existente con ese correo, invitacion duplicada activa, y acceso denegado
+        para roles no admin. El diseno de token de uso unico con expiracion configurable es
+        consistente con las mejores practicas de OWASP para tokens de invitacion. La regla de
+        negocio de registrar quien creo la invitacion es una buena practica de auditoria.
+
+        Se identifican tres condiciones no bloqueantes:
+
+        CONDICION NO BLOQUEANTE 1 (funcional): El criterio sobre invitaciones duplicadas define
+        correctamente el comportamiento cuando hay una invitacion "pendiente y vigente". Sin
+        embargo, no define el comportamiento cuando existe una invitacion expirada para el mismo
+        correo. El flujo logico indica que una invitacion expirada debe poder reemplazarse con
+        una nueva; si no se explicita, el Arquitecto podria interpretar que cualquier invitacion
+        previa (incluso expirada) bloquea futuras invitaciones, generando una inconsistencia
+        operativa.
+
+        CONDICION NO BLOQUEANTE 2 (seguridad, Ley 1273): Los criterios de aceptacion y reglas
+        de negocio no mencionan que el token de invitacion debe generarse con aleatoriedad
+        criptografica. Segun OWASP Forgot Password Cheat Sheet, los tokens de este tipo deben
+        tener minimo 128 bits de entropia generados con CSPRNG. Un token predecible representa
+        un riesgo de acceso no autorizado (Ley 1273/2009 art. 269A). Debe quedar como regla de
+        negocio explicita para que el equipo de implementacion no use Math.random() ni UUID v4
+        estandar para este proposito.
+
+        CONDICION NO BLOQUEANTE 3 (seguridad, Ley 1273): No existe criterio de rate limiting
+        en el endpoint de envio de invitaciones. Un administrador comprometido o un error en
+        la aplicacion podria usar este endpoint para spam masivo de correos o para enumerar
+        si un correo ya existe en el sistema (a traves de los mensajes de error diferenciados).
+
       guardarrails_aplicables:
-        - ley: "Ley 1581 de 2012"
+        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
           aplica: true
           cumple: true
-          accion_requerida: "Cumple. CA-4 restringe acceso al listado de solicitudes al rol Administrador."
-        - ley: "Circular SIC No. 2 de 2024"
+          accion_requerida: >
+            La HU procesa el correo electronico del invitado (dato personal). El correo se
+            usa exclusivamente para enviar la invitacion (finalidad declarada y especifica).
+            El consentimiento se registra en HU-003 al completar el registro, no en esta HU.
+            La regla de negocio de registrar quien creo la invitacion cubre la trazabilidad
+            requerida. Aceptable sin cambios.
+
+        - ley: "Ley 1273/2009 — Seguridad de la informacion"
           aplica: true
-          cumple: true
-          accion_requerida: "Cumple. Finalidad especifica y declarada. AuditInterceptor garantiza accountability."
-        - ley: "Ley 1273 de 2009"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-4 previene acceso no autorizado. CA-5 evita exposicion de informacion tecnica."
-        - ley: "Ley 527 de 1999"
+          cumple: "pendiente"
+          accion_requerida: >
+            Agregar regla de negocio que exija generacion del token con aleatoriedad
+            criptografica (CSPRNG, minimo 128 bits de entropia) segun OWASP. Agregar criterio
+            de rate limiting en el endpoint. El criterio de acceso denegado para roles no
+            admin esta presente y es correcto. Condiciones no bloqueantes.
+
+        - ley: "Ley 527/1999 — Validez de documentos digitales"
           aplica: false
           cumple: true
-          accion_requerida: "No aplica. La aprobacion administrativa no es un documento contractual bajo Ley 527."
+          accion_requerida: >
+            No aplica directamente en esta HU. La invitacion es un mecanismo operativo, no
+            un documento con valor legal. El valor legal se establece en HU-003 al registrar
+            las aceptaciones.
+
+      fuentes_consultadas:
+        - url: "https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html"
+          resumen: >
+            OWASP: tokens de un solo uso, minimo 128 bits de entropia con CSPRNG, expiracion
+            con tiempo limitado. Para invitaciones (no reset de contrasena), 48 horas es
+            acceptable dado que el administrador que invita tiene control del proceso y la
+            escala es de 1-3 admins. Tokens nunca en texto plano en base de datos — almacenar
+            hash seguro.
+        - url: "https://www.rippling.com/blog/iam-best-practices"
+          resumen: >
+            IAM best practices: identidades externas aprovisionadas con invitaciones deben
+            pasar por un proceso de verificacion previo. Para plataformas de escala reducida,
+            el patron de invitacion por email de admin existente es apropiado y suficiente.
 
     - id: "HU-003"
-      titulo: "Registro inicial del atleta en la plataforma"
-      decision: "APROBADA"
+      titulo: "Completar registro de administrador mediante token de invitacion"
+      decision: "APROBADA_CON_CONDICIONES"
       observaciones: >
-        Sin cambios respecto a v1.0. La HU cubre correctamente el registro de Fase 1 del
-        atleta. CA-3 y CA-4 cubren HABEAS_DATA y TERMS_OF_SERVICE como checkboxes obligatorios
-        e independientes. CA-5 cubre registro inmutable. CA-6 cubre mensaje generico ante
-        duplicados. HEALTH_DATA_CONSENT NO se solicita en Fase 1 — diferido a EPICA-04 cuando
-        se recolectan datos sensibles de salud. Bajo Ley 1581/2012 art. 6 y Decreto 1377/2013,
-        el consentimiento para datos sensibles se requiere en el momento de su recoleccion.
-        Diseno legalmente correcto.
-      guardarrails_aplicables:
-        - ley: "Ley 1581 de 2012 + Decreto 1377 de 2013"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. HABEAS_DATA y TERMS_OF_SERVICE independientes. HEALTH_DATA_CONSENT diferido a EPICA-04."
-        - ley: "Circular SIC No. 2 de 2024"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. Principio de minimalidad: solo datos de identificacion en Fase 1."
-        - ley: "Ley 1273 de 2009"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-6 garantiza mensaje neutro ante duplicados."
-        - ley: "Ley 527 de 1999"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-5 establece registro inmutable con timestamp, version e identificador."
+        La HU es la mas completa de la epica en cobertura de criterios de aceptacion: cubre
+        el happy path, expiracion del token, uso ya consumido, y errores de validacion. La
+        nota de que el endpoint es publico pero requiere token valido es correcta y elimina
+        una posible ambiguedad. El flujo de autenticacion posterior usa el mecanismo estandar
+        de EPICA-01, lo que es correcto.
 
-    - id: "HU-004"
-      titulo: "Inicio de sesion en la plataforma"
-      decision: "APROBADA"
-      observaciones: >
-        PROMOVIDA a APROBADA (era APROBADA_CON_CONDICIONES). El humano resolvio el conflicto
-        agregando CA-4: bloqueo temporal por cuenta tras 5 intentos fallidos consecutivos
-        durante 15 minutos. CA-1 cubre acceso exitoso por rol. CA-2 cubre credenciales
-        incorrectas con mensaje generico anti-enumeracion. CA-3 cubre entrenador pendiente
-        (PENDING y REJECTED resultan en COACH_NOT_APPROVED 403). CA-4 cumple Ley 1273/2009
-        art. 269A y OWASP 2025 (umbral de 5 intentos dentro del rango recomendado 3-10,
-        bloqueo por cuenta no solo por IP). Los 4 criterios son verificables.
-      guardarrails_aplicables:
-        - ley: "Ley 1273 de 2009"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-4 establece bloqueo por cuenta (5 intentos, 15 min). Satisface OWASP 2025 y Ley 1273/2009."
-        - ley: "Ley 1581 de 2012"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. CA-2 garantiza mensaje generico (anti-enumeracion)."
-        - ley: "Circular SIC No. 2 de 2024"
-          aplica: true
-          cumple: true
-          accion_requerida: "Cumple. Solo datos necesarios para autenticacion."
-        - ley: "Ley 527 de 1999"
-          aplica: false
-          cumple: true
-          accion_requerida: "No aplica. El inicio de sesion no es un contrato bajo Ley 527."
+        Sin embargo, existe una condicion bloqueante y dos condiciones no bloqueantes:
 
-  conflictos_con_arquitecto:
-    - hu_afectada: "HU-004"
-      descripcion: >
-        Conflicto sobre la suficiencia del ThrottlerGuard global como medida de proteccion
-        contra fuerza bruta en el endpoint POST /auth/login.
-      resolucion: >
-        RESUELTO por el humano (2026-03-01). Decision: agregar bloqueo por cuenta
-        (5 intentos fallidos consecutivos, bloqueo temporal de 15 minutos). Se acepta
-        la posicion del Analista. Nuevo CA-4 agregado a HU-004 en epica_input.yaml.
-        El ThrottlerGuard global se mantiene como capa adicional de proteccion por IP,
-        pero el control principal es el bloqueo por cuenta.
+        CONDICION BLOQUEANTE (legal): La nota de la HU menciona que "el registro debe incluir
+        aceptaciones legales (TERMS_OF_SERVICE y HABEAS_DATA) igual que cualquier usuario",
+        pero no existe ningun criterio de aceptacion que lo verifique. Las notas no son
+        criterios verificables — el equipo de QA no puede probar una nota. Debe existir un
+        criterio de aceptacion explicito que exija el registro inmutable de TERMS_OF_SERVICE
+        y HABEAS_DATA en legal_acceptances con userId, documentVersion, ip, userAgent y
+        acceptedAt. Este criterio es la evidencia funcional del cumplimiento de Ley 1581/2012
+        y Ley 527/1999. Sin el, la HU esta legalmente incompleta.
+
+        CONDICION NO BLOQUEANTE 1 (seguridad, Ley 1273): La regla de negocio "cada token es
+        de uso unico" es correcta, y el criterio sobre "invitacion ya utilizada" lo verifica
+        despues del hecho. Sin embargo, no existe criterio que exija invalidacion atomica del
+        token en la misma transaccion que crea la cuenta. Sin invalidacion atomica, existe
+        un riesgo de race condition donde dos solicitudes concurrentes con el mismo token
+        podrian crear dos cuentas.
+
+        CONDICION NO BLOQUEANTE 2 (seguridad, Ley 1273): El criterio de errores de validacion
+        permite reintentos con datos corregidos, lo que es funcionalmente correcto. Sin
+        embargo, no limita la cantidad de intentos fallidos con un token valido. Sin este
+        limite, un atacante con un token interceptado podria iterar sobre distintas
+        combinaciones de datos personales.
+
+      guardarrails_aplicables:
+        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
+          aplica: true
+          cumple: "pendiente"
+          accion_requerida: >
+            Convertir la nota de aceptaciones legales en criterio de aceptacion verificable.
+            El criterio debe exigir: registro inmutable de TERMS_OF_SERVICE y HABEAS_DATA en
+            legal_acceptances, con userId, documentVersion, ip, userAgent y acceptedAt. El
+            consentimiento es explicito porque el usuario realiza la accion de completar el
+            registro (accion afirmativa, no pre-marcado). La finalidad (gestion de la
+            plataforma de entrenamiento deportivo) debe ser visible antes de confirmar el
+            registro. Condicion bloqueante — el Documentador no puede iniciar hasta que este
+            criterio quede en epica_input.yaml.
+
+        - ley: "Ley 1273/2009 — Seguridad de la informacion"
+          aplica: true
+          cumple: "pendiente"
+          accion_requerida: >
+            Agregar criterio que exija invalidacion atomica del token en la misma transaccion
+            que crea la cuenta (no solo verificar intentos posteriores). Evaluar criterio de
+            rate limiting por token para intentos fallidos de completar el registro. Ambas
+            son condiciones no bloqueantes.
+
+        - ley: "Ley 527/1999 — Validez de documentos digitales"
+          aplica: true
+          cumple: "pendiente"
+          accion_requerida: >
+            Aplica porque en esta HU se registra el consentimiento digital con valor legal
+            (TERMS_OF_SERVICE y HABEAS_DATA). Para cumplir Ley 527: (i) autenticidad se
+            garantiza con el token de invitacion valido como mecanismo de verificacion de
+            identidad; (ii) integridad se garantiza con el registro inmutable en
+            legal_acceptances sin UPDATE ni DELETE; (iii) disponibilidad se garantiza con
+            la persistencia en base de datos. Estos tres elementos solo pueden verificarse
+            si existe el criterio de aceptacion de la condicion bloqueante de Ley 1581.
+            Queda pendiente hasta que dicha condicion se resuelva.
+
+      fuentes_consultadas:
+        - url: "https://www.suin-juriscol.gov.co/viewDocument.asp?ruta=Leyes/1684507"
+          resumen: >
+            Ley 1581 de 2012: la autorizacion para tratamiento de datos debe ser previa,
+            expresa e informada. En el registro por token, la accion de completar el
+            formulario y confirmar constituye el consentimiento expreso. Debe quedar
+            registrado en legal_acceptances con los campos obligatorios.
+        - url: "http://www.secretariasenado.gov.co/senado/basedoc/ley_0527_1999.html"
+          resumen: >
+            Ley 527 de 1999: los mensajes de datos tienen validez legal si garantizan
+            autenticidad, integridad y disponibilidad. El registro inmutable en base de datos
+            con timestamp y datos del solicitante cumple estos tres requisitos.
+        - url: "https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html"
+          resumen: >
+            OWASP: tokens de invitacion deben ser de uso unico con invalidacion inmediata al
+            ser consumidos. El sistema debe prevenir race conditions en el consumo del token
+            mediante transacciones atomicas.
+
+  conflictos_con_arquitecto: []
 
   escalamiento_requerido: false
+  motivo_escalamiento: ""
 
-  motivo_escalamiento: >
-    Resuelto. El humano decidio agregar bloqueo por cuenta (5 intentos, 15 min) como
-    CA-4 de HU-004. Conflicto cerrado. El flujo puede continuar.
+  condiciones_bloqueantes_resumen:
+    - hu: "HU-001"
+      ley: "Ley 1581/2012 + Ley 527/1999"
+      condicion: >
+        Agregar criterio de aceptacion que exija el registro inmutable de TERMS_OF_SERVICE y
+        HABEAS_DATA en legal_acceptances al crear el administrador por seed, con documentVersion,
+        ip del entorno de despliegue y acceptedAt. La restriccion de la epica lo declara
+        obligatorio pero ningun criterio de la HU lo verifica.
 
-  notas_adicionales:
-    - "RESUELTO v2.0: HU-001 promovida a APROBADA. Condiciones de v1.0 resueltas en criterios de aceptacion."
-    - "RESUELTO v2.0: HU-002 promovida a APROBADA. Condiciones de v1.0 resueltas."
-    - "RESUELTO: HU-003 APROBADA. HEALTH_DATA_CONSENT diferido a EPICA-04."
-    - "RESUELTO: entrenador REJECTED en login recibe COACH_NOT_APPROVED (403)."
-    - "RESUELTO v2.1: HU-004 promovida a APROBADA. Humano agrego CA-4: bloqueo por cuenta (5 intentos, 15 min). Conflicto con Arquitecto cerrado."
-    - "PENDIENTE: HU adicional para recuperacion de contrasena. Definir antes de cerrar la epica."
+    - hu: "HU-003"
+      ley: "Ley 1581/2012 + Ley 527/1999"
+      condicion: >
+        Convertir la nota de aceptaciones legales en criterio de aceptacion verificable: registro
+        inmutable de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con userId,
+        documentVersion, ip, userAgent y acceptedAt. Las notas no son criterios verificables
+        por el equipo de QA.
+
+  condiciones_no_bloqueantes_resumen:
+    - hu: "HU-001"
+      ley: "Ley 1273/2009"
+      condicion: >
+        Agregar criterio de trazabilidad de auditoria para la creacion del administrador fuera
+        del pipeline HTTP (el AuditInterceptor global no cubre el seed).
+
+    - hu: "HU-002"
+      ley: "funcional"
+      condicion: >
+        Definir el comportamiento cuando existe una invitacion expirada para el mismo correo
+        (debe poder reemplazarse con una nueva invitacion).
+
+    - hu: "HU-002"
+      ley: "Ley 1273/2009"
+      condicion: >
+        Agregar regla de negocio que exija generacion del token con aleatoriedad criptografica
+        (CSPRNG, minimo 128 bits de entropia) segun OWASP Forgot Password Cheat Sheet.
+
+    - hu: "HU-002"
+      ley: "Ley 1273/2009"
+      condicion: >
+        Agregar criterio de rate limiting en el endpoint de envio de invitaciones para prevenir
+        spam y enumeracion de correos existentes.
+
+    - hu: "HU-003"
+      ley: "Ley 1273/2009"
+      condicion: >
+        Agregar criterio que exija invalidacion atomica del token en la misma transaccion que
+        crea la cuenta, para prevenir race conditions en el consumo concurrente del token.
+
+    - hu: "HU-003"
+      ley: "Ley 1273/2009"
+      condicion: >
+        Evaluar criterio de rate limiting por token de invitacion para intentos fallidos de
+        completar el registro, previniendo iteracion sobre datos personales con token interceptado.
+
+  notas_finales: >
+    El patron arquitectonico elegido (Seed + Invitacion por email) es correcto y alineado con
+    las mejores practicas de IAM para plataformas de escala reducida. La cadena de dependencias
+    HU-001 -> HU-002 -> HU-003 es coherente y no presenta contradicciones internas. El diseno
+    de token de uso unico con expiracion configurable es consistente con OWASP. Las condiciones
+    bloqueantes son ajustes menores a los criterios de aceptacion existentes, no cambios de
+    alcance ni de objetivo. Una vez el Product Owner incorpore los criterios faltantes en
+    epica_input.yaml, las tres HU pueden considerarse listas para planificacion tecnica.
+    El Documentador NO debe iniciar hasta que las dos condiciones bloqueantes esten resueltas.
