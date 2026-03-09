@@ -54,6 +54,8 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
 | `/revisar-codigo "tarea"` | Re-ejecuta el LT con instrucciones especificas | Tarea puntual: revisar solo patrones de auth, etc. |
 | `/commit` | Crea commits estandarizados con Conventional Commits, auto-staging y tags | Cualquier commit del proyecto — epicas o generales |
 | `/commit checkpoint 1` | Commit directo de Checkpoint 1 con staging y tag automaticos | Aprobaste el CHECKPOINT 1 y quieres commitear |
+| `/actualizar-docs` | Revisa cambios recientes y propone actualizaciones a CLAUDE.md, rules, skills, memory y guia | Despues de un hito, refactor o cambio estructural |
+| `/actualizar-docs "contexto"` | Igual pero con contexto especifico de que cambio | Cuando quieres focalizar la revision |
 
 **Ejemplo:**
 ```
@@ -95,22 +97,30 @@ El desarrollador humano actua como director: decide que se construye, aprueba la
    - **Aprobar:** Commitea y ejecuta la migracion de Prisma:
      ```bash
      /commit checkpoint 1
-     pnpm prisma migrate dev --name epica-xx-descripcion
-     pnpm prisma generate
      ```
+
+6. **Migracion Prisma.** Despues del commit, aplicar la migracion desde la **raiz del proyecto**:
+   ```bash
+   cd ~/projects/fitmess/fitmess-api
+   pnpm prisma migrate dev --name epica-xx-descripcion
+   pnpm prisma generate
+   ```
+   - `migrate dev` crea la migracion SQL y la aplica a la base de datos local
+   - `generate` regenera el cliente Prisma con los tipos nuevos (modelos, enums)
+   - **IMPORTANTE:** Estos comandos DEBEN ejecutarse desde la raiz del proyecto (donde esta `prisma/schema.prisma`). Si se ejecutan desde otro directorio (ej: `outputs/`), Prisma no encuentra el schema y falla con `Could not find Prisma Schema`
 
 ### Fase 2 — Implementacion
 
-6. **Lanzar implementacion.** Escribe `/implementar-epica`. El sistema ejecuta automaticamente:
+7. **Lanzar implementacion.** Escribe `/implementar-epica`. El sistema ejecuta automaticamente:
    - Desarrollador implementa services, completa controllers, registra modules. Verifica compilacion con `tsc --noEmit` antes de entregar
    - QA escribe tests, valida cobertura (80% dominio, 70% adaptadores), verifica compilacion con `pnpm run build`, revisa seguridad
    - Lider Tecnico revisa linting, patrones y consistencia con el contrato
 
-7. **Ciclos de correccion.** Si hay errores, el sistema repite automaticamente (max 3 ciclos). Si llega al ciclo 3 sin resolucion, escala al humano.
+8. **Ciclos de correccion.** Si hay errores, el sistema repite automaticamente (max 3 ciclos). Si llega al ciclo 3 sin resolucion, escala al humano.
 
-8. **Revisar CHECKPOINT 2.** Cuando el LT aprueba, recibes un resumen final.
+9. **Revisar CHECKPOINT 2.** Cuando el LT aprueba, recibes un resumen final.
 
-9. **Commit y push.** Si todo esta bien:
+10. **Commit y push.** Si todo esta bien:
    ```bash
    /commit checkpoint 2
    git push
@@ -225,5 +235,6 @@ pnpm prisma migrate dev                  → Aplica migracion
 /validar-qa                              → Re-validar QA standalone (tests, cobertura, seguridad)
 /revisar-codigo                          → Re-revisar codigo standalone (linting, patrones, contrato)
 /commit                                  → Commit estandarizado (Conventional Commits + tags)
+/actualizar-docs                         → Revisa cambios y propone actualizaciones a docs
 git push                                 → Deploy
 ```

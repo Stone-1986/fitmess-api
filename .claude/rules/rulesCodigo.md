@@ -44,7 +44,7 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 
 - Cada operación define DTOs separados: `CreateXxxDto`, `UpdateXxxDto`, `XxxResponseDto`
 - Los DTOs de respuesta NUNCA exponen campos internos: `archivedAt`, passwords, tokens, refresh tokens, datos sensibles de salud
-- Los validadores personalizados van en `src/modules/[module]/validators/`
+- Los validadores personalizados van en `src/modules/[module]/validators/` o en `src/modules/[module]/[feature]/validators/` para módulos multi-feature
 - NUNCA duplicar la lógica de validación entre DTOs y services — el DTO valida estructura, el service valida negocio
 - Los DTOs SIEMPRE usan decoradores de `class-validator` para validación y `class-transformer` para transformación
 

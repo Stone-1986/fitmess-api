@@ -24,6 +24,34 @@ src/modules/[module-name]/
   [module-name].service.spec.ts
 ```
 
+### Multi-feature modules (feature folders)
+
+Cuando un módulo crece con múltiples features (ej: auth tiene core, coach-requests, admin-invitations), se organiza en feature folders. El `@Module()` sigue siendo único — los subfolders NO son módulos NestJS.
+
+```
+src/modules/[module-name]/
+  [module-name].module.ts           ← único @Module(), importa desde subfolders
+  core/                             ← feature principal
+    [module-name].controller.ts
+    [module-name].service.ts
+    dto/
+  [feature-name]/                   ← feature adicional
+    [feature-name].controller.ts
+    [feature-name].service.ts
+    dto/
+  shared/                           ← compartido entre features
+    decorators/
+    guards/
+    strategies/
+```
+
+**Reglas:**
+- Los subfolders NO son `@Module()` — son solo organización de archivos
+- Los imports dentro del mismo módulo son directos (no vía eventos)
+- Cada feature tiene su propio `dto/` subfolder
+- El folder `shared/` contiene guards, decorators y strategies usados por múltiples features
+- Los specs viven junto a su archivo fuente dentro de cada feature
+
 ---
 
 ## 2. Controller THIN — template

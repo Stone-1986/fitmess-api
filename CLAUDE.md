@@ -90,6 +90,7 @@ Load the relevant skill when working on specialized tasks. Skills provide detail
 | `validar-qa` | Standalone QA re-validation: tests, coverage, linting, security scan | Active |
 | `revisar-codigo` | Standalone Tech Lead code review: linting, patterns, contract consistency | Active |
 | `commit` | Standardized git commits with Conventional Commits, auto-staging, and epic tags | Active |
+| `actualizar-docs` | Review recent changes and propose targeted updates to CLAUDE.md, rules, skills, memory, and usage guide | Active |
 
 ---
 
@@ -97,7 +98,7 @@ Load the relevant skill when working on specialized tasks. Skills provide detail
 
 ```
 src/modules/
-  auth/           → EPICA-01
+  auth/           → EPICA-01 + EPICA-09 (multi-feature: core, coach-requests, admin-invitations)
   exercises/      → EPICA-02
   plans/          → EPICA-03
   subscriptions/  → EPICA-04

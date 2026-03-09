@@ -53,6 +53,29 @@ test/
   [module-name].e2e-spec.ts         <- Tests e2e con supertest
 ```
 
+### Multi-feature modules (feature folders)
+
+En módulos con feature folders, los specs viven junto a su archivo fuente dentro de cada feature:
+
+```
+src/modules/auth/
+  core/
+    auth.controller.spec.ts         <- Specs del controller core
+    auth.service.spec.ts            <- Specs del service core
+  coach-requests/
+    coach-requests.controller.spec.ts
+    coach-requests.service.spec.ts
+  admin-invitations/
+    admin-invitations.controller.spec.ts
+    admin-invitations.service.spec.ts
+  shared/
+    guards/
+      jwt-auth.guard.spec.ts
+      roles.guard.spec.ts
+    strategies/
+      jwt.strategy.spec.ts
+```
+
 ---
 
 ## 4. Convenciones

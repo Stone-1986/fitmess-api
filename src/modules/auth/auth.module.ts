@@ -3,15 +3,17 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import type { StringValue } from 'ms';
-import { AuthService } from './auth.service.js';
-import { CoachRequestsService } from './coach-requests.service.js';
-import { AuthController } from './auth.controller.js';
-import { CoachRequestsController } from './coach-requests.controller.js';
-import { LocalStrategy } from './strategies/local.strategy.js';
-import { JwtStrategy } from './strategies/jwt.strategy.js';
-import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
-import { LocalAuthGuard } from './guards/local-auth.guard.js';
-import { RolesGuard } from './guards/roles.guard.js';
+import { AuthService } from './core/auth.service.js';
+import { CoachRequestsService } from './coach-requests/coach-requests.service.js';
+import { AdminInvitationsService } from './admin-invitations/admin-invitations.service.js';
+import { AuthController } from './core/auth.controller.js';
+import { CoachRequestsController } from './coach-requests/coach-requests.controller.js';
+import { AdminInvitationsController } from './admin-invitations/admin-invitations.controller.js';
+import { LocalStrategy } from './shared/strategies/local.strategy.js';
+import { JwtStrategy } from './shared/strategies/jwt.strategy.js';
+import { JwtAuthGuard } from './shared/guards/jwt-auth.guard.js';
+import { LocalAuthGuard } from './shared/guards/local-auth.guard.js';
+import { RolesGuard } from './shared/guards/roles.guard.js';
 
 @Module({
   imports: [
@@ -30,10 +32,15 @@ import { RolesGuard } from './guards/roles.guard.js';
       }),
     }),
   ],
-  controllers: [AuthController, CoachRequestsController],
+  controllers: [
+    AuthController,
+    CoachRequestsController,
+    AdminInvitationsController,
+  ],
   providers: [
     AuthService,
     CoachRequestsService,
+    AdminInvitationsService,
     LocalStrategy,
     JwtStrategy,
     JwtAuthGuard,

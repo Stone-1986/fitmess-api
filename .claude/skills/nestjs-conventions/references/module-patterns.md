@@ -198,7 +198,7 @@ El objeto `user` es inyectado en `request.user` por Passport después de validar
         EventEmitterModule.forRoot(),
 
         // --- Módulos de dominio (orden alfabético) ---
-        AuthModule,
+        AuthModule,                // multi-feature: core, coach-requests, admin-invitations
         ExercisesModule,
         PlansModule,
         SubscriptionsModule,
