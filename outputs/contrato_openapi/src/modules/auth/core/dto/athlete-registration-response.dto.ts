@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { UserRole } from '../enums/user-role.enum';
-import { IdentificationType } from '../enums/identification-type.enum';
+import {
+  UserRole,
+  IdentificationType,
+} from '../../../../../generated/prisma/index.js';
 
 /**
  * DTO de respuesta para el registro exitoso de un atleta (HU-003).

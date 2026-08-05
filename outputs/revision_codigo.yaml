@@ -1,3 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTA POSTERIOR (2026-08-05)
+#
+# Esta revision quedo en estado RECHAZADO, pero la epica se aprobo, taggeo
+# (EPICA-09/checkpoint-2) y commiteo el 2026-03-08.
+#
+# Que paso: el unico bloqueo eran errores de Prettier. El orquestador ejecuto
+# `pnpm run format` mas la eliminacion de un import no usado, verifico lint en 0
+# errores y presento el CHECKPOINT 2 sin re-lanzar la cadena. Nadie reescribio
+# este archivo, asi que el estado persistido quedo contradiciendo la realidad.
+#
+# No fue un caso aislado: el mismo atajo se aplico en EPICA-01 (ver
+# outputs/execution-log.md, Fase 2 ciclo 2). Era comportamiento no documentado.
+#
+# Correccion del modelo: `implementar-epica/SKILL.md` ahora define el Paso 4.5
+# — ruta rapida de correcciones triviales con lista blanca cerrada y obligacion
+# de re-correr los gates Y reescribir `estado:` en los dos artefactos antes de
+# presentar el CHECKPOINT 2.
+#
+# El bloque `reparacion_retroactiva` al final de este archivo documenta la
+# verificacion real ejecutada el 2026-08-05.
+# ─────────────────────────────────────────────────────────────────────────────
+
 revision_codigo:
   fecha: "2026-03-08"
   ciclo: 1

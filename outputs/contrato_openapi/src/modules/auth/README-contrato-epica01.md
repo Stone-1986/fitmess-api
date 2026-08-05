@@ -3,6 +3,13 @@
 Generado por el Documentador el 2026-03-01.
 Fuente de verdad: `outputs/plan_de_implementacion.yaml` + `outputs/reporte_validacion_negocio.yaml`.
 
+> **NOTA DE MIGRACIÓN (2026-08-05).** Los archivos se movieron del layout plano original
+> (`contrato_openapi/dto/`, `contrato_openapi/enums/`) al layout canónico que espeja `src/`:
+> `contrato_openapi/src/modules/auth/core/` y `.../auth/coach-requests/`.
+> Las copias locales de enums se eliminaron; los imports ahora apuntan a `generated/prisma`,
+> igual que el código real (`rulesCodigo.md § Enums`).
+> Las rutas que aparecen más abajo en este documento reflejan la estructura anterior.
+
 ---
 
 ## Resumen de endpoints

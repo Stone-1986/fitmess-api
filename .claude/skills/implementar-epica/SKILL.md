@@ -28,6 +28,14 @@ Si falta algún prerequisito, informar al humano y no continuar.
 
 ## Execution Log
 
+**Leerlo ANTES de arrancar el Paso 1.** El log no es solo un artefacto de salida: es el único lugar donde viven las decisiones rechazadas, los conflictos que escalaron al humano, las correcciones aplicadas fuera de ciclo y los hallazgos abiertos de épicas anteriores. Nada de eso está en el plan ni en el contrato.
+
+Al leerlo, extraer y tener presente durante todo el flujo:
+
+- **Decisiones ya tomadas por el humano** — no volver a proponer lo que ya se descartó
+- **Hallazgos abiertos** (sección `## Hallazgos abiertos`) — si esta épica toca código relacionado con uno, mencionarlo al humano en el CHECKPOINT 2
+- **Correcciones triviales aplicadas en épicas previas** — si el mismo error se repite, es señal de que falta una regla, no de que haya que volver a parcharlo
+
 Continuar escribiendo en `outputs/execution-log.md` (creado en Fase 1).
 
 **Al inicio de cada ciclo de Fase 2:**
@@ -99,9 +107,38 @@ Esperar a que termine.
 
 **Log:** Agregar fila 2 (qa) con cobertura y estado.
 
+### Paso 2.5 — Verificar los gates (obligatorio)
+
+**El orquestador ejecuta los gates directamente. No se delega esta verificación.**
+
+Ningún agente califica su propio trabajo: el QA escribe los tests, mide la cobertura de esos mismos tests y reporta si alcanzó el target. El Líder Técnico no tiene Bash y no puede contrastar nada. Sin este paso, la decisión final del flujo descansa en números autorreportados.
+
+Ejecutar los cuatro comandos y **guardar la salida cruda**:
+
+```bash
+pnpm run test:cov 2>&1      # timeout 300000
+pnpm run lint 2>&1
+npx prettier --check "src/**/*.ts" 2>&1
+pnpm run build 2>&1
+```
+
+Comparar con lo que declara `outputs/reporte_qa.yaml`:
+
+| Campo del reporte | Contrastar contra |
+|---|---|
+| `linting.eslint` | conteo de errores (no warnings) de `pnpm run lint` |
+| `linting.prettier` | salida de `prettier --check` |
+| `cobertura.dominio.porcentaje` | tabla de `test:cov` (services) |
+| `cobertura.adaptadores.porcentaje` | tabla de `test:cov` (controllers, guards, listeners) |
+| `errores_criticos` de tipo `error_de_compilacion` | salida de `pnpm run build` |
+
+**Si hay discrepancia entre el reporte y la salida real:** el reporte del QA es inválido. Relanzar el QA una vez con la discrepancia explícita en el prompt. Si vuelve a discrepar, **escalar al humano** — es una falla del agente, no del código, y no se resuelve con ciclos de corrección.
+
+**Log:** Agregar fila 2.5 (orquestador) con el resultado de los gates y si el reporte del QA coincidió.
+
 ### Paso 3 — Lanzar Líder Técnico
 
-Usar el Task tool para lanzar el Líder Técnico:
+Usar el Task tool para lanzar el Líder Técnico. **Incluir la salida cruda del Paso 2.5 en el prompt** — el LT no tiene Bash y esta es su única fuente verificada:
 
 **Agente: lider-tecnico**
 ```
@@ -111,6 +148,20 @@ Lee estos archivos:
 - outputs/reporte_qa.yaml (reporte del QA)
 - src/ (código implementado)
 - outputs/plan_de_implementacion.yaml (referencia del contrato)
+- outputs/execution-log.md (decisiones previas y hallazgos abiertos)
+
+SALIDA VERIFICADA DE LOS GATES (ejecutada por el orquestador, no por el QA):
+--- pnpm run test:cov ---
+[pegar salida real]
+--- pnpm run lint ---
+[pegar salida real]
+--- npx prettier --check ---
+[pegar salida real]
+--- pnpm run build ---
+[pegar salida real]
+
+Estos números son la fuente de verdad. Si el reporte del QA los contradice,
+prevalece esta salida y se documenta la discrepancia en tu revisión.
 
 Analiza linting, cobertura, patrones, consistencia código↔contrato y vulnerabilidades.
 Escribe tu revisión en outputs/revision_codigo.yaml."
@@ -145,6 +196,34 @@ Leer `outputs/revision_codigo.yaml` y evaluar:
 - Informar al humano que se requieren cambios en el contrato o plan
 - El humano debe re-ejecutar `/planificar-epica` con las correcciones
 - **Log:** Agregar fila 4 con estado DETENIDO — requiere cambios en contrato/plan
+
+### Paso 4.5 — Correcciones triviales (ruta rápida)
+
+Girar un ciclo completo de tres agentes por un `pnpm run format` es desperdicio. Esta ruta lo evita, pero es **cerrada y verificable** — no queda a criterio del momento.
+
+**Solo aplica si TODOS los rechazos del LT están en esta lista blanca:**
+
+| Permitido | No permitido |
+|---|---|
+| Errores de Prettier / formato | Cualquier cambio de lógica |
+| Imports o variables no usadas | Cobertura por debajo del target |
+| Orden de imports | Violaciones de patrón |
+| Comentario o typo en un mensaje | Errores de compilación |
+| — | Vulnerabilidades de cualquier severidad |
+| — | Inconsistencias código↔contrato |
+
+Si **un solo** rechazo cae fuera de la lista blanca, la ruta rápida no aplica: se incrementa el ciclo y vuelve al Paso 1 con el Desarrollador.
+
+**Procedimiento obligatorio (los cuatro pasos, sin omitir ninguno):**
+
+1. Aplicar la corrección (`pnpm run format`, eliminar el import, etc.)
+2. **Re-ejecutar los cuatro gates del Paso 2.5.** Si alguno falla, la ruta rápida se aborta: incrementar ciclo y volver al Paso 1
+3. **Reescribir `estado:` en los DOS artefactos** — `outputs/reporte_qa.yaml` y `outputs/revision_codigo.yaml` — a `"APROBADO"`, vaciar `errores_criticos` / `instrucciones_desarrollador`, y agregar en `razonamiento` qué se corrigió y que fue por ruta rápida
+4. **Log:** fila con agente `orquestador`, estado `CORRECCION_TRIVIAL`, y el detalle de qué se tocó
+
+> **El paso 3 no es opcional.** Si se omite, el CHECKPOINT 2 se presenta como APROBADO mientras los dos YAML persistidos dicen `RECHAZADO`. Eso ya ocurrió en EPICA-01 y EPICA-09: el commit de `EPICA-09/checkpoint-2` contiene ambos artefactos en estado `RECHAZADO` sobre código aprobado y taggeado. Los artefactos son la salida formal del sistema — si contradicen la realidad, el sistema miente.
+
+**Antes de presentar el CHECKPOINT 2**, verificar siempre que `outputs/reporte_qa.yaml` y `outputs/revision_codigo.yaml` digan ambos `estado: "APROBADO"`. Si alguno dice otra cosa, el flujo no está completo.
 
 ## Gestión de Ciclos
 

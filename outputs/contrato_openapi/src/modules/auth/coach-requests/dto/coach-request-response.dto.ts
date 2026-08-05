@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CoachRequestStatus } from '../enums/coach-request-status.enum';
+import { CoachRequestStatus } from '../../../../../generated/prisma/index.js';
 
 /**
  * DTO de respuesta ligera para operaciones sobre CoachRequest (HU-001, HU-002).

@@ -14,7 +14,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CoachRequestStatus } from '../enums/coach-request-status.enum';
+import { CoachRequestStatus } from '../../../../../generated/prisma/index.js';
 import { IsOnOrAfter } from '../validators/is-on-or-after.validator';
 
 /**

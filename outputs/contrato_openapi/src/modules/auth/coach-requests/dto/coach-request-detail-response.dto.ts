@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CoachRequestStatus } from '../enums/coach-request-status.enum';
-import { IdentificationType } from '../enums/identification-type.enum';
+import {
+  CoachRequestStatus,
+  IdentificationType,
+} from '../../../../../generated/prisma/index.js';
 
 /**
  * DTO de respuesta con detalle completo de una solicitud de entrenador (HU-002).

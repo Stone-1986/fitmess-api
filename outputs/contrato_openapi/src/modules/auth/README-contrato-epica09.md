@@ -3,6 +3,13 @@
 Generado por el Documentador el 2026-03-08.
 Fuente de verdad: `outputs/plan_de_implementacion.yaml` + `outputs/reporte_validacion_negocio.yaml`.
 
+> **NOTA DE MIGRACIÓN (2026-08-05).** Los archivos de esta épica se movieron a
+> `contrato_openapi/src/modules/auth/admin-invitations/` (layout canónico que espeja `src/`).
+> Además se eliminaron los DTOs de EPICA-01 que este Documentador había regenerado desde su
+> propio plan: estaban empobrecidos (a `athlete-registration-response.dto.ts` le faltaban
+> `name`, `role` e `identificationType`) y contradecían el código ya en producción.
+> `documentador.md` ahora prohíbe regenerar contrato de endpoints ajenos al plan propio.
+
 ---
 
 ## Resumen de endpoints

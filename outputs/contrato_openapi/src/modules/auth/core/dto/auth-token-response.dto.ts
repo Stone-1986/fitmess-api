@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { UserRole } from '../enums/user-role.enum';
+import { UserRole } from '../../../../../generated/prisma/index.js';
 
 /**
  * DTO anidado que representa los datos básicos del usuario autenticado.

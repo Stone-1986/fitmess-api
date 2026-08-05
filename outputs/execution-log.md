@@ -56,3 +56,45 @@
 | 1 | Implementación | desarrollador | OK | src/modules/auth/ + src/modules/notifications/ + prisma/seed.ts | NotificationsModule (EmailService + listener), AdminInvitationsService + Controller, 6 DTOs admin, registerAdmin en AuthService/Controller, seed.ts, 2 BusinessErrors nuevos. |
 | 2 | QA | qa | OK | reporte_qa.yaml + 6 spec files | 149 tests PASS. Build: OK. Lint: 9 errores Prettier en 5 archivos. Cobertura: 99% dominio, 80% adaptadores. 17/17 criterios técnicos. 0 vulnerabilidades altas. Estado: RECHAZADO (solo formato). |
 | 3 | Revisión de código | lider-tecnico | RECHAZADO → OK | revision_codigo.yaml | LT confirmó: único bloqueo Prettier. Patrones OK, consistencia contrato OK, 0 violaciones. Orquestador aplicó correcciones triviales: pnpm run format + 1 import no usado. Lint: 0 errores. Tests: 149 pass. Estado final: APROBADO. |
+
+---
+
+# Mantenimiento fuera del flujo de épicas
+
+Cambios aplicados directamente en sesión con el humano, sin pasar por la cadena
+Desarrollador → QA → Líder Técnico. Se registran aquí para que el log sea el
+histórico completo del proyecto y no solo de las épicas. Los gates de calidad
+(build, tsc, lint, prettier, cobertura) se aplican igual y se documentan abajo.
+
+## 2026-08-05 — Rango de fechas en búsqueda de solicitudes (EPICA-01, HU-002)
+
+| # | Paso | Responsable | Estado | Output | Notas |
+|---|------|-------------|--------|--------|-------|
+| 1 | Revisión de API | humano + Claude | OK | — | El humano propuso unificar los endpoints de búsqueda y agregar filtros. Se descartó fusionar `GET /coach-requests/:id` en `POST /search`: DTOs distintos (Detail expone phone, dateOfBirth, planDescription que Summary no), pérdida del 404 semántico y de la cacheabilidad del GET. Devolver el detalle en listas paginadas violaría minimización de datos (Ley 1581/2012 art. 4c). Los filtros propuestos (email, identificationNumber, createdAt) ya existían. |
+| 2 | Hallazgo | Claude | BUG | — | `createdAt` se resolvía sobre el día UTC (`setUTCHours` sobre `new Date('YYYY-MM-DD')`). Un admin en Colombia (UTC-5) no veía las solicitudes creadas después de las 19:00 hora local: en UTC ya pertenecían al día siguiente. Faltaban resultados en silencio. |
+| 3 | Corrección | humano + Claude | OK | `coach-requests/` (6 archivos), `contrato_openapi/` (2 DTOs) | `createdAt` → `createdAtFrom` / `createdAtTo`, opcionales e independientes, resueltos con offset fijo `-05:00` (Colombia no observa DST). Nuevo `@IsOnOrAfter` en `coach-requests/validators/`: rango invertido responde 400 en vez de lista vacía. Formato restringido a `YYYY-MM-DD` porque el service compone la hora sobre el valor. |
+| 4 | Contrato | humano + Claude | OK | `contrato_openapi/dto/` + `contrato_openapi/src/modules/auth/dto/` | Ambas copias del DTO actualizadas (EPICA-01 y EPICA-09) + descripción de `@ApiOperation` en el controller. |
+| 5 | Verificación | humano + Claude | OK | — | 162 tests PASS (antes 149; +5 en service asertando el `where` construido, +9 de DTO). Build: OK. `tsc --noEmit`: OK. Lint: 0 errores (32 warnings preexistentes). Prettier: OK. Cobertura: 94.38% global · coach-requests 98.43% · validators 100%. |
+| 6 | Commit | humano | OK | `4672658` | `fix(auth): corregir zona horaria y soportar rango de fechas`. BREAKING CHANGE: con `forbidNonWhitelisted: true` activo, los clientes que envíen `createdAt` reciben 400. |
+
+## 2026-08-05 — Revisión crítica del modelo de implementación
+
+Disparada por el humano al detectar que `implementar-epica` exige que el execution-log exista pero nunca lo lee. La revisión encontró tres problemas más graves que ese.
+
+| # | Hallazgo | Evidencia | Corrección |
+|---|----------|-----------|------------|
+| 1 | Los artefactos de la épica aprobada dicen `RECHAZADO`. El commit taggeado `EPICA-09/checkpoint-2` contiene `reporte_qa.yaml:342` y `revision_codigo.yaml:196` ambos en `estado: "RECHAZADO"` sobre código aprobado. | Causa: el orquestador aplicó las correcciones triviales y siguió sin re-lanzar QA/LT ni reescribir los YAML. | Nuevo **Paso 4.5** en `implementar-epica`: lista blanca cerrada de correcciones triviales + obligación de re-correr gates y reescribir `estado:` en ambos artefactos. Verificación explícita antes del CHECKPOINT 2. |
+| 2 | El último gate no puede verificar nada. El LT no tiene Bash (`lider-tecnico.md:257`) y decide sobre números que el QA se autorreporta — el mismo agente escribe los tests, mide su cobertura y declara si pasó. | El prompt del QA tiene ~15 líneas defensivas (`NUNCA escribir PENDIENTE_EJECUCION_REAL`) y existe el commit `ea08b65` "reforzar ejecución bash del QA": el sistema ya falló por aquí. | Nuevo **Paso 2.5**: el orquestador ejecuta `test:cov`, `lint`, `prettier --check` y `build`, contrasta contra el YAML del QA y pasa la salida cruda al LT en el prompt. Discrepancia → QA inválido, relanzar una vez, luego escalar. |
+| 3 | El orquestador hacía de desarrollador sin que estuviera escrito. Ocurrió en las dos épicas (log líneas 32 y 58); `implementar-epica` no lo mencionaba. | — | Formalizado en el Paso 4.5 con lista blanca cerrada. |
+| 4 | El execution-log era de solo escritura (hallazgo original del humano). | `planificar-epica:28` lo crea, `implementar-epica:25` verifica que exista, `:31` sigue escribiendo. Ningún agente lo lee. | Ahora es input: el orquestador lo lee antes del Paso 1 y el LT lo tiene en su lista de lectura, con instrucción de detectar errores que se repiten entre épicas. |
+| 5 | El contrato se bifurcó en dos layouts **y el segundo estaba degradado**. El Documentador de EPICA-09 regeneró los DTOs de EPICA-01 desde su propio plan: los 13 archivos duplicados diferían y `athlete-registration-response.dto.ts` había perdido `name`, `role` e `identificationType` (33 líneas vs 75). | Verificado contra `src/modules/auth/core/dto/athlete-registration-response.dto.ts`, que tiene los 9 campos del layout original. | Layout canónico único: `contrato_openapi/src/modules/[module]/[feature]/` espejando `src/`. Migrados 22 archivos conservando el contenido correcto, eliminadas las copias degradadas y los enums locales (imports → `generated/prisma`). `documentador.md` ahora prohíbe regenerar contrato ajeno al plan propio. |
+
+Verificación tras los cambios: build OK, 162 tests PASS. `outputs/` está excluido de ambos tsconfig, así que la reorganización del contrato no afecta compilación.
+
+## Hallazgos abiertos
+
+Detectados fuera del flujo de agentes y aún sin resolver.
+
+| # | Hallazgo | Detectado | Severidad | Estado |
+|---|----------|-----------|-----------|--------|
+| 1 | `AuditLog` está definido en `prisma/schema.prisma:121` y su tabla existe desde la migración de EPICA-01, pero **ningún archivo de `src/` escribe en ella** — la tabla está vacía. Sus campos (`method`, `url`, `statusCode`, `duration`, `correlationId`) son de nivel HTTP: fueron pensados para un interceptor global que nunca se implementó. Impacto: EPICA-01 es "Gestión de Acceso y Cumplimiento Legal" y no hay rastro de quién consulta datos personales. Nota adicional: `POST /coach-requests/search` permite buscar por `identificationNumber` exacto; como los criterios viajan en el body, un interceptor genérico registraría la llamada pero no por qué documento se buscó. | 2026-08-05 | Media | ABIERTO |

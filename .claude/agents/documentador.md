@@ -41,16 +41,38 @@ Dos documentos:
 
 ## Output Esperado
 
-Archivos TypeScript con decoradores Swagger que constituyen el contrato OpenAPI:
+Archivos TypeScript con decoradores Swagger que constituyen el contrato OpenAPI.
+
+### Ruta canónica — única y obligatoria
+
+El contrato **espeja la estructura real de `src/`**, incluyendo feature folders cuando el módulo los tenga:
 
 ```
-src/modules/[module]/
-  [module].controller.ts          ← Controller con decoradores completos (stubs)
+outputs/contrato_openapi/src/modules/[module]/[feature]/
+  [feature].controller.ts         ← Controller con decoradores completos (stubs)
   dto/
     create-[entity].dto.ts        ← DTO de entrada con @ApiProperty y validadores
     update-[entity].dto.ts        ← DTO de actualización
     [entity]-response.dto.ts      ← DTO de respuesta (sin campos internos)
 ```
+
+Ejemplo real: el módulo `auth` tiene feature folders, así que su contrato vive en
+`outputs/contrato_openapi/src/modules/auth/core/`, `.../auth/coach-requests/` y
+`.../auth/admin-invitations/` — nunca en una carpeta plana en la raíz de `contrato_openapi/`.
+
+**Antes de escribir, inspeccionar `src/modules/[module]/` y replicar su estructura.** Si el módulo no existe todavía, replicar la estructura que el plan define.
+
+### Enums
+
+NUNCA generar copias locales de enums que existan en el schema de Prisma. Importarlos desde `generated/prisma`, igual que el código real (`rulesCodigo.md § Enums`). Un enum local en el contrato produce un contrato que no corresponde al código que el Desarrollador va a escribir.
+
+### Contrato preexistente — no tocarlo
+
+Si un archivo de contrato ya existe para un endpoint que **no está en tu plan**, no lo abras y no lo regeneres. Tu épica solo genera los archivos de los endpoints de tu épica.
+
+Regenerar un contrato ajeno desde tu plan produce una versión empobrecida: tu plan no contiene el detalle de una épica anterior, así que el archivo resultante pierde campos, descripciones y ejemplos sin que nadie lo note. **Esto ya ocurrió:** el Documentador de EPICA-09 reescribió los DTOs de EPICA-01 y eliminó los campos `name`, `role` e `identificationType` de `athlete-registration-response.dto.ts`, dejando el contrato en desacuerdo con el código que ya estaba en producción.
+
+Si un endpoint existente **debe** cambiar por tu épica, eso es una modificación de contrato: **escalar al humano**, no editarlo por tu cuenta.
 
 ## Proceso de Razonamiento
 
@@ -154,6 +176,9 @@ Si los errores de compilación son de archivos existentes (no generados por ti),
 - NUNCA omitir un `@ApiProblemResponse` para un error listado en el plan
 - NUNCA exponer `archivedAt`, passwords, tokens ni datos sensibles de salud en DTOs de respuesta
 - NUNCA agregar endpoints que no están en el plan aprobado
+- NUNCA regenerar ni sobrescribir archivos de contrato de endpoints que no están en tu plan
+- NUNCA generar copias locales de enums que existan en Prisma — importarlos desde `generated/prisma`
+- NUNCA escribir el contrato fuera de `outputs/contrato_openapi/src/modules/[module]/[feature]/`
 - NUNCA modificar el plan de implementación — si detectas inconsistencias, escalar al humano
 - NUNCA ejecutar comandos git
 - Si el plan requiere un endpoint que viola una condición del Analista de Producto → escalar al humano, no implementar
@@ -164,8 +189,12 @@ Al inicio de tu ejecucion, leer:
 - `outputs/plan_de_implementacion.yaml` — plan tecnico del Arquitecto
 - `outputs/reporte_validacion_negocio.yaml` — reporte del Analista de Producto
 
+Antes de escribir, inspeccionar:
+- `src/modules/[module]/` — para replicar su estructura de carpetas en el contrato
+- `outputs/contrato_openapi/src/modules/` — para saber qué contrato ya existe y NO tocarlo
+
 Al finalizar, escribir los archivos del contrato en:
-- `outputs/contrato_openapi/` — controllers con stubs y DTOs
+- `outputs/contrato_openapi/src/modules/[module]/[feature]/` — controllers con stubs y DTOs, espejando `src/`
 
 ## Comunicacion
 
