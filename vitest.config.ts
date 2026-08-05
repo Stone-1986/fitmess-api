@@ -16,13 +16,20 @@ export default defineConfig({
         branches: 75,
         statements: 80,
       },
-      include: ['src/**/*.ts'],
+      // IMPORTANTE: estos patrones se resuelven relativos a `root` (./src), NO a la
+      // raiz del proyecto. Prefijarlos con `src/` produce `src/src/**` — un patron
+      // que no coincide con nada, dejando la cobertura medida solo sobre los archivos
+      // que algun test carga por casualidad. Ese bug reportaba 94% sobre 19 archivos
+      // cuando el real era 71% sobre 36.
+      include: ['**/*.ts'],
       exclude: [
-        'src/**/*.spec.ts',
-        'src/**/*.dto.ts',
-        'src/**/*.module.ts',
-        'src/generated/**',
-        'src/main.ts',
+        '**/*.spec.ts',
+        '**/*.dto.ts', // declarativos: decoradores de validacion, sin logica propia
+        '**/*.module.ts', // wiring de DI
+        '**/index.ts', // barriles: solo re-exports
+        '**/*.interface.ts', // solo tipos, no compilan a codigo ejecutable
+        'main.ts',
+        'coverage/**',
       ],
     },
   },

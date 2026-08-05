@@ -1,32 +1,25 @@
 /**
  * Tests unitarios de AuthController.
  *
- * NOTA DE INFRAESTRUCTURA:
- * El controller importa { Request } from 'express', pero 'express' no esta declarado
- * como dependencia directa en package.json (solo transitiva via @nestjs/platform-express).
- * Esto causa que el import del controller falle en Vitest al no poder resolver el paquete.
+ * El controller es THIN: solo extrae ip/user-agent del request y delega al
+ * service. Estos tests instancian la clase REAL via @nestjs/testing y mockean
+ * unicamente AuthService.
  *
- * Se usan mocks de modulo para resolver el problema y testear el comportamiento del controller.
+ * Historico: hasta 2026-08-05 este spec construia una replica del controller a
+ * mano ("controllerBehavior") por un supuesto fallo al importar 'express'. Los
+ * tests pasaban sin ejecutar una sola linea del controller real — cobertura 0%.
+ * Se verifico que el import funciona correctamente y se reconectaron.
  */
-
-// Mockear los modulos que fallan en el entorno de test antes de importarlos
-vi.mock('express', () => ({
-  default: {},
-}));
-
-vi.mock('class-validator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('class-validator')>();
-  return {
-    ...actual,
-    IsTrue: () => () => {},
-  };
-});
-
+import { Test, TestingModule } from '@nestjs/testing';
+import { AuthController } from './auth.controller.js';
+import { AuthService } from './auth.service.js';
 import {
   UserRole,
   CoachRequestStatus,
   IdentificationType,
 } from '../../../../generated/prisma/index.js';
+import { RegisterAthleteDto } from './dto/register-athlete.dto.js';
+import { RegisterCoachDto } from './dto/register-coach.dto.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 
@@ -72,7 +65,7 @@ const baseAthleteDto = {
   acceptsTermsOfService: true,
   personalDataDocumentVersion: 'v1.0',
   termsDocumentVersion: 'v2.0',
-};
+} as RegisterAthleteDto;
 
 const baseCoachDto = {
   name: 'Carlos Ramirez',
@@ -87,53 +80,45 @@ const baseCoachDto = {
   acceptsHabeasData: true,
   termsDocumentVersion: 'v2.0',
   personalDataDocumentVersion: 'v1.0',
-};
+} as RegisterCoachDto;
 
-// ── Mock del AuthController (THIN controller) ─────────────────────────────────
-// Verificamos la logica del controller directamente sin instanciar la clase NestJS
+// ── Mock de AuthService ────────────────────────────────────────────────────────
 
 const authServiceMock = {
   registerAthlete: vi.fn(),
   registerCoach: vi.fn(),
+  registerAdmin: vi.fn(),
   login: vi.fn(),
 };
 
-// Simulacion del comportamiento del controller (sin depender del setup de NestJS)
-const controllerBehavior = {
-  registerAthlete: (
-    dto: typeof baseAthleteDto,
-    req: { ip?: string; headers: Record<string, string> },
-  ): Promise<unknown> => {
-    const ip = req.ip ?? '0.0.0.0';
-    const userAgent = req.headers['user-agent'] ?? 'unknown';
-    return authServiceMock.registerAthlete(
-      dto,
-      ip,
-      userAgent,
-    ) as Promise<unknown>;
-  },
-  registerCoach: (
-    dto: typeof baseCoachDto,
-    req: { ip?: string; headers: Record<string, string> },
-  ): Promise<unknown> => {
-    const ip = req.ip ?? '0.0.0.0';
-    const userAgent = req.headers['user-agent'] ?? 'unknown';
-    return authServiceMock.registerCoach(
-      dto,
-      ip,
-      userAgent,
-    ) as Promise<unknown>;
-  },
-  login: (req: { user: unknown }): Promise<unknown> => {
-    return authServiceMock.login(req.user) as Promise<unknown>;
-  },
-};
+/** Request de express minimo: solo lo que el controller lee. */
+function buildRequest(
+  ip?: string,
+  userAgent?: string,
+): Parameters<AuthController['registerAthlete']>[1] {
+  return {
+    ip,
+    headers: userAgent ? { 'user-agent': userAgent } : {},
+  } as unknown as Parameters<AuthController['registerAthlete']>[1];
+}
 
 // ── Suite principal ────────────────────────────────────────────────────────────
 
-describe('AuthController — comportamiento (delegacion al service)', () => {
-  beforeEach(() => {
+describe('AuthController', () => {
+  let controller: AuthController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [AuthController],
+      providers: [{ provide: AuthService, useValue: authServiceMock }],
+    }).compile();
+
+    controller = module.get<AuthController>(AuthController);
     vi.clearAllMocks();
+  });
+
+  it('se instancia correctamente', () => {
+    expect(controller).toBeInstanceOf(AuthController);
   });
 
   // ── registerAthlete() ────────────────────────────────────────────────────────
@@ -144,10 +129,10 @@ describe('AuthController — comportamiento (delegacion al service)', () => {
       authServiceMock.registerAthlete.mockResolvedValue(mockAthleteResponse);
 
       // Act
-      await controllerBehavior.registerAthlete(baseAthleteDto, {
-        ip: '127.0.0.1',
-        headers: { 'user-agent': 'test-agent' },
-      });
+      await controller.registerAthlete(
+        baseAthleteDto,
+        buildRequest('127.0.0.1', 'test-agent'),
+      );
 
       // Assert
       expect(authServiceMock.registerAthlete).toHaveBeenCalledWith(
@@ -162,49 +147,60 @@ describe('AuthController — comportamiento (delegacion al service)', () => {
       authServiceMock.registerAthlete.mockResolvedValue(mockAthleteResponse);
 
       // Act
-      const result = await controllerBehavior.registerAthlete(baseAthleteDto, {
-        ip: '127.0.0.1',
-        headers: { 'user-agent': 'test-agent' },
-      });
+      const result = await controller.registerAthlete(
+        baseAthleteDto,
+        buildRequest('127.0.0.1', 'test-agent'),
+      );
 
       // Assert
       expect(result).toBe(mockAthleteResponse);
     });
 
-    it('usa ip fallback 0.0.0.0 cuando req.ip es undefined', async () => {
+    it('usa 0.0.0.0 cuando el request no trae ip', async () => {
       // Arrange
       authServiceMock.registerAthlete.mockResolvedValue(mockAthleteResponse);
 
       // Act
-      await controllerBehavior.registerAthlete(baseAthleteDto, {
-        ip: undefined,
-        headers: { 'user-agent': 'test-agent' },
-      });
+      await controller.registerAthlete(
+        baseAthleteDto,
+        buildRequest(undefined, 'test-agent'),
+      );
 
-      // Assert
+      // Assert — la ip se persiste en LegalAcceptance (Ley 527/1999)
       expect(authServiceMock.registerAthlete).toHaveBeenCalledWith(
         baseAthleteDto,
         '0.0.0.0',
-        expect.any(String),
+        'test-agent',
       );
     });
 
-    it('usa user-agent fallback unknown cuando el header no esta presente', async () => {
+    it("usa 'unknown' cuando el request no trae user-agent", async () => {
       // Arrange
       authServiceMock.registerAthlete.mockResolvedValue(mockAthleteResponse);
 
       // Act
-      await controllerBehavior.registerAthlete(baseAthleteDto, {
-        ip: '127.0.0.1',
-        headers: {},
-      });
+      await controller.registerAthlete(
+        baseAthleteDto,
+        buildRequest('127.0.0.1'),
+      );
 
       // Assert
       expect(authServiceMock.registerAthlete).toHaveBeenCalledWith(
         baseAthleteDto,
-        expect.any(String),
+        '127.0.0.1',
         'unknown',
       );
+    });
+
+    it('propaga la excepcion del service sin atraparla', async () => {
+      // Arrange — rulesCodigo: los controllers NUNCA hacen try/catch
+      const error = new Error('DUPLICATE_ENTITY');
+      authServiceMock.registerAthlete.mockRejectedValue(error);
+
+      // Act & Assert
+      await expect(
+        controller.registerAthlete(baseAthleteDto, buildRequest('127.0.0.1')),
+      ).rejects.toThrow(error);
     });
   });
 
@@ -216,16 +212,16 @@ describe('AuthController — comportamiento (delegacion al service)', () => {
       authServiceMock.registerCoach.mockResolvedValue(mockCoachRequestResponse);
 
       // Act
-      await controllerBehavior.registerCoach(baseCoachDto, {
-        ip: '127.0.0.1',
-        headers: { 'user-agent': 'test-agent' },
-      });
+      await controller.registerCoach(
+        baseCoachDto,
+        buildRequest('10.0.0.5', 'coach-agent'),
+      );
 
       // Assert
       expect(authServiceMock.registerCoach).toHaveBeenCalledWith(
         baseCoachDto,
-        '127.0.0.1',
-        'test-agent',
+        '10.0.0.5',
+        'coach-agent',
       );
     });
 
@@ -234,62 +230,88 @@ describe('AuthController — comportamiento (delegacion al service)', () => {
       authServiceMock.registerCoach.mockResolvedValue(mockCoachRequestResponse);
 
       // Act
-      const result = await controllerBehavior.registerCoach(baseCoachDto, {
-        ip: '127.0.0.1',
-        headers: { 'user-agent': 'test-agent' },
-      });
+      const result = await controller.registerCoach(
+        baseCoachDto,
+        buildRequest('10.0.0.5', 'coach-agent'),
+      );
 
       // Assert
       expect(result).toBe(mockCoachRequestResponse);
+    });
+
+    it('aplica los mismos defaults de ip y user-agent', async () => {
+      // Arrange
+      authServiceMock.registerCoach.mockResolvedValue(mockCoachRequestResponse);
+
+      // Act
+      await controller.registerCoach(baseCoachDto, buildRequest());
+
+      // Assert
+      expect(authServiceMock.registerCoach).toHaveBeenCalledWith(
+        baseCoachDto,
+        '0.0.0.0',
+        'unknown',
+      );
     });
   });
 
   // ── login() ──────────────────────────────────────────────────────────────────
 
   describe('login() — POST /auth/login', () => {
-    it('delega al service con el usuario del request (req.user)', async () => {
-      // Arrange
+    it('delega al service el user que LocalAuthGuard adjunto al request', async () => {
+      // Arrange — LocalStrategy valida credenciales y adjunta req.user
       authServiceMock.login.mockResolvedValue(mockAuthTokenResponse);
-      const mockUser = {
-        id: USER_ID,
-        email: 'atleta@test.com',
-        role: UserRole.ATHLETE,
-      };
+      const user = { id: USER_ID, email: 'atleta@test.com' };
+      const req = { user } as Parameters<AuthController['login']>[0];
 
       // Act
-      await controllerBehavior.login({ user: mockUser });
+      await controller.login(req);
 
       // Assert
-      expect(authServiceMock.login).toHaveBeenCalledWith(mockUser);
+      expect(authServiceMock.login).toHaveBeenCalledWith(user);
     });
 
-    it('retorna el resultado del service sin modificarlo', async () => {
+    it('retorna el token del service sin modificarlo', async () => {
       // Arrange
       authServiceMock.login.mockResolvedValue(mockAuthTokenResponse);
-      const mockUser = {
-        id: USER_ID,
-        email: 'atleta@test.com',
-        role: UserRole.ATHLETE,
-      };
+      const req = { user: { id: USER_ID } } as Parameters<
+        AuthController['login']
+      >[0];
 
       // Act
-      const result = await controllerBehavior.login({ user: mockUser });
+      const result = await controller.login(req);
 
       // Assert
       expect(result).toBe(mockAuthTokenResponse);
     });
+
+    it('propaga COACH_NOT_APPROVED sin atraparla', async () => {
+      // Arrange
+      const error = new Error('COACH_NOT_APPROVED');
+      authServiceMock.login.mockRejectedValue(error);
+      const req = { user: { id: USER_ID } } as Parameters<
+        AuthController['login']
+      >[0];
+
+      // Act & Assert
+      await expect(controller.login(req)).rejects.toThrow(error);
+    });
   });
-});
 
-// ── Tests de validacion de clase del controller (NestJS TestingModule) ────────
-// Este bloque se separa para aislar el error de importacion de express si ocurre
+  // ── Contrato de controller THIN ──────────────────────────────────────────────
 
-describe('AuthController — estructura', () => {
-  it('el controller AuthController tiene los metodos requeridos (thin controller)', () => {
-    // Verificar que el contrato del controller esta definido correctamente
-    // Los 3 metodos publicos: registerAthlete, registerCoach, login
-    expect(typeof controllerBehavior.registerAthlete).toBe('function');
-    expect(typeof controllerBehavior.registerCoach).toBe('function');
-    expect(typeof controllerBehavior.login).toBe('function');
+  describe('contrato THIN', () => {
+    it('expone exactamente los 4 metodos del contrato', () => {
+      const metodos = Object.getOwnPropertyNames(
+        AuthController.prototype,
+      ).filter((m) => m !== 'constructor');
+
+      expect(metodos.sort()).toEqual([
+        'login',
+        'registerAdmin',
+        'registerAthlete',
+        'registerCoach',
+      ]);
+    });
   });
 });

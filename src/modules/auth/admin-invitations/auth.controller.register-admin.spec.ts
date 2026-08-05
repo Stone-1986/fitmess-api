@@ -1,14 +1,22 @@
 /**
  * Tests unitarios de AuthController.registerAdmin() — EPICA-09.
  *
- * Verifica que el controller es THIN: delega al service con los parámetros
- * correctos y retorna el resultado sin modificarlo.
+ * Verifica que el controller es THIN: delega al service con los parametros
+ * correctos y retorna el resultado sin modificarlo. Instancia la clase REAL
+ * via @nestjs/testing y mockea unicamente AuthService.
+ *
+ * Historico: hasta 2026-08-05 este spec construia una replica del controller a
+ * mano ("controllerBehavior"). Los tests pasaban sin ejecutar una sola linea del
+ * controller real — cobertura 0%. Se reconectaron a la clase real.
  */
-
+import { Test, TestingModule } from '@nestjs/testing';
+import { AuthController } from '../core/auth.controller.js';
+import { AuthService } from '../core/auth.service.js';
 import {
   IdentificationType,
   UserRole,
 } from '../../../../generated/prisma/index.js';
+import { RegisterAdminDto } from './dto/register-admin.dto.js';
 
 // ── Datos de prueba ────────────────────────────────────────────────────────────
 
@@ -36,54 +44,60 @@ const baseAdminDto = {
   termsDocumentVersion: 'v1.0',
   acceptsHabeasData: true,
   personalDataDocumentVersion: 'v1.0',
-};
+} as RegisterAdminDto;
 
 // ── Mock del AuthService ───────────────────────────────────────────────────────
 
 const authServiceMock = {
+  registerAthlete: vi.fn(),
+  registerCoach: vi.fn(),
   registerAdmin: vi.fn(),
+  login: vi.fn(),
 };
 
-// Simulacion del comportamiento del controller (thin — delegacion directa)
-const controllerBehavior = {
-  registerAdmin: (
-    dto: typeof baseAdminDto,
-    req: { ip?: string; headers: Record<string, string> },
-  ): Promise<unknown> => {
-    const ip = req.ip ?? '0.0.0.0';
-    const userAgent = req.headers['user-agent'] ?? 'unknown';
-    return authServiceMock.registerAdmin(
-      dto,
-      ip,
-      userAgent,
-    ) as Promise<unknown>;
-  },
-};
+/** Request de express minimo: solo lo que el controller lee. */
+function buildRequest(
+  ip?: string,
+  userAgent?: string,
+): Parameters<AuthController['registerAdmin']>[1] {
+  return {
+    ip,
+    headers: userAgent ? { 'user-agent': userAgent } : {},
+  } as unknown as Parameters<AuthController['registerAdmin']>[1];
+}
 
 // ── Suite principal ────────────────────────────────────────────────────────────
 
 describe('AuthController.registerAdmin() — POST /auth/admin/register', () => {
-  beforeEach(() => {
+  let controller: AuthController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [AuthController],
+      providers: [{ provide: AuthService, useValue: authServiceMock }],
+    }).compile();
+
+    controller = module.get<AuthController>(AuthController);
     vi.clearAllMocks();
   });
 
-  it('delega al service con el DTO, ip y user-agent del request', async () => {
+  it('delega al service con el DTO, ip y user-agent correctos', async () => {
     // Arrange
     authServiceMock.registerAdmin.mockResolvedValue(
       mockAdminRegistrationResponse,
     );
 
     // Act
-    await controllerBehavior.registerAdmin(baseAdminDto, {
-      ip: '192.168.1.1',
-      headers: { 'user-agent': 'Mozilla/5.0' },
-    });
+    await controller.registerAdmin(
+      baseAdminDto,
+      buildRequest('192.168.1.10', 'admin-agent'),
+    );
 
     // Assert
     expect(authServiceMock.registerAdmin).toHaveBeenCalledWith(
       baseAdminDto,
-      '192.168.1.1',
-      'Mozilla/5.0',
+      '192.168.1.10',
+      'admin-agent',
     );
   });
 
@@ -94,67 +108,77 @@ describe('AuthController.registerAdmin() — POST /auth/admin/register', () => {
     );
 
     // Act
-    const result = await controllerBehavior.registerAdmin(baseAdminDto, {
-      ip: '127.0.0.1',
-      headers: { 'user-agent': 'test-agent' },
-    });
+    const result = await controller.registerAdmin(
+      baseAdminDto,
+      buildRequest('192.168.1.10', 'admin-agent'),
+    );
 
     // Assert
     expect(result).toBe(mockAdminRegistrationResponse);
   });
 
-  it('usa ip fallback 0.0.0.0 cuando req.ip es undefined', async () => {
+  it('usa 0.0.0.0 cuando el request no trae ip', async () => {
     // Arrange
     authServiceMock.registerAdmin.mockResolvedValue(
       mockAdminRegistrationResponse,
     );
 
     // Act
-    await controllerBehavior.registerAdmin(baseAdminDto, {
-      ip: undefined,
-      headers: { 'user-agent': 'test-agent' },
-    });
+    await controller.registerAdmin(
+      baseAdminDto,
+      buildRequest(undefined, 'admin-agent'),
+    );
 
-    // Assert
+    // Assert — la ip se persiste en LegalAcceptance (Ley 527/1999)
     expect(authServiceMock.registerAdmin).toHaveBeenCalledWith(
       baseAdminDto,
       '0.0.0.0',
-      'test-agent',
+      'admin-agent',
     );
   });
 
-  it('usa user-agent fallback unknown cuando el header no esta presente', async () => {
+  it("usa 'unknown' cuando el request no trae user-agent", async () => {
     // Arrange
     authServiceMock.registerAdmin.mockResolvedValue(
       mockAdminRegistrationResponse,
     );
 
     // Act
-    await controllerBehavior.registerAdmin(baseAdminDto, {
-      ip: '127.0.0.1',
-      headers: {},
-    });
+    await controller.registerAdmin(baseAdminDto, buildRequest('192.168.1.10'));
 
     // Assert
     expect(authServiceMock.registerAdmin).toHaveBeenCalledWith(
       baseAdminDto,
-      '127.0.0.1',
+      '192.168.1.10',
       'unknown',
     );
   });
 
-  it('NO realiza try/catch — las excepciones fluyen al pipeline de NestJS', async () => {
-    // Arrange — el service lanza un error
-    authServiceMock.registerAdmin.mockRejectedValue(
-      new Error('BusinessException simulada'),
+  it('no expone el invitationToken en la respuesta', async () => {
+    // Arrange
+    authServiceMock.registerAdmin.mockResolvedValue(
+      mockAdminRegistrationResponse,
     );
 
-    // Act & Assert — el controller no captura la excepcion, la deja fluir
+    // Act
+    const result = await controller.registerAdmin(
+      baseAdminDto,
+      buildRequest('192.168.1.10', 'admin-agent'),
+    );
+
+    // Assert — Ley 1273/2009: el token no vuelve al cliente
+    expect(result).not.toHaveProperty('invitationToken');
+    expect(result).not.toHaveProperty('passwordHash');
+  });
+
+  it('propaga INVITATION_EXPIRED sin atraparla', async () => {
+    // Arrange — rulesCodigo: los controllers NUNCA hacen try/catch
+    const error = new Error('INVITATION_EXPIRED');
+    authServiceMock.registerAdmin.mockRejectedValue(error);
+
+    // Act & Assert
     await expect(
-      controllerBehavior.registerAdmin(baseAdminDto, {
-        ip: '127.0.0.1',
-        headers: { 'user-agent': 'test-agent' },
-      }),
-    ).rejects.toThrow('BusinessException simulada');
+      controller.registerAdmin(baseAdminDto, buildRequest('192.168.1.10')),
+    ).rejects.toThrow(error);
   });
 });
