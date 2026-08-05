@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  Equals,
   IsBoolean,
-  IsDateString,
   IsEmail,
   IsEnum,
   IsNotEmpty,
@@ -13,6 +13,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { IdentificationType } from '../../../../../generated/prisma/index.js';
+import { IsLegalAgeBirthDate } from '../../shared/validators/is-legal-age-birth-date.validator.js';
 
 /**
  * DTO de entrada para HU-001: Solicitud de registro como entrenador.
@@ -110,20 +111,19 @@ export class RegisterCoachDto {
   })
   identificationNumber: string;
 
-  @ApiPropertyOptional({
-    description: 'Fecha de nacimiento del entrenador en formato ISO 8601',
+  @ApiProperty({
+    description:
+      'Fecha de nacimiento del entrenador en formato YYYY-MM-DD. ' +
+      'Debe corresponder a una persona mayor de edad (18 anos cumplidos): ' +
+      'un menor no tiene capacidad legal para aceptar los Terminos ni para ' +
+      'autorizar por si mismo el tratamiento de sus datos.',
     example: '1990-06-15',
     format: 'date',
   })
-  @IsOptional()
-  @IsDateString(
-    {},
-    {
-      message:
-        'La fecha de nacimiento debe estar en formato ISO 8601 (YYYY-MM-DD)',
-    },
-  )
-  dateOfBirth?: string;
+  @IsString()
+  @IsNotEmpty({ message: 'La fecha de nacimiento es obligatoria' })
+  @IsLegalAgeBirthDate()
+  dateOfBirth: string;
 
   @ApiPropertyOptional({
     description:
@@ -174,6 +174,10 @@ export class RegisterCoachDto {
     message:
       'La aceptacion de los terminos y condiciones debe ser verdadero o falso',
   })
+  @Equals(true, {
+    message:
+      'Debes aceptar los terminos y condiciones para registrarte en la plataforma',
+  })
   acceptsTermsOfService: boolean;
 
   @ApiProperty({
@@ -183,6 +187,10 @@ export class RegisterCoachDto {
   })
   @IsBoolean({
     message: 'La autorizacion de habeas data debe ser verdadero o falso',
+  })
+  @Equals(true, {
+    message:
+      'Debes autorizar el tratamiento de tus datos personales para registrarte en la plataforma',
   })
   acceptsHabeasData: boolean;
 

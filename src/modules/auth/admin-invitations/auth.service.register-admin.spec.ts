@@ -62,6 +62,7 @@ const baseAdminDto: RegisterAdminDto = {
   phoneCountryCode: '57',
   identificationType: IdentificationType.CC,
   identificationNumber: '80123456',
+  dateOfBirth: '1985-06-15',
   acceptsTermsOfService: true,
   termsDocumentVersion: 'v1.0',
   acceptsHabeasData: true,

@@ -68,7 +68,7 @@ export class AuthService {
             identificationType: dto.identificationType,
             identificationNumber: dto.identificationNumber,
             avatarUrl: dto.avatarUrl,
-            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+            dateOfBirth: new Date(dto.dateOfBirth),
           },
         });
 
@@ -165,6 +165,7 @@ export class AuthService {
             identificationType: dto.identificationType,
             identificationNumber: dto.identificationNumber,
             avatarUrl: dto.avatarUrl,
+            dateOfBirth: new Date(dto.dateOfBirth),
           },
         });
 
@@ -316,7 +317,7 @@ export class AuthService {
             identificationType: dto.identificationType,
             identificationNumber: dto.identificationNumber,
             avatarUrl: dto.avatarUrl,
-            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+            dateOfBirth: new Date(dto.dateOfBirth),
           },
         });
 

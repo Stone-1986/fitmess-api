@@ -46,6 +46,7 @@ const baseCoachDto: RegisterCoachDto = {
   phoneCountryCode: '+57',
   identificationType: IdentificationType.CC,
   identificationNumber: '1023456789',
+  dateOfBirth: '1988-03-20',
   planDescription: 'Especialista en fuerza con 5 anos de experiencia.',
   acceptsTermsOfService: true,
   acceptsHabeasData: true,
