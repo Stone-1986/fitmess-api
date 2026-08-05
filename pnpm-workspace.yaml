@@ -6,3 +6,22 @@ ignoredBuiltDependencies:
   - esbuild
   - prisma
   - unrs-resolver
+
+# El cliente de Prisma se genera en `generated/prisma/` (raiz del proyecto), fuera de
+# `node_modules/`. Su runtime hace `require("@prisma/client-runtime-utils")`, un paquete
+# transitivo de `@prisma/client` que pnpm no enlaza en la raiz de `node_modules` por su
+# resolucion estricta — solo queda dentro del store virtual.
+#
+# Node resuelve desde `generated/prisma/runtime/` subiendo hasta `<raiz>/node_modules`,
+# donde ese paquete no existe: `node dist/main` (el comando `start:prod`, el de despliegue)
+# falla al arrancar con MODULE_NOT_FOUND.
+#
+# `nest start` lo enmascaraba: los shims de pnpm exportan NODE_PATH apuntando a
+# `.pnpm/node_modules`, y el proceso hijo heredaba esa variable. En desarrollo funcionaba
+# y en produccion no.
+#
+# Hoistear el scope completo en vez de declarar el paquete como dependencia directa evita
+# tener que sincronizar a mano la version de un paquete interno de Prisma cada vez que se
+# actualice `@prisma/client`.
+publicHoistPattern:
+  - '@prisma/*'
