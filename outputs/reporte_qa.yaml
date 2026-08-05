@@ -362,10 +362,75 @@ reporte_qa:
         src/modules/auth/dto/admin-invitation-response.dto.ts:40
       tipo: "linting"
 
-  estado: "RECHAZADO"
-  motivo_rechazo: >
+  estado: "APROBADO"
+
+  # Historico preservado: motivo del rechazo original del 2026-03-08.
+  # Se resolvio con `pnpm run format` — ver reparacion_retroactiva al final.
+  motivo_rechazo_original: >
     Linting FAIL: 9 errores de Prettier/ESLint en 5 archivos de produccion (errores de
     formato unicamente). La cobertura es excelente (99% dominio, 80% adaptadores, 149 tests
     pasando), todos los criterios de aceptacion tecnicos se cumplen, el build compila sin
     errores, y no hay vulnerabilidades ALTA ni CRITICA. El unico bloqueo es el formateo del
     codigo: ejecutar `pnpm run format` resuelve todos los errores en un solo paso.
+
+# ─────────────────────────────────────────────────────────────────────────────
+reparacion_retroactiva:
+  fecha: "2026-08-05"
+  motivo: >
+    El estado persistido era RECHAZADO sobre codigo aprobado, taggeado y
+    commiteado. Se aplico el procedimiento del Paso 4.5 de implementar-epica
+    (ruta rapida de correcciones triviales), que exige re-correr los gates
+    antes de reescribir el estado.
+
+  alcance_de_la_verificacion: >
+    Los gates se ejecutaron sobre HEAD (1dd4a45), no sobre el commit original
+    de la epica (ff47c43). HEAD es un superconjunto: contiene toda EPICA-09 mas
+    el fix de rango de fechas en coach-requests. Que HEAD pase implica que el
+    codigo de EPICA-09 esta sano hoy; NO es una verificacion del estado exacto
+    del 2026-03-08, que no se re-ejecuto.
+
+  gates_ejecutados:
+    - comando: "pnpm run test:cov"
+      resultado: "PASS (exit 0)"
+      detalle: "162 tests en 14 archivos. Global: 94.38% stmts, 89.67% branches, 87.75% funcs, 94.31% lines"
+    - comando: "pnpm run lint"
+      resultado: "PASS"
+      detalle: "0 errores, 32 warnings (no-unsafe-argument preexistentes en e2e y filters)"
+    - comando: "npx prettier --check 'src/**/*.ts'"
+      resultado: "PASS"
+      detalle: "All matched files use Prettier code style"
+    - comando: "pnpm run build"
+      resultado: "PASS"
+      detalle: "nest build sin errores"
+
+  cobertura_verificada:
+    dominio:
+      target: 80
+      cumple: true
+      archivos:
+        - { archivo: "admin-invitations.service.ts", stmts: 100 }
+        - { archivo: "auth.service.ts", stmts: 100 }
+        - { archivo: "coach-requests.service.ts", stmts: 98.3 }
+        - { archivo: "email.service.ts", stmts: 85 }
+    adaptadores:
+      target: 70
+      cumple: "PARCIAL"    # ver advertencia_cobertura
+      archivos:
+        - { archivo: "controllers (todos)", stmts: 100 }
+        - { archivo: "roles.guard.ts", stmts: 100 }
+        - { archivo: "jwt.strategy.ts", stmts: 100 }
+        - { archivo: "admin-invitation-created.listener.ts", stmts: 100 }
+        - { archivo: "jwt-auth.guard.ts", stmts: 50, bajo_target: true }
+        - { archivo: "prisma.service.ts", stmts: 0, bajo_target: true }
+
+  advertencia_cobertura: >
+    El comando `pnpm run test:cov` retorna exit 0 porque los thresholds de
+    vitest.config.ts son GLOBALES (80/80/75/80) y el agregado los supera. Pero
+    dos adaptadores estan por debajo del target de 70% de rulesArquitectura si
+    la regla se lee por archivo: jwt-auth.guard.ts (50%, lineas 27-36 sin
+    cubrir) y prisma.service.ts (0%, lineas 11-21). Ninguno es codigo nuevo de
+    EPICA-09 — vienen de EPICA-01 y de la capa transversal. No se corrigen aqui
+    porque esta reparacion documenta el estado real, no lo modifica. Registrado
+    como hallazgo abierto #2 en outputs/execution-log.md.
+
+  estado_final: "APROBADO"

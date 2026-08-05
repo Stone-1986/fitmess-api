@@ -216,11 +216,13 @@ revision_codigo:
       para habilitar la validacion automatica de Spectral en futuros ciclos. Se recomienda
       al humano investigar la configuracion de ConfigService en el contexto de exportacion.
 
-  estado: "RECHAZADO"
+  estado: "APROBADO"
   requiere_modificar_contrato: false
   requiere_modificar_plan: false
 
-  instrucciones_desarrollador:
+  # Historico preservado: instrucciones del rechazo original del 2026-03-08.
+  # Todas se aplicaron — ver reparacion_retroactiva al final del archivo.
+  instrucciones_desarrollador_resueltas:
     - prioridad: 1
       archivo: >
         src/modules/auth/admin-invitations.controller.ts,
@@ -252,3 +254,46 @@ revision_codigo:
         El codigo de produccion, la logica de negocio, los tests (149 pasando),
         la cobertura (99% dominio, 80% adaptadores) y el build (exit code 0) son
         correctos. El formato Prettier es el UNICO bloqueo para la aprobacion.
+
+# ─────────────────────────────────────────────────────────────────────────────
+reparacion_retroactiva:
+  fecha: "2026-08-05"
+  motivo: >
+    El estado persistido era RECHAZADO sobre codigo aprobado, taggeado y
+    commiteado. Se aplico el procedimiento del Paso 4.5 de implementar-epica,
+    que exige re-correr los gates antes de reescribir el estado.
+
+  clasificacion_del_rechazo_original: >
+    Los bloqueos eran exclusivamente de formato Prettier mas un import no usado.
+    Todos caen dentro de la lista blanca de correcciones triviales del Paso 4.5,
+    por lo que la ruta rapida era aplicable. Lo que falto en marzo no fue la
+    correccion — fue reescribir este archivo despues de aplicarla.
+
+  alcance_de_la_verificacion: >
+    Los gates se ejecutaron sobre HEAD (1dd4a45), no sobre el commit original de
+    la epica (ff47c43). HEAD es un superconjunto: contiene toda EPICA-09 mas el
+    fix de rango de fechas. Que HEAD pase implica que el codigo de EPICA-09 esta
+    sano hoy; NO es una verificacion del estado exacto del 2026-03-08.
+
+  gates_verificados:
+    eslint: "PASS — 0 errores, 32 warnings preexistentes"
+    prettier: "PASS — All matched files use Prettier code style"
+    build: "PASS — nest build sin errores"
+    tests: "PASS — 162 tests en 14 archivos"
+    cobertura_global: "94.38% stmts, 89.67% branches, 87.75% funcs, 94.31% lines"
+
+  patrones: "Sin violaciones (revision original del 2026-03-08, no re-ejecutada)"
+  consistencia_contrato: >
+    OK. Nota: el contrato se reorganizo el 2026-08-05 al layout canonico
+    contrato_openapi/src/modules/[module]/[feature]/. Los DTOs de EPICA-09 que
+    habian regenerado y empobrecido el contrato de EPICA-01 se eliminaron.
+    Ver outputs/execution-log.md, entrada del 2026-08-05.
+
+  salvedad: >
+    Dos adaptadores quedan por debajo del target de 70% si rulesArquitectura se
+    lee por archivo: jwt-auth.guard.ts (50%) y prisma.service.ts (0%). El gate
+    `pnpm run test:cov` retorna exit 0 porque los thresholds de vitest son
+    globales. Ninguno es codigo nuevo de EPICA-09. Registrado como hallazgo
+    abierto #2 en outputs/execution-log.md — no se corrige en esta reparacion.
+
+  estado_final: "APROBADO"
