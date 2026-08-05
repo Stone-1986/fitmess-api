@@ -134,6 +134,19 @@ export const BusinessError = {
     httpStatus: HttpStatus.CONFLICT, // 409 — conflicto de estado inmutable
   },
 
+  // ── Invitaciones de administrador ────────────────────────────────
+  INVITATION_EXPIRED: {
+    code: 'INVITATION_EXPIRED',
+    title: 'La invitacion ha expirado',
+    httpStatus: HttpStatus.UNPROCESSABLE_ENTITY, // 422
+  },
+
+  INVITATION_ALREADY_USED: {
+    code: 'INVITATION_ALREADY_USED',
+    title: 'La invitacion ya fue utilizada',
+    httpStatus: HttpStatus.CONFLICT, // 409
+  },
+
   // ── Auth ──────────────────────────────────────────────────────────
   COACH_NOT_APPROVED: {
     code: 'COACH_NOT_APPROVED',

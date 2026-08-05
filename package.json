@@ -94,6 +94,9 @@
     "unplugin-swc": "^1.5.9",
     "vitest": "^4.0.18"
   },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "lint-staged": {
     "src/**/*.ts": [
       "eslint --fix",

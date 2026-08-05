@@ -47,3 +47,12 @@
 | 5 | Spot-check | orquestador | OK | — | Contrato: @ApiProperty+validadores en DTOs, endpoints completos, no expone campos internos, security: [] en públicos. Schema: AdminInvitation correcto, append-only, índice email justificado. Sin hallazgos. |
 | 6 | CHECKPOINT 1 v1.0 | orquestador | FEEDBACK | — | Presentado al humano. Feedback: GET /admin-invitations/:token → POST /admin-invitations/verify (token sensible no debe ir en URL). Plan, contrato y DTO actualizados. |
 | 7 | Corrección seguridad | orquestador | OK | plan + contrato actualizados | GET → POST /admin-invitations/verify. Nuevo DTO: VerifyAdminInvitationDto. Consistente con decisión #5 del plan y OWASP/RFC 7662. |
+| 8 | CHECKPOINT 1 v1.1 | orquestador | APROBADO | — | Humano aprobó. Migración Prisma aplicada (20260309012821_epica_09_admin_invitation). |
+
+## Fase 2 — Implementación (ciclo 1)
+
+| # | Paso | Agente | Estado | Output | Notas |
+|---|------|--------|--------|--------|-------|
+| 1 | Implementación | desarrollador | OK | src/modules/auth/ + src/modules/notifications/ + prisma/seed.ts | NotificationsModule (EmailService + listener), AdminInvitationsService + Controller, 6 DTOs admin, registerAdmin en AuthService/Controller, seed.ts, 2 BusinessErrors nuevos. |
+| 2 | QA | qa | OK | reporte_qa.yaml + 6 spec files | 149 tests PASS. Build: OK. Lint: 9 errores Prettier en 5 archivos. Cobertura: 99% dominio, 80% adaptadores. 17/17 criterios técnicos. 0 vulnerabilidades altas. Estado: RECHAZADO (solo formato). |
+| 3 | Revisión de código | lider-tecnico | RECHAZADO → OK | revision_codigo.yaml | LT confirmó: único bloqueo Prettier. Patrones OK, consistencia contrato OK, 0 violaciones. Orquestador aplicó correcciones triviales: pnpm run format + 1 import no usado. Lint: 0 errores. Tests: 149 pass. Estado final: APROBADO. |

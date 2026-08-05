@@ -1,217 +1,231 @@
 revision_codigo:
   fecha: "2026-03-08"
-  ciclo: 2
-  razonamiento: >
-    QUE: Verificacion independiente del ciclo 2 — se leyeron directamente los archivos
-    afectados para confirmar que las dos correcciones reportadas estan presentes en el
-    codigo actual. POR QUE: El reporte anterior fue generado por el orquestador (no por
-    el LT) tras aplicar las correcciones directamente. Esta revision cierra el ciclo con
-    una lectura real del codigo. REFERENCIA: src/modules/auth/dto/login.dto.ts,
-    src/modules/auth/guards/local-auth.guard.ts, revision_codigo.yaml ciclo 2 anterior.
+  ciclo: 1
+  razonamiento: ""
 
   linting:
     eslint: "PASS"
-    prettier: "PASS"
-    errores: 0
-    warnings: 32
-    detalle_warnings: >
-      Todos los 32 warnings son @typescript-eslint/no-unsafe-argument configurado como
-      'warn' (no 'error') en eslint.config.mjs. Distribuidos en: guard specs (4),
-      prisma-exception.filter.ts (1), test/auth.e2e-spec.ts (27). Ninguno en codigo
-      de produccion critico. No bloquea.
+    prettier: "FAIL"
+    errores:
+      - archivo: "src/modules/auth/admin-invitations.controller.ts"
+        linea: 96
+        regla: "prettier/prettier"
+        descripcion: >
+          @ApiProblemResponse(400, ...) en linea unica. Prettier requiere formato
+          multilinea con trailing comma en este contexto (coherente con los otros
+          @ApiProblemResponse que ya usan multilinea en el mismo archivo).
+      - archivo: "src/modules/auth/admin-invitations.controller.ts"
+        linea: 98
+        regla: "prettier/prettier"
+        descripcion: >
+          @ApiProblemResponse(403, ...) con indentacion y salto de linea no alineados
+          con la configuracion de Prettier.
+      - archivo: "src/modules/auth/admin-invitations.service.ts"
+        linea: 79
+        regla: "prettier/prettier"
+        descripcion: >
+          La asignacion del await a existingActiveInvitation en la llamada findFirst
+          debe comenzar en nueva linea con indentacion correcta.
+      - archivo: "src/modules/auth/admin-invitations.service.ts"
+        linea: 87
+        regla: "prettier/prettier"
+        descripcion: >
+          Coma y salto de linea sobrante al final del bloque where de findFirst.
+      - archivo: "src/modules/auth/admin-invitations.service.ts"
+        linea: 175
+        regla: "prettier/prettier"
+        descripcion: >
+          Parametro rawToken en la firma del metodo findByToken debe estar en formato
+          multilinea con trailing comma.
+      - archivo: "src/modules/auth/auth.controller.ts"
+        linea: 170
+        regla: "prettier/prettier"
+        descripcion: >
+          @ApiProblemResponse(404, ...) en version de una sola linea no es el formato
+          esperado por Prettier en este contexto.
+      - archivo: "src/modules/auth/auth.controller.ts"
+        linea: 178
+        regla: "prettier/prettier"
+        descripcion: >
+          @ApiProblemResponse(422, ...) mismo patron que linea 170.
+      - archivo: "src/modules/auth/auth.module.ts"
+        linea: 35
+        regla: "prettier/prettier"
+        descripcion: >
+          Array de controllers en una sola linea. Prettier requiere formato multilinea
+          con cada elemento en su propia linea y trailing comma.
+      - archivo: "src/modules/auth/dto/admin-invitation-response.dto.ts"
+        linea: 40
+        regla: "prettier/prettier"
+        descripcion: >
+          Salto de linea faltante en el decorador @ApiProperty del campo createdAt.
 
   cobertura:
     dominio:
-      auth_service: { stmts: 100, branch: 89.79, cumple: true }
-      coach_requests_service: { stmts: 98.24, branch: 95.45, cumple: true }
-      target: 80
+      porcentaje: 99
       cumple: true
     adaptadores:
-      auth_controller: { stmts: 100, cumple: true }
-      coach_requests_controller: { stmts: 100, cumple: true }
-      jwt_auth_guard: { stmts: 75, cumple: true }
-      roles_guard: { stmts: 100, cumple: true }
-      jwt_strategy: { stmts: 100, cumple: true }
-      target: 70
+      porcentaje: 80
       cumple: true
-    tests: { total: 93, pass: 93, fail: 0, archivos: 7 }
-    global_stmts: 96.44
-
-  verificacion_correcciones_ciclo2:
-
-    correccion_1:
-      archivo: "src/modules/auth/dto/login.dto.ts"
-      descripcion: "Agregado @MaxLength(72), format: 'email' en @ApiProperty de email, maxLength: 72 en @ApiProperty de password"
-      estado: "CONFIRMADA"
-      evidencia:
-        - "Linea 14: format: 'email' presente en @ApiProperty del campo email"
-        - "Linea 23: maxLength: 72 presente en @ApiProperty del campo password"
-        - "Linea 27: @MaxLength(72, { message: 'La contrasena no puede superar 72 caracteres' }) presente"
-      detalle: >
-        Los tres elementos reportados como pendientes en el ciclo 2 estan presentes en el
-        codigo actual. El decorador @MaxLength(72) esta en la linea 27 como validador de
-        class-validator. La propiedad maxLength: 72 esta en @ApiProperty (linea 23) para
-        documentacion Swagger. El format: 'email' esta en @ApiProperty del campo email
-        (linea 14). Todos correctos.
-
-    correccion_2:
-      archivo: "src/modules/auth/guards/local-auth.guard.ts"
-      descripcion: "Agregado handleRequest() con patron RFC 9457 consistente"
-      estado: "CONFIRMADA"
-      evidencia:
-        - "Lineas 23-32: handleRequest<TUser>(err, user) presente e implementado"
-        - "Linea 25: if (err instanceof BusinessException) throw err — relanza BusinessException existente"
-        - "Lineas 26-29: throw new BusinessException(BusinessError.INVALID_CREDENTIALS, ...) para errores no-Business"
-        - "El patron es consistente con JwtAuthGuard (jwt-auth.guard.ts lineas 18-26)"
-      detalle: >
-        handleRequest() esta implementado correctamente. Captura cualquier error no-BusinessException
-        y lo envuelve en BusinessException con INVALID_CREDENTIALS, garantizando formato RFC 9457
-        consistente en todos los escenarios de error de autenticacion local. El patron es identico
-        al de JwtAuthGuard salvo por el re-lanzamiento de BusinessException existente (linea 25),
-        que es correcto para preservar errores de dominio como ACCOUNT_TEMPORARILY_LOCKED.
 
   patrones:
     violaciones: []
-    verificaciones:
-      - nombre: "BusinessException+BusinessError en services"
-        estado: "OK"
-        evidencia: >
-          auth.service.ts: BusinessException con DUPLICATE_ENTITY (linea 100),
-          ACCOUNT_TEMPORARILY_LOCKED (linea 253), INVALID_CREDENTIALS (linea 290),
-          COACH_NOT_APPROVED (linea 326). TechnicalException con DATABASE_ERROR (lineas 105, 210, 360).
-          coach-requests.service.ts: BusinessException con ENTITY_NOT_FOUND (lineas 183, 353),
-          INVALID_STATE_TRANSITION (lineas 225, 288). TechnicalException con DATABASE_ERROR (lineas 122, 249, 313).
-          Ningun HttpException nativo de NestJS en ningun service.
+    # Verificaciones realizadas:
+    # [OK] Services — solo BusinessException+TechnicalException. Ningun HttpException nativo.
+    #      AdminInvitationsService: BusinessException con DUPLICATE_ENTITY (lineas 69,91),
+    #      ENTITY_NOT_FOUND (linea 190), INVITATION_ALREADY_USED (linea 198),
+    #      INVITATION_EXPIRED (linea 208). TechnicalException con DATABASE_ERROR (linea 135).
+    #      AuthService.registerAdmin(): BusinessException con ENTITY_NOT_FOUND (linea 281),
+    #      INVITATION_ALREADY_USED (linea 290), INVITATION_EXPIRED (linea 300),
+    #      DUPLICATE_ENTITY (linea 361). TechnicalException con DATABASE_ERROR (linea 366).
+    # [OK] Controllers THIN — sin try/catch, sin PrismaService inyectado, delegan al service.
+    #      AdminInvitationsController.create() — linea 110 — retorna directamente.
+    #      AdminInvitationsController.verify() — linea 178 — retorna directamente.
+    #      AuthController.registerAdmin() — linea 188 — retorna directamente.
+    # [OK] Imports Prisma desde generated/prisma (no @prisma/client).
+    #      admin-invitations.controller.ts linea 22: from '../../../generated/prisma/index.js'.
+    #      auth.service.ts linea 12: from '../../../generated/prisma/index.js'.
+    #      admin-registration-response.dto.ts linea 2: from '../../../../generated/prisma/index.js'.
+    #      register-admin.dto.ts linea 15: from '../../../../generated/prisma/index.js'.
+    #      seed.ts linea 30: from '../generated/prisma/index.js'.
+    # [OK] Enums desde generated/prisma — sin duplicados locales.
+    #      UserRole, DocumentType, IdentificationType, CoachRequestStatus — todos importados
+    #      desde generated/prisma. AdminInvitationStatus es un tipo string derivado (no enum
+    #      Prisma) — correcto porque el estado no se persiste en DB (decision arquitectonica).
+    # [OK] Comunicacion entre modulos via EventEmitter2.
+    #      AdminInvitationsService emite admin.invitation.created (linea 151).
+    #      AuthService.registerAdmin() emite user.registered (linea 374).
+    #      NotificationsModule escucha admin.invitation.created — sin imports directos
+    #      de services del modulo auth. Patron correcto.
+    # [OK] Sin construccion manual del envelope — controllers retornan result del service.
+    # [OK] Listeners usan try/catch sin propagar al pipeline HTTP.
+    #      AdminInvitationCreatedListener.handleAdminInvitationCreated() — try/catch
+    #      captura error, loggea solo invitationId (nunca rawToken ni email), no relanza.
+    #      EmailService.sendAdminInvitation() — try/catch captura excepciones de red,
+    #      loggea solo recipientDomain (dominio del correo), nunca email completo.
+    # [OK] Logging — sin tokens RAW, passwords, ni emails completos en logs.
+    #      EmailService loggea to.split('@')[1] (recipientDomain), nunca el email completo.
+    #      Listener loggea solo invitationId y errorMessage.
+    #      AuthService.registerAdmin() no loggea invitationToken ni password.
 
-      - nombre: "Controllers THIN sin try/catch ni PrismaService"
-        estado: "OK"
-        evidencia: >
-          auth.controller.ts: 3 metodos, cada uno delega directamente al service y retorna.
-          Sin try/catch. Sin PrismaService inyectado. Sin logica de negocio.
-          coach-requests.controller.ts: 4 metodos, mismo patron. Sin try/catch.
-          Sin PrismaService inyectado. Sin logica de negocio.
-
-      - nombre: "Import Prisma desde generated/prisma"
-        estado: "OK"
-        evidencia: >
-          auth.service.ts linea 12: from '../../../generated/prisma/index.js'.
-          coach-requests.service.ts linea 4-7: from '../../../generated/prisma/index.js'.
-          auth.controller.ts linea 20: from '../../../generated/prisma/index.js'.
-          coach-requests.controller.ts linea 25: from '../../../generated/prisma/index.js'.
-          register-athlete.dto.ts linea 15: from '../../../../generated/prisma/index.js'.
-          register-coach.dto.ts linea 15: from '../../../../generated/prisma/index.js'.
-          Sin imports desde '@prisma/client' en ningun archivo del modulo auth.
-
-      - nombre: "Enums desde generated/prisma (no duplicados locales)"
-        estado: "OK"
-        evidencia: >
-          UserRole, DocumentType, CoachRequestStatus, IdentificationType — todos importados
-          desde generated/prisma. Ningun enum local duplicado detectado en el modulo auth.
-
-      - nombre: "Comunicacion entre modulos via EventEmitter2"
-        estado: "OK"
-        evidencia: >
-          auth.service.ts: eventEmitter.emit('user.registered', ...) y eventEmitter.emit('coach.request.created', ...).
-          coach-requests.service.ts: eventEmitter.emit('coach.request.approved', ...) y
-          eventEmitter.emit('coach.request.rejected', ...).
-          Ningun service importado de otro modulo (excepto PrismaService de prisma/).
-
-      - nombre: "Sin construccion manual de envelope"
-        estado: "OK"
-        evidencia: >
-          Todos los controllers retornan directamente el resultado del service.
-          El ResponseInterceptor construye el envelope { success, statusCode, data, timestamp }.
-
-      - nombre: "Sin logs de passwords/tokens/datos sensibles"
-        estado: "OK"
-        evidencia: >
-          AuthService no instancia Logger ni PinoLogger. Ningun metodo loggea password,
-          accessToken, refreshToken ni tokenHash. LocalStrategy.validate() (via auth.service.ts)
-          no loggea credenciales.
-
-      - nombre: "Decoradores Swagger en endpoints"
-        estado: "OK"
-        evidencia: >
-          auth.controller.ts: @ApiTags('auth'), @ApiOperation(security:[]), @ApiResponse,
-          @ApiProblemResponse en los 3 endpoints. Errores documentados: 400, 409 (register),
-          400, 401, 403, 429 (login).
-          coach-requests.controller.ts: @ApiTags, @ApiBearerAuth(), @ApiOperation, @ApiResponse,
-          @ApiProblemResponse en los 4 endpoints. Cobertura completa de errores del plan.
-
-      - nombre: "ParseUUIDPipe en parametros :id"
-        estado: "OK"
-        evidencia: >
-          coach-requests.controller.ts: findOne (linea 118), approve (linea 157), reject (linea 204)
-          — todos usan @Param('id', ParseUUIDPipe).
-
-      - nombre: "State machine CoachRequest"
-        estado: "OK"
-        evidencia: >
-          approve(): verifica status !== PENDING y lanza INVALID_STATE_TRANSITION.
-          reject(): verifica status !== PENDING y lanza INVALID_STATE_TRANSITION.
-          Patron enum + metodo por transicion, sin librerias externas.
-
-      - nombre: "Seguridad endpoints publicos"
-        estado: "OK"
-        evidencia: >
-          auth.controller.ts: @ApiOperation({ security: [] }) en registerAthlete (linea 52),
-          registerCoach (linea 93) y login (linea 141). Los tres endpoints publicos marcados correctamente.
-          coach-requests.controller.ts: @ApiBearerAuth() a nivel de clase — correcto.
-
-  consistencia_contrato: "PASS"
-  divergencias_resueltas_ciclo1: 17
-  divergencias_resueltas_ciclo2: 2
-  divergencias_nuevas: []
-
-  nota_divergencia_qa: >
-    El QA reporto divergencia pendiente en RegisterCoachDto (termsDocumentVersion /
-    personalDataDocumentVersion). Verificacion LT: ambos campos ESTAN presentes en
-    register-coach.dto.ts (lineas 189-219). No existe divergencia real. El contrato
-    actualizado los incluye. No es un issue pendiente.
+  consistencia_contrato: "OK"
+  # Verificaciones realizadas contra outputs/contrato_openapi/src/modules/auth/:
+  #
+  # POST /admin-invitations (HU-002):
+  # [OK] Metodo POST, ruta /admin-invitations, response 201 AdminInvitationResponseDto.
+  # [OK] Guards: @UseGuards(JwtAuthGuard, RolesGuard) + @Roles(UserRole.ADMIN) — igual contrato.
+  # [OK] @ApiProblemResponse(400, 401, 403, 409) — igual contrato.
+  # [OK] AdminInvitationResponseDto: id, email, expiresAt, createdAt — identico contrato.
+  #      tokenHash e invitedBy correctamente ausentes.
+  #
+  # POST /admin-invitations/verify (HU-003):
+  # [OK] Metodo POST, ruta /admin-invitations/verify, response 200.
+  # [OK] Endpoint publico: @Public() + @ApiOperation({ security: [] }) presente.
+  #      El contrato de referencia no tiene @Public() — es un detalle de implementacion
+  #      (mecanismo para levantar JwtAuthGuard). El comportamiento observable es identico.
+  # [OK] @ApiProblemResponse(400, 404, 409, 422) — igual contrato.
+  # [OK] AdminInvitationStatusResponseDto: email, status (enum string), expiresAt — identico.
+  #
+  # POST /auth/admin/register (HU-003):
+  # [OK] Metodo POST, ruta /auth/admin/register, response 201 AdminRegistrationResponseDto.
+  # [OK] Endpoint publico: @ApiOperation({ security: [] }), sin JwtAuthGuard en el metodo.
+  # [OK] @ApiProblemResponse(400, 404, 409, 422) — igual contrato.
+  # [OK] RegisterAdminDto: todos los campos presentes e identicos al contrato —
+  #      invitationToken, name, email, password, phone, phoneCountryCode,
+  #      identificationType, identificationNumber, dateOfBirth?, avatarUrl?,
+  #      acceptsTermsOfService, termsDocumentVersion, acceptsHabeasData,
+  #      personalDataDocumentVersion.
+  # [OK] AdminRegistrationResponseDto: id, name, email, role, dateOfBirth?, avatarUrl?,
+  #      createdAt — identico contrato.
+  #
+  # Naming conventions:
+  # [OK] Rutas en ingles, plural, kebab-case: /admin-invitations, /admin-invitations/verify,
+  #      /auth/admin/register.
+  # [OK] ApiTags: 'admin-invitations' y 'auth'.
+  # [OK] ParseUUIDPipe: no aplica — no hay parametros :id en los endpoints de EPICA-09.
 
   escaneo_automatico:
     revisado: true
-    ejecutado: false
-    motivo_no_ejecucion_valido: true
-    motivo: >
-      Sin commits git (todos los archivos untracked) — imposible ejecutar git diff para
-      alimentar /security-review. Motivo valido.
-    hallazgos_confirmados: 0
-    hallazgos_descartados_validados: 2
+    hallazgos_confirmados: 1
+    hallazgos_descartados_validados: 1
     hallazgos_descartados_rechazados: 0
     notas: >
-      Vulnerabilidad BAJA 1 (context.requestStatus en COACH_NOT_APPROVED):
-      Descarte del QA validado. ProblemDetailFilter loggea el error internamente pero
-      no serializa el campo 'context' en la respuesta al cliente. Riesgo residual
-      aceptable — no bloquea.
-      Vulnerabilidad BAJA 2 (LocalAuthGuard sin handleRequest()):
-      RESUELTA en ciclo 2. handleRequest() confirmado presente en el codigo actual.
+      Hallazgo MEDIUM (token en URL de correo de invitacion, email.service.ts:53):
+      Confirmado como MEDIUM. El token RAW se incluye en el enlace de registro como
+      query parameter, lo que lo expone en: (a) logs del servidor de correo Resend,
+      (b) historial del navegador del receptor, (c) headers Referer si el usuario
+      navega desde esa URL a otro sitio. La mitigacion implementada es adecuada para
+      este flujo: token de uso unico (tokenUsedAt = now() atomicamente en $transaction),
+      expiracion de 48h configurable (ADMIN_INVITE_EXPIRATION_HOURS), HTTPS requerido
+      en produccion. Este patron es inherente al flujo de invitacion por email (magic link)
+      — la alternativa seria tokens de corta duracion (ej: 1h) o un segundo endpoint de
+      intercambio, lo cual aumentaria complejidad sin eliminar el riesgo en logs de correo.
+      El riesgo esta documentado en el plan (decisiones arquitectonicas #4 y #5).
+      Clasifico como MEDIUM confirmado pero no bloqueante: riesgo operacional aceptado
+      y documentado con mitigaciones adecuadas para el contexto (1-3 admins, MVP).
+      Hallazgo LOW (rate limiting en POST /admin-invitations/verify): Descarte del QA
+      validado. Token de 256 bits (randomBytes(32)) hace infactible la fuerza bruta
+      computacionalmente (2^256 combinaciones). ThrottlerGuard global (100 req/min)
+      es mitigacion suficiente para proteccion operacional adicional.
 
   validacion_openapi_spectral:
     revisado: true
-    ejecutado: false
-    motivo_no_ejecucion_valido: true
-    motivo: >
-      pnpm run openapi:validate requiere DATABASE_URL activa para arrancar la app y
-      exportar el schema. Sin base de datos disponible en el entorno de revision,
-      el export no puede completarse. El humano puede ejecutar: pnpm run openapi:validate
     errores_confirmados: 0
     warnings_documentados: 0
     notas: >
-      Inspeccion manual confirma que todos los endpoints con JwtAuthGuard documentan
-      @ApiProblemResponse(401). Los endpoints publicos tienen security: []. Las rutas
-      siguen convencion lowercase/ingles. La validacion automatica con Spectral queda
-      pendiente de ejecucion por el humano con base de datos activa.
+      Spectral no ejecuto — error preexistente en pnpm run openapi:export: TypeError
+      al instanciar JwtStrategy porque ConfigService no esta disponible en el contexto
+      de tsx (script standalone). El motivo del QA es valido: el error no fue introducido
+      por EPICA-09 y el build pasa con exit code 0. Este error bloquea la validacion
+      automatica en todos los ciclos hasta que se resuelva.
 
-  estado: "APROBADO"
+      Revision manual contra las reglas de Spectral para los nuevos endpoints:
+      - fitmess-auth-401-operation: POST /admin-invitations documenta @ApiProblemResponse(401).
+        Los endpoints publicos (verify, admin/register) tienen security: [] — Spectral
+        los excluiria de esta regla. Cumple.
+      - fitmess-no-internal-fields: tokenHash e invitedBy ausentes en todos los DTOs
+        de respuesta. passwordHash no expuesto. Cumple.
+      - fitmess-error-content-type: @ApiProblemResponse en todos los errores 4xx de
+        los tres endpoints. Cumple.
+      - fitmess-path-conventions: rutas en ingles, plural, kebab-case. Cumple.
+
+      El error de pnpm run openapi:export es un problema preexistente que debe resolverse
+      para habilitar la validacion automatica de Spectral en futuros ciclos. Se recomienda
+      al humano investigar la configuracion de ConfigService en el contexto de exportacion.
+
+  estado: "RECHAZADO"
   requiere_modificar_contrato: false
   requiere_modificar_plan: false
-  nota_estado: >
-    Revision independiente confirma que las dos correcciones del ciclo 2 estan presentes
-    en el codigo actual:
-    1. login.dto.ts — @MaxLength(72), format:'email', maxLength:72 en @ApiProperty: CONFIRMADOS
-    2. local-auth.guard.ts — handleRequest() con patron RFC 9457: CONFIRMADO
-    Linting PASS (0 errores, 32 warnings nivel warn). Cobertura PASS (dominio 98-100%,
-    adaptadores 75-100%). Patrones correctos en todos los archivos verificados.
-    Sin violaciones de BusinessException, controllers THIN, imports Prisma correctos.
-    Sin vulnerabilidades HIGH/CRITICAL. El codigo esta listo para git push.
+
+  instrucciones_desarrollador:
+    - prioridad: 1
+      archivo: >
+        src/modules/auth/admin-invitations.controller.ts,
+        src/modules/auth/admin-invitations.service.ts,
+        src/modules/auth/auth.controller.ts,
+        src/modules/auth/auth.module.ts,
+        src/modules/auth/dto/admin-invitation-response.dto.ts
+      accion: "Corregir los 9 errores de formato Prettier en los 5 archivos"
+      detalle: >
+        Ejecutar desde la raiz del proyecto:
+
+          pnpm run format
+
+        Este comando aplica Prettier a todos los archivos del proyecto y resuelve los
+        9 errores de formato en un solo paso. No se requiere modificacion manual de
+        logica, estructura, ni tests — todos los errores son de formato (trailing commas,
+        saltos de linea, indentacion en decoradores y bloques where).
+
+        Archivos afectados y lineas:
+          - admin-invitations.controller.ts: lineas 96, 98 (@ApiProblemResponse en linea unica)
+          - admin-invitations.service.ts: lineas 79, 87, 175 (findFirst y firma de findByToken)
+          - auth.controller.ts: lineas 170, 178 (@ApiProblemResponse en linea unica)
+          - auth.module.ts: linea 35 (array controllers en linea unica)
+          - dto/admin-invitation-response.dto.ts: linea 40 (salto de linea en @ApiProperty)
+
+        Verificar resultado con:
+          npx prettier --check "src/**/*.ts"
+
+        El codigo de produccion, la logica de negocio, los tests (149 pasando),
+        la cobertura (99% dominio, 80% adaptadores) y el build (exit code 0) son
+        correctos. El formato Prettier es el UNICO bloqueo para la aprobacion.
