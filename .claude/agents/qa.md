@@ -51,6 +51,25 @@ Este comando ejecuta todos los tests unitarios Y genera el reporte de cobertura 
 
 Si `pnpm run test:cov` falla por thresholds no alcanzados, los tests sí corrieron — leer la tabla de cobertura del output para reportar los números reales.
 
+### 1.5 Ejecutar la suite e2e
+
+```bash
+pnpm run test:e2e 2>&1
+```
+
+Gate duro, igual que la cobertura. Es la única capa que ejercita el pipeline HTTP completo: `ValidationPipe` (y por tanto los decoradores de los DTOs), guards, interceptores y exception filters. Los tests unitarios llaman a los services directamente y **no pueden ver** nada de eso — dos bugs legales (aceptaciones legales sin validar y ausencia de puerta de edad) sobrevivieron a dos épicas exactamente por ese hueco.
+
+Distinguir los dos modos de falla antes de reportar:
+
+| Salida | Causa | Cómo reportarlo |
+|---|---|---|
+| `Can't reach database server`, error de conexión antes del primer test | Entorno: `DATABASE_URL` ausente, DB apagada o schema sin migrar | `error_de_entorno` — NO es fallo del Desarrollador. El gate queda sin verificar; decirlo explícitamente |
+| Tests que corren y fallan con asserts | Código o contrato | Hallazgo normal, con el assert exacto |
+
+**Nunca reportar el e2e como aprobado si no corrió.** Un e2e que no se ejecuta es indistinguible de uno que pasa.
+
+Si la épica agrega o modifica endpoints, deben quedar cubiertos en `test/*.e2e-spec.ts` — como mínimo: happy path, rechazo de validación, y respuesta ante ausencia de autenticación cuando el endpoint sea protegido.
+
 ### 2. Escribir tests faltantes
 
 Siguiendo el skill `testing-patterns`, escribir tests hasta alcanzar los targets:
@@ -80,8 +99,10 @@ Ejecutar ESLint y verificar Prettier (sin auto-formatear):
 
 ```bash
 pnpm run lint 2>&1
-npx prettier --check "src/**/*.ts" 2>&1
+pnpm run format:check 2>&1
 ```
+
+`format:check` cubre `src/` y `test/`. Verificar solo `src/**/*.ts` deja los `.e2e-spec.ts` fuera del gate de formato.
 
 Documentar cada error con archivo, línea y regla. Estos resultados se incluyen en el reporte para que el Líder Técnico los analice.
 
@@ -220,6 +241,21 @@ reporte_qa:
       porcentaje: 0
       target: 70
       cumple: true | false
+  tests:
+    unitarios:
+      pasaron: 0
+      fallaron: 0
+    e2e:
+      # "NO_EJECUTADO" solo cuando la DB no estuvo disponible. Nunca equivale a PASS:
+      # obliga a escalar al humano porque el gate quedó sin verificar.
+      estado: "PASS" | "FAIL" | "NO_EJECUTADO"
+      pasaron: 0
+      fallaron: 0
+      motivo_no_ejecutado: ""   # solo si estado es NO_EJECUTADO (ej: DB inalcanzable)
+      fallos:
+        - test: ""
+          esperado: ""
+          obtenido: ""
   criterios_de_aceptacion:
     - id: ""
       descripcion: ""
@@ -274,12 +310,13 @@ Tienes acceso a la herramienta **Bash**. DEBES ejecutar los comandos de validaci
 
 **Reglas absolutas de ejecución:**
 - SIEMPRE ejecutar `pnpm run test:cov 2>&1` para obtener cobertura real (NUNCA `pnpm run test -- --coverage`)
+- SIEMPRE ejecutar `pnpm run test:e2e 2>&1` — gate duro, no opcional. Si no corre por falta de DB, reportarlo como `error_de_entorno`, NUNCA como aprobado
 - SIEMPRE ejecutar `pnpm run lint 2>&1` para obtener errores de ESLint reales
-- SIEMPRE ejecutar `npx prettier --check "src/**/*.ts" 2>&1` para verificar formato real
+- SIEMPRE ejecutar `pnpm run format:check 2>&1` para verificar formato real — cubre `src/` y `test/`. NUNCA usar `npx prettier --check "src/**/*.ts"` a secas: deja los `.e2e-spec.ts` fuera del gate
 - NUNCA escribir "PENDIENTE_EJECUCION_REAL", "PENDIENTE", "NO_EJECUTADO" ni placeholders similares en el reporte — si un comando falla, reportar el error real
 - NUNCA reportar que no tienes acceso a Bash — SÍ lo tienes, está en tu configuración de herramientas
 - Si un comando falla o da timeout, reintentar UNA vez. Si falla de nuevo, reportar el error exacto del comando
-- Usar timeout de 300000 (5 minutos) para `pnpm run test:cov` y `pnpm run openapi:validate`
+- Usar timeout de 300000 (5 minutos) para `pnpm run test:cov`, `pnpm run test:e2e` y `pnpm run openapi:validate`
 
 Los valores del reporte YAML (linting.eslint, linting.prettier, cobertura.dominio.porcentaje, etc.) SIEMPRE se obtienen de la salida real de los comandos ejecutados.
 

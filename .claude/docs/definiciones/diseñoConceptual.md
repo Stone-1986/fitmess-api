@@ -419,25 +419,41 @@ Los agentes NUNCA ejecutan migraciones ni comandos Prisma CLI. El MCP se usa exc
 
 Tres mecanismos de validacion que operan en diferentes momentos del flujo:
 
-### 9.1 Hook pre-commit — Linting + Compilacion
+### 9.1 Hook pre-commit — Linting + Compilacion + e2e
 
 | Aspecto | Valor |
 |---|---|
-| Herramienta | Husky + lint-staged + tsc |
+| Herramienta | Husky + lint-staged + tsc + Vitest e2e |
 | Gatillo | Antes de cada `git commit` del humano |
-| Que valida | 1) `eslint --fix` + `prettier --write` sobre `src/**/*.ts` y `test/**/*.ts` (via lint-staged) · 2) `npx tsc --noEmit` (verificacion de tipos completa) |
+| Que valida | 1) `eslint --fix` + `prettier --write` sobre `src/**/*.ts` y `test/**/*.ts` (via lint-staged) · 2) `npx tsc --noEmit` (verificacion de tipos completa) · 3) `pnpm run test:e2e`, solo si el commit toca `src/`, `test/`, `prisma/`, `package.json` o `vitest.config*` |
 | Quien lo activa | Solo el humano (los agentes no hacen commits) |
 | Por que tsc | SWC/Vitest transpila sin type-checking — los tests pueden pasar con errores de tipo. `tsc --noEmit` es la ultima linea de defensa |
+| Por que e2e condicional | Un commit de documentacion, de `.claude/` o de `outputs/` no puede romper el pipeline HTTP y no justifica ~20s |
+| Si la DB no esta disponible | El hook **avisa y deja pasar** el commit. Bloquear obligaria a usar `--no-verify` para trabajar sin DB, y eso apagaria tambien lint-staged y tsc: un gate que empuja a saltarse todos los gates es peor que un gate ausente. La verificacion autoritativa sigue siendo el Paso 2.5, que escala al humano |
+| Si los tests fallan de verdad | Bloquea el commit. La distincion se hace buscando `Can't reach database server` en la salida |
+| Husky y `sh -e` | El hook corre con `sh -e`, asi que cualquier comando que falle aborta solo. El e2e usa `\|\| e2e_status=$?` para poder clasificar el fallo antes de decidir |
 
 ### 9.2 Gate de cobertura — Vitest
 
 | Aspecto | Valor |
 |---|---|
 | Herramienta | Vitest con provider `v8` |
-| Gatillo | `pnpm run test:cov` (ejecutado por el QA) |
-| Thresholds globales | Lines 75%, Functions 75%, Branches 70%, Statements 75% |
+| Gatillo | `pnpm run test:cov` (lo ejecuta el orquestador en el Paso 2.5; el QA tambien lo corre, pero su numero se contrasta contra el del orquestador) |
+| Thresholds globales | Lines 80%, Functions 80%, Branches 75%, Statements 80% |
 | Targets por capa (manuales) | Services 80%, Controllers/Guards/Listeners 70% |
 | Gate duro | Si no se alcanza, el flujo regresa al QA |
+
+### 9.2.1 Gate e2e — Vitest + supertest
+
+| Aspecto | Valor |
+|---|---|
+| Herramienta | Vitest con `vitest.config.e2e.ts` + supertest sobre el `AppModule` real |
+| Gatillo | `pnpm run test:e2e` (Paso 2.5 del orquestador) |
+| Gate duro | Cualquier test fallido bloquea el flujo |
+| Que cubre y los unitarios no | El pipeline HTTP completo: `ValidationPipe` (decoradores de los DTOs), guards, interceptores y exception filters. Los unitarios llaman a los services directamente y no atraviesan nada de eso |
+| Dependencia externa | Requiere `DATABASE_URL` con el schema migrado. Es el unico gate que puede fallar por entorno |
+| Si la DB no esta disponible | Se reporta `NO_EJECUTADO` y se **escala al humano**. Nunca cuenta como aprobado: un e2e que no corre es indistinguible de uno que pasa |
+| Por que existe este gate | Se agrego el 2026-08-05 tras el hallazgo #4: la suite llevaba rota desde que los DTOs cambiaron de `accepted*` a `accepts*`, y dos bugs legales (aceptaciones sin validar, sin puerta de edad) sobrevivieron a dos epicas porque ningun gate ejercitaba el `ValidationPipe` |
 
 ### 9.3 Validador YAML de entrada
 
@@ -673,8 +689,8 @@ plan_de_implementacion:
 | `validate:epica` | `pnpm run validate:epica <ruta>` | Humano | Valida estructura YAML de epica antes del Agent Team |
 | `openapi:export` | `pnpm run openapi:export` | QA | Exporta el contrato OpenAPI generado por Swagger |
 | `openapi:validate` | `pnpm run openapi:validate` | QA | Valida contrato con Spectral |
-| `test:cov` | `pnpm run test:cov` | QA | Tests unitarios con reporte de cobertura |
-| `test:e2e` | `pnpm run test:e2e` | QA | Tests end-to-end |
+| `test:cov` | `pnpm run test:cov` | QA / orquestador (Paso 2.5) | Tests unitarios con reporte de cobertura. Gate duro |
+| `test:e2e` | `pnpm run test:e2e` | QA / orquestador (Paso 2.5) | Tests end-to-end contra la DB real. Gate duro — ver §9.2.1 |
 | `lint` | `pnpm run lint` | QA / pre-commit | ESLint con auto-fix |
 | `format:check` | `pnpm run format:check` | QA | Prettier en modo verificacion (sin escribir) |
 

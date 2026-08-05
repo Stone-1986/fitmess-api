@@ -30,7 +30,9 @@ Invoca al agente QA para validación standalone.
 
 4. **Ejecutar el proceso completo del agente QA:**
    - §1: Tests unitarios con cobertura (80% dominio, 70% adaptadores)
-   - §2: Tests e2e
+   - §1.5: Suite e2e — `pnpm run test:e2e`, gate duro. Si la DB no está disponible se reporta
+     `NO_EJECUTADO` y se escala; nunca se da por aprobado
+   - §2: Tests e2e faltantes para los endpoints nuevos o modificados
    - §3: Validación de linting (ESLint + Prettier)
    - §4: Revisión de seguridad y vulnerabilidades
    - §5: Checklists de calidad (excepciones, datos, Supabase, logging)

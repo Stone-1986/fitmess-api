@@ -55,11 +55,16 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - Si la cobertura no se alcanza, el flujo de implementación se bloquea y regresa al QA
 - Los tests unitarios van en `*.spec.ts` dentro de `src/`
 - Los tests e2e van en `*.e2e-spec.ts` dentro de `test/`
+- `pnpm run test:e2e` DEBE pasar sin fallos — es un gate duro equivalente a la cobertura y al linting
+- La suite e2e es la ÚNICA capa que ejercita el pipeline HTTP completo: `ValidationPipe` (y por tanto los decoradores de los DTOs), guards, interceptores y exception filters. Los tests unitarios llaman a los services directamente y no pueden detectar nada de eso
+- Todo endpoint nuevo o modificado se cubre en la suite e2e: happy path, rechazo de validación y, si es protegido, respuesta sin autenticación
+- Si `test:e2e` no puede ejecutarse porque la base de datos no está disponible, el gate queda **sin verificar** y se escala al humano — NUNCA se reporta como aprobado. Un e2e que no corre es indistinguible de uno que pasa
+- El hook `.husky/pre-commit` también ejecuta `test:e2e`, pero solo cuando el commit toca `src/`, `test/`, `prisma/`, `package.json` o `vitest.config*`. Si la DB no está disponible el hook **avisa y deja pasar**: bloquear empujaría a usar `git commit --no-verify`, que apagaría además lint-staged y `tsc --noEmit`. El hook es una red de conveniencia; el gate autoritativo es el Paso 2.5 de `implementar-epica`
 
 ## Calidad de código
 
 - NUNCA aprobar código que no pase ESLint y Prettier — es un gate duro del Líder Técnico
-- El QA ejecuta `pnpm run lint` y `npx prettier --check` e incluye los resultados en su reporte
+- El QA ejecuta `pnpm run lint` y `pnpm run format:check` e incluye los resultados en su reporte — `format:check` cubre `src/` y `test/`, a diferencia de un `prettier --check` limitado a `src/`
 - El Líder Técnico analiza los resultados de linting sin ejecutar comandos
 
 ## Compilación

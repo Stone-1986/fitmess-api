@@ -89,15 +89,21 @@ IMPORTANTE: Tienes acceso a Bash. DEBES ejecutar todos los comandos — NUNCA es
 
 Ejecuta estos comandos con Bash (obligatorio):
 1. pnpm run test:cov 2>&1 (timeout: 300000) — tests + cobertura real
-2. pnpm run lint 2>&1 — errores de ESLint reales
-3. npx prettier --check 'src/**/*.ts' 2>&1 — verificación de formato real
+2. pnpm run test:e2e 2>&1 (timeout: 300000) — suite e2e contra la DB real
+3. pnpm run lint 2>&1 — errores de ESLint reales
+4. pnpm run format:check 2>&1 — verificación de formato real (cubre src/ y test/)
 
 Después:
-4. Escribe tests faltantes hasta alcanzar targets (80% dominio, 70% adaptadores)
-5. Verificación de criterios de aceptación técnicos
-6. Detección de vulnerabilidades manual
-7. Escaneo de seguridad automatizado (/security-review)
-8. Validación OpenAPI con Spectral: pnpm run openapi:validate 2>&1
+5. Escribe tests faltantes hasta alcanzar targets (80% dominio, 70% adaptadores)
+6. Verificación de criterios de aceptación técnicos
+7. Detección de vulnerabilidades manual
+8. Escaneo de seguridad automatizado (/security-review)
+9. Validación OpenAPI con Spectral: pnpm run openapi:validate 2>&1
+
+Sobre el e2e: si falla por conexión a la DB es un problema de entorno — reportarlo como
+tal y NO como fallo del código. Si los tests corren y fallan con asserts, es un hallazgo
+real. Los endpoints nuevos o modificados de esta épica deben quedar cubiertos en
+test/*.e2e-spec.ts: es la única capa que ejercita ValidationPipe, guards y filters.
 
 Todos los valores del reporte YAML deben venir de la salida real de los comandos.
 Escribe tu reporte en outputs/reporte_qa.yaml."
@@ -113,12 +119,13 @@ Esperar a que termine.
 
 Ningún agente califica su propio trabajo: el QA escribe los tests, mide la cobertura de esos mismos tests y reporta si alcanzó el target. El Líder Técnico no tiene Bash y no puede contrastar nada. Sin este paso, la decisión final del flujo descansa en números autorreportados.
 
-Ejecutar los cuatro comandos y **guardar la salida cruda**:
+Ejecutar los cinco comandos y **guardar la salida cruda**:
 
 ```bash
 pnpm run test:cov 2>&1      # timeout 300000
+pnpm run test:e2e 2>&1      # timeout 300000 — requiere DB, ver abajo
 pnpm run lint 2>&1
-npx prettier --check "src/**/*.ts" 2>&1
+pnpm run format:check 2>&1  # cubre src/ y test/ — no usar `npx prettier --check 'src/**/*.ts'`
 pnpm run build 2>&1
 ```
 
@@ -130,7 +137,21 @@ Comparar con lo que declara `outputs/reporte_qa.yaml`:
 | `linting.prettier` | salida de `prettier --check` |
 | `cobertura.dominio.porcentaje` | tabla de `test:cov` (services) |
 | `cobertura.adaptadores.porcentaje` | tabla de `test:cov` (controllers, guards, listeners) |
+| `tests.e2e` | conteo de passed/failed de `pnpm run test:e2e` |
 | `errores_criticos` de tipo `error_de_compilacion` | salida de `pnpm run build` |
+
+#### El e2e y su dependencia de la base de datos
+
+`test:e2e` levanta el `AppModule` real contra la DB de `DATABASE_URL`. Es el único gate que puede fallar por el entorno y no por el código, así que hay que distinguir los dos casos antes de culpar a nadie:
+
+| Síntoma en la salida | Qué significa | Qué hacer |
+|---|---|---|
+| `Can't reach database server`, `MODULE_NOT_FOUND`, error de conexión antes del primer test | Problema de entorno | **Escalar al humano.** No es un fallo del Desarrollador y no se arregla con un ciclo de corrección. El gate queda sin verificar — nunca darlo por aprobado |
+| Tests que corren y fallan con asserts (`expected 201, got 400`) | Problema del código o del contrato | Ciclo de corrección normal |
+
+**Nunca omitir este gate porque la DB no esté disponible.** Un e2e que no corre es indistinguible de un e2e que pasa, y esa fue exactamente la causa del hallazgo #4: la suite llevaba rota desde que los DTOs cambiaron de `accepted*` a `accepts*` y nadie lo vio porque el comando no estaba en ningún gate.
+
+**Por qué el e2e no es redundante con `test:cov`:** los unitarios llaman a los services directamente, así que nunca pasan por el `ValidationPipe`, los guards ni los exception filters. Todo lo que vive en el pipeline HTTP —validación de DTOs, orden guard/pipe, envelope de respuesta, formato RFC 9457— solo lo verifica el e2e. Dos bugs legales (consentimientos sin validar, sin puerta de edad) sobrevivieron a dos épicas justamente ahí.
 
 **Si hay discrepancia entre el reporte y la salida real:** el reporte del QA es inválido. Relanzar el QA una vez con la discrepancia explícita en el prompt. Si vuelve a discrepar, **escalar al humano** — es una falla del agente, no del código, y no se resuelve con ciclos de corrección.
 
@@ -153,9 +174,11 @@ Lee estos archivos:
 SALIDA VERIFICADA DE LOS GATES (ejecutada por el orquestador, no por el QA):
 --- pnpm run test:cov ---
 [pegar salida real]
+--- pnpm run test:e2e ---
+[pegar salida real]
 --- pnpm run lint ---
 [pegar salida real]
---- npx prettier --check ---
+--- pnpm run format:check ---
 [pegar salida real]
 --- pnpm run build ---
 [pegar salida real]
@@ -217,7 +240,7 @@ Si **un solo** rechazo cae fuera de la lista blanca, la ruta rápida no aplica: 
 **Procedimiento obligatorio (los cuatro pasos, sin omitir ninguno):**
 
 1. Aplicar la corrección (`pnpm run format`, eliminar el import, etc.)
-2. **Re-ejecutar los cuatro gates del Paso 2.5.** Si alguno falla, la ruta rápida se aborta: incrementar ciclo y volver al Paso 1
+2. **Re-ejecutar los cinco gates del Paso 2.5.** Si alguno falla, la ruta rápida se aborta: incrementar ciclo y volver al Paso 1
 3. **Reescribir `estado:` en los DOS artefactos** — `outputs/reporte_qa.yaml` y `outputs/revision_codigo.yaml` — a `"APROBADO"`, vaciar `errores_criticos` / `instrucciones_desarrollador`, y agregar en `razonamiento` qué se corrigió y que fue por ruta rápida
 4. **Log:** fila con agente `orquestador`, estado `CORRECCION_TRIVIAL`, y el detalle de qué se tocó
 

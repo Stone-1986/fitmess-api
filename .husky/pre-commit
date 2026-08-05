@@ -1,2 +1,46 @@
 npx lint-staged
 npx tsc --noEmit
+
+# ── Gate e2e (rulesArquitectura § Testing) ────────────────────────────────────
+#
+# Husky ejecuta este archivo con `sh -e`, asi que cualquier comando que falle
+# aborta el commit por si solo. El e2e necesita un trato distinto: es el unico
+# gate que puede fallar por el entorno (base de datos) y no por el codigo, y hay
+# que separar los dos casos antes de bloquear a nadie.
+#
+# Solo corre si el commit toca codigo ejecutable. Un commit de documentacion, de
+# .claude/ o de outputs/ no puede romper el pipeline HTTP y no merece 20 segundos.
+# pnpm-workspace.yaml y pnpm-lock.yaml entran porque cambian la resolucion de
+# modulos: asi se detecto que `node dist/main` no encontraba
+# @prisma/client-runtime-utils.
+if git diff --cached --name-only | grep -qE '^(src/|test/|prisma/|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|vitest\.config)'; then
+  echo "husky - ejecutando suite e2e (el commit toca codigo o resolucion de modulos)"
+
+  e2e_status=0
+  # `|| e2e_status=$?` mantiene el fallo dentro de una lista condicional para que
+  # `sh -e` no aborte antes de poder clasificarlo.
+  e2e_output=$(pnpm run test:e2e 2>&1) || e2e_status=$?
+
+  if [ "$e2e_status" -ne 0 ]; then
+    if echo "$e2e_output" | grep -q "Can't reach database server"; then
+      # Fallo de entorno. No se bloquea el commit a proposito: hacerlo obligaria a
+      # usar `git commit --no-verify` para trabajar sin DB, y eso apagaria TAMBIEN
+      # lint-staged y tsc. Un gate que empuja a saltarse todos los gates es peor
+      # que un gate ausente. El aviso queda a la vista y el Paso 2.5 de
+      # `implementar-epica` vuelve a verificarlo antes del CHECKPOINT 2.
+      echo ""
+      echo "  ADVERTENCIA: suite e2e NO EJECUTADA — la base de datos no esta disponible."
+      echo "  El gate quedo SIN VERIFICAR: un e2e que no corre no equivale a uno que pasa."
+      echo "  Levanta la DB y corre 'pnpm run test:e2e' antes de abrir el PR."
+      echo ""
+    else
+      echo "$e2e_output"
+      echo ""
+      echo "  SUITE E2E FALLIDA — commit bloqueado."
+      echo "  Es la unica capa que ejercita ValidationPipe, guards y exception filters:"
+      echo "  un fallo aqui describe lo que recibiria un cliente real."
+      echo ""
+      exit 1
+    fi
+  fi
+fi

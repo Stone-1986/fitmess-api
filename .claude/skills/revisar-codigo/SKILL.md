@@ -29,7 +29,7 @@ Invoca al agente Líder Técnico para revisión de código standalone.
 3. **Si no hay argumentos**, ejecutar el proceso LT completo (§1-§5 del agente)
 
 4. **Ejecutar el proceso completo del Líder Técnico:**
-   - §1: Revisar resultados de linting y cobertura
+   - §1: Revisar resultados de linting, cobertura y suite e2e (los tres son gate duro)
    - §1.5: Analizar resultados de validación OpenAPI (Spectral)
    - §2: Revisar violaciones de patrones
    - §3: Validar consistencia código↔contrato

@@ -222,6 +222,14 @@ El proyecto tiene 4 niveles de verificacion de compilacion:
 
 **¿Por que tantos niveles?** Vitest usa SWC para transpilar, que NO verifica tipos. Los tests pueden pasar aunque el codigo tenga errores de tipo. Solo `tsc` (via `tsc --noEmit` o `pnpm run build`) verifica tipos realmente.
 
+### El hook pre-commit y la suite e2e
+
+Ademas de lint-staged y `tsc --noEmit`, el hook corre `pnpm run test:e2e` **cuando el commit toca** `src/`, `test/`, `prisma/`, `package.json` o `vitest.config*`. Un commit de documentacion no lo dispara.
+
+Necesita la base de datos levantada. Si no lo esta, el hook **no bloquea el commit**: imprime una advertencia de que el gate quedo sin verificar y sigue. La razon es practica — bloquear obligaria a usar `git commit --no-verify`, que apaga tambien lint-staged y `tsc`. Si ves esa advertencia, levanta la DB y corre `pnpm run test:e2e` antes de abrir el PR.
+
+Si los tests corren y fallan de verdad, el commit **si** se bloquea.
+
 ---
 
 ## Resumen rapido
