@@ -16,6 +16,15 @@ import { CoachRequestDetailResponseDto } from './dto/coach-request-detail-respon
 import { CoachRequestSummaryResponseDto } from './dto/coach-request-summary-response.dto.js';
 import { PaginationMeta } from '../../common/interceptors/response.interceptor.js';
 
+/**
+ * Offset UTC de la zona horaria de Colombia (America/Bogota).
+ *
+ * Es un valor fijo: Colombia no observa horario de verano, por lo que el offset
+ * no varia a lo largo del anio. Si el proyecto llegara a operar en paises con DST,
+ * esto debe reemplazarse por una conversion con zona horaria real (Intl / date-fns-tz).
+ */
+const COLOMBIA_UTC_OFFSET = '-05:00';
+
 @Injectable()
 export class CoachRequestsService {
   constructor(
@@ -30,6 +39,7 @@ export class CoachRequestsService {
    * Body vacio retorna todas las solicitudes con paginacion por defecto (page=1, limit=20).
    * Arrays ids y status soportan multiples valores (OR dentro del array).
    * name: busqueda parcial ILIKE %valor%.
+   * createdAtFrom/createdAtTo: rango inclusivo en hora local de Colombia.
    */
   async search(
     dto: SearchCoachRequestsDto,
@@ -49,12 +59,27 @@ export class CoachRequestsService {
       coachRequestWhere['status'] = { in: dto.status };
     }
 
-    if (dto.createdAt) {
-      const startOfDay = new Date(dto.createdAt);
-      startOfDay.setUTCHours(0, 0, 0, 0);
-      const endOfDay = new Date(dto.createdAt);
-      endOfDay.setUTCHours(23, 59, 59, 999);
-      coachRequestWhere['createdAt'] = { gte: startOfDay, lte: endOfDay };
+    // Rango de fechas de creacion — ambos extremos opcionales e inclusivos.
+    // Las fechas del filtro se interpretan en hora local de Colombia, no en UTC:
+    // un admin que busca "2026-03-02" espera su dia local completo. Sin esta
+    // conversion las solicitudes creadas despues de las 19:00 hora local caerian
+    // en el dia UTC siguiente y quedarian fuera del resultado.
+    if (dto.createdAtFrom || dto.createdAtTo) {
+      const createdAtRange: { gte?: Date; lte?: Date } = {};
+
+      if (dto.createdAtFrom) {
+        createdAtRange.gte = new Date(
+          `${dto.createdAtFrom}T00:00:00.000${COLOMBIA_UTC_OFFSET}`,
+        );
+      }
+
+      if (dto.createdAtTo) {
+        createdAtRange.lte = new Date(
+          `${dto.createdAtTo}T23:59:59.999${COLOMBIA_UTC_OFFSET}`,
+        );
+      }
+
+      coachRequestWhere['createdAt'] = createdAtRange;
     }
 
     // Filtros sobre User (JOIN via user)

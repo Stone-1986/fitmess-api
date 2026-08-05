@@ -8,12 +8,23 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CoachRequestStatus } from '../../../../../generated/prisma/index.js';
+import { IsOnOrAfter } from '../validators/is-on-or-after.validator.js';
+
+/**
+ * Formato de fecha aceptado en los filtros de rango: solo la parte de fecha.
+ *
+ * Se restringe a YYYY-MM-DD (y no a ISO 8601 completo) porque el service compone
+ * la hora y el offset de Colombia sobre este valor. Aceptar un datetime completo
+ * produciria una fecha invalida al concatenar.
+ */
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * DTO de entrada para HU-002: Busqueda avanzada de solicitudes de entrenadores.
@@ -23,6 +34,8 @@ import { CoachRequestStatus } from '../../../../../generated/prisma/index.js';
  *
  * Filtros combinables con logica AND.
  * Los campos ids y status aceptan arrays para filtrar multiples valores.
+ * createdAtFrom y createdAtTo delimitan un rango de fechas; cada extremo es
+ * opcional por separado.
  */
 export class SearchCoachRequestsDto {
   // ── Filtros ────────────────────────────────────────────────────────────────
@@ -92,16 +105,45 @@ export class SearchCoachRequestsDto {
 
   @ApiPropertyOptional({
     description:
-      'Filtrar solicitudes creadas en una fecha especifica (formato ISO 8601, solo la parte de fecha)',
+      'Fecha inicial del rango de creacion (inclusive, desde las 00:00:00 de ese dia). ' +
+      'Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). ' +
+      'Si se omite, no hay limite inferior.',
     example: '2026-03-01',
     format: 'date',
   })
   @IsOptional()
+  @Matches(DATE_ONLY_PATTERN, {
+    message: 'createdAtFrom debe tener el formato YYYY-MM-DD',
+  })
   @IsDateString(
-    {},
-    { message: 'La fecha debe estar en formato ISO 8601 (YYYY-MM-DD)' },
+    { strict: true },
+    {
+      message: 'createdAtFrom no corresponde a una fecha valida del calendario',
+    },
   )
-  createdAt?: string;
+  createdAtFrom?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Fecha final del rango de creacion (inclusive, hasta las 23:59:59.999 de ese dia). ' +
+      'Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). ' +
+      'Si se omite, no hay limite superior. Para buscar un solo dia, enviar el mismo ' +
+      'valor en createdAtFrom y createdAtTo.',
+    example: '2026-03-31',
+    format: 'date',
+  })
+  @IsOptional()
+  @Matches(DATE_ONLY_PATTERN, {
+    message: 'createdAtTo debe tener el formato YYYY-MM-DD',
+  })
+  @IsDateString(
+    { strict: true },
+    { message: 'createdAtTo no corresponde a una fecha valida del calendario' },
+  )
+  @IsOnOrAfter('createdAtFrom', {
+    message: 'createdAtTo no puede ser anterior a createdAtFrom',
+  })
+  createdAtTo?: string;
 
   // ── Paginacion ─────────────────────────────────────────────────────────────
 

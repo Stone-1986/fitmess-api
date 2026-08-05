@@ -71,6 +71,9 @@ export class CoachRequestsController {
       'body vacio {} retorna todas las solicitudes con paginacion por defecto (page=1, limit=10). ' +
       'Los filtros se combinan con logica AND. ' +
       'Los campos uuid y status aceptan arrays. El campo nombre usa busqueda parcial. ' +
+      'createdAtFrom y createdAtTo delimitan un rango inclusivo de fechas de creacion; ' +
+      'cada extremo es opcional por separado y se interpreta en hora local de Colombia (UTC-5). ' +
+      'Enviar el mismo valor en ambos filtra por un solo dia. ' +
       'Solo accesible para usuarios con rol Administrador (Ley 1581/2012).',
   })
   @ApiResponse({

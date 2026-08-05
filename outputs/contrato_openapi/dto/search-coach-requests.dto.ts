@@ -8,12 +8,14 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CoachRequestStatus } from '../enums/coach-request-status.enum';
+import { IsOnOrAfter } from '../validators/is-on-or-after.validator';
 
 /**
  * DTO de entrada para búsqueda de solicitudes de entrenadores (HU-002).
@@ -83,13 +85,37 @@ export class SearchCoachRequestsDto {
 
   @ApiPropertyOptional({
     description:
-      'Filtrar solicitudes creadas en una fecha específica (formato ISO 8601, solo la parte de fecha)',
+      'Fecha inicial del rango de creación (inclusive, desde las 00:00:00 de ese día). ' +
+      'Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). ' +
+      'Si se omite, no hay límite inferior.',
     example: '2026-03-01',
     format: 'date',
   })
   @IsOptional()
-  @IsDateString({}, { message: 'La fecha debe estar en formato ISO 8601 (YYYY-MM-DD)' })
-  createdAt?: string;
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'createdAtFrom debe tener el formato YYYY-MM-DD',
+  })
+  @IsDateString({ strict: true }, { message: 'createdAtFrom no corresponde a una fecha válida del calendario' })
+  createdAtFrom?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Fecha final del rango de creación (inclusive, hasta las 23:59:59.999 de ese día). ' +
+      'Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). ' +
+      'Si se omite, no hay límite superior. Para buscar un solo día, enviar el mismo ' +
+      'valor en createdAtFrom y createdAtTo.',
+    example: '2026-03-31',
+    format: 'date',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'createdAtTo debe tener el formato YYYY-MM-DD',
+  })
+  @IsDateString({ strict: true }, { message: 'createdAtTo no corresponde a una fecha válida del calendario' })
+  @IsOnOrAfter('createdAtFrom', {
+    message: 'createdAtTo no puede ser anterior a createdAtFrom',
+  })
+  createdAtTo?: string;
 
   // ── Paginación ─────────────────────────────────────────────────────────────
 

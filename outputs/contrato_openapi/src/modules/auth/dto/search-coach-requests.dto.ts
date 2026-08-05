@@ -7,11 +7,13 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CoachRequestStatus } from '../enums/coach-request-status.enum';
+import { IsOnOrAfter } from '../validators/is-on-or-after.validator';
 
 /**
  * DTO de entrada para HU-002: Busqueda avanzada de solicitudes de entrenadores.
@@ -73,12 +75,23 @@ export class SearchCoachRequestsDto {
   identificationNumber?: string;
 
   @ApiPropertyOptional({
-    description: 'Filtrar por fecha de creacion de la solicitud. Formato ISO 8601 (YYYY-MM-DD). Retorna solicitudes de ese dia.',
+    description: 'Fecha inicial del rango de creacion (inclusive). Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). Si se omite, no hay limite inferior.',
     example: '2026-03-01',
   })
   @IsOptional()
-  @IsDateString({}, { message: 'createdAt debe ser una fecha en formato ISO 8601 (YYYY-MM-DD)' })
-  createdAt?: string;
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'createdAtFrom debe tener el formato YYYY-MM-DD' })
+  @IsDateString({ strict: true }, { message: 'createdAtFrom no corresponde a una fecha valida del calendario' })
+  createdAtFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Fecha final del rango de creacion (inclusive, cubre el dia completo). Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). Para buscar un solo dia, enviar el mismo valor en createdAtFrom y createdAtTo.',
+    example: '2026-03-31',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'createdAtTo debe tener el formato YYYY-MM-DD' })
+  @IsDateString({ strict: true }, { message: 'createdAtTo no corresponde a una fecha valida del calendario' })
+  @IsOnOrAfter('createdAtFrom', { message: 'createdAtTo no puede ser anterior a createdAtFrom' })
+  createdAtTo?: string;
 
   @ApiPropertyOptional({
     description: 'Numero de pagina (empieza en 1)',

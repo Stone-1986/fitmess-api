@@ -77,6 +77,23 @@ const eventEmitterMock = {
   emit: vi.fn(),
 };
 
+/**
+ * Extrae el `where` del ultimo findMany ejecutado.
+ *
+ * search() invoca count() y findMany() para construir el arreglo que recibe
+ * $transaction, asi que los mocks registran la llamada aunque $transaction
+ * este mockeado y no ejecute las promesas.
+ */
+function lastFindManyWhere(): Record<string, unknown> {
+  const calls = prismaMock.coachRequest.findMany.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+
+  const lastArgs = calls[calls.length - 1]?.[0] as {
+    where: Record<string, unknown>;
+  };
+  return lastArgs.where;
+}
+
 // ── Suite principal ────────────────────────────────────────────────────────────
 
 describe('CoachRequestsService', () => {
@@ -187,15 +204,84 @@ describe('CoachRequestsService', () => {
       expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });
 
-    it('aplica filtro por createdAt (rango del dia) cuando se especifica', async () => {
+    it('aplica solo limite inferior cuando se especifica createdAtFrom', async () => {
       // Arrange
       prismaMock.$transaction.mockResolvedValue([0, []]);
 
       // Act
-      await service.search({ createdAt: '2026-03-01' });
+      await service.search({ createdAtFrom: '2026-03-01' });
+
+      // Assert — 00:00 hora Colombia = 05:00 UTC del mismo dia, sin limite superior
+      const where = lastFindManyWhere();
+      expect(where['createdAt']).toEqual({
+        gte: new Date('2026-03-01T05:00:00.000Z'),
+      });
+    });
+
+    it('aplica solo limite superior cuando se especifica createdAtTo', async () => {
+      // Arrange
+      prismaMock.$transaction.mockResolvedValue([0, []]);
+
+      // Act
+      await service.search({ createdAtTo: '2026-03-31' });
+
+      // Assert — 23:59:59.999 hora Colombia = 04:59:59.999 UTC del dia siguiente
+      const where = lastFindManyWhere();
+      expect(where['createdAt']).toEqual({
+        lte: new Date('2026-04-01T04:59:59.999Z'),
+      });
+    });
+
+    it('cubre el dia local completo cuando createdAtFrom y createdAtTo son iguales', async () => {
+      // Arrange
+      prismaMock.$transaction.mockResolvedValue([0, []]);
+
+      // Act
+      await service.search({
+        createdAtFrom: '2026-03-02',
+        createdAtTo: '2026-03-02',
+      });
+
+      // Assert — el rango cruza la medianoche UTC: cubre las 24 horas locales
+      const where = lastFindManyWhere();
+      expect(where['createdAt']).toEqual({
+        gte: new Date('2026-03-02T05:00:00.000Z'),
+        lte: new Date('2026-03-03T04:59:59.999Z'),
+      });
+    });
+
+    it('incluye las solicitudes creadas de noche en hora Colombia dentro del dia local', async () => {
+      // Arrange — 20:00 del 2 de marzo hora Colombia ya es el 3 de marzo en UTC.
+      // Con el filtro anterior (dia UTC exacto) esta solicitud quedaba fuera.
+      prismaMock.$transaction.mockResolvedValue([0, []]);
+      const creadaDeNoche = new Date('2026-03-03T01:00:00.000Z');
+
+      // Act
+      await service.search({
+        createdAtFrom: '2026-03-02',
+        createdAtTo: '2026-03-02',
+      });
 
       // Assert
-      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      const range = lastFindManyWhere()['createdAt'] as {
+        gte: Date;
+        lte: Date;
+      };
+      expect(creadaDeNoche.getTime()).toBeGreaterThanOrEqual(
+        range.gte.getTime(),
+      );
+      expect(creadaDeNoche.getTime()).toBeLessThanOrEqual(range.lte.getTime());
+    });
+
+    it('no aplica filtro de fecha cuando no se especifica ningun extremo', async () => {
+      // Arrange
+      prismaMock.$transaction.mockResolvedValue([0, []]);
+
+      // Act
+      await service.search({ status: [CoachRequestStatus.PENDING] });
+
+      // Assert
+      expect(lastFindManyWhere()).not.toHaveProperty('createdAt');
     });
 
     it('calcula hasNext y hasPrevious correctamente con paginacion', async () => {
