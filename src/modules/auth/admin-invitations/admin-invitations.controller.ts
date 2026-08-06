@@ -14,17 +14,17 @@ import {
 } from '@nestjs/swagger';
 import { ApiProblemResponse } from '../../common/swagger/error-responses.js';
 import { AdminInvitationsService } from './admin-invitations.service.js';
-import { JwtAuthGuard } from '../shared/guards/jwt-auth.guard.js';
-import { RolesGuard } from '../shared/guards/roles.guard.js';
-import { Roles } from '../shared/decorators/roles.decorator.js';
-import { CurrentUser } from '../shared/decorators/current-user.decorator.js';
-import type { AuthUser } from '../shared/strategies/jwt.strategy.js';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { AuthUser } from '../../common/types/auth-user.interface.js';
 import { UserRole } from '../../../../generated/prisma/index.js';
 import { CreateAdminInvitationDto } from './dto/create-admin-invitation.dto.js';
 import { AdminInvitationResponseDto } from './dto/admin-invitation-response.dto.js';
 import { AdminInvitationStatusResponseDto } from './dto/admin-invitation-status-response.dto.js';
 import { VerifyAdminInvitationDto } from './dto/verify-admin-invitation.dto.js';
-import { Public } from '../shared/decorators/public.decorator.js';
+import { Public } from '../../common/decorators/public.decorator.js';
 
 /**
  * AdminInvitationsController — gestion de invitaciones de administrador (EPICA-09)

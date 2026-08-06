@@ -2,10 +2,10 @@ import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RolesGuard } from './roles.guard.js';
-import { UserRole } from '../../../../../generated/prisma/index.js';
+import { UserRole } from '../../../../generated/prisma/index.js';
 import { ROLES_KEY } from '../decorators/roles.decorator.js';
-import { BusinessException } from '../../../common/exceptions/business.exception.js';
-import { BusinessError } from '../../../common/exceptions/business-error.enum.js';
+import { BusinessException } from '../exceptions/business.exception.js';
+import { BusinessError } from '../exceptions/business-error.enum.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

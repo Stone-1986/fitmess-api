@@ -32,7 +32,10 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 
 - Los módulos NUNCA importan services de otros módulos directamente
 - La comunicación entre módulos se hace ÚNICAMENTE vía `@nestjs/event-emitter`
-- Los módulos `prisma` y `common` son la única excepción: pueden ser importados por cualquier módulo
+- Los módulos `prisma` y `common` son la única excepción: pueden ser importados por cualquier módulo. Ambos son `@Global`, así que en la práctica no hace falta importarlos
+- Los guards compartidos (`JwtAuthGuard`, `RolesGuard`), los decoradores (`@Roles`, `@Public`, `@CurrentUser`) y el tipo `AuthUser` viven en `src/modules/common/` — NUNCA en `auth/`. Un módulo de dominio que necesite proteger sus endpoints los importa desde `common` y **no importa `AuthModule`**
+- `AuthModule` no exporta nada y ningún módulo debe importarlo. Hasta EPICA-02 exportaba los guards junto con `AuthService`, así que cualquier módulo que quisiera proteger un endpoint terminaba con `AuthService` inyectable — el acoplamiento que esta sección prohíbe, entrando por la puerta de atrás
+- `LocalAuthGuard` sí se queda en `auth`: solo lo usa el endpoint de login
 
 ## Controllers
 

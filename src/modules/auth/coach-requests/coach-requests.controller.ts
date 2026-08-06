@@ -17,11 +17,11 @@ import {
 } from '@nestjs/swagger';
 import { ApiProblemResponse } from '../../common/swagger/error-responses.js';
 import { CoachRequestsService } from './coach-requests.service.js';
-import { JwtAuthGuard } from '../shared/guards/jwt-auth.guard.js';
-import { RolesGuard } from '../shared/guards/roles.guard.js';
-import { Roles } from '../shared/decorators/roles.decorator.js';
-import { CurrentUser } from '../shared/decorators/current-user.decorator.js';
-import type { AuthUser } from '../shared/strategies/jwt.strategy.js';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { Roles } from '../../common/decorators/roles.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { AuthUser } from '../../common/types/auth-user.interface.js';
 import { UserRole } from '../../../../generated/prisma/index.js';
 import { SearchCoachRequestsDto } from './dto/search-coach-requests.dto.js';
 import { RejectCoachRequestDto } from './dto/reject-coach-request.dto.js';

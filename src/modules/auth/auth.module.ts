@@ -11,9 +11,7 @@ import { CoachRequestsController } from './coach-requests/coach-requests.control
 import { AdminInvitationsController } from './admin-invitations/admin-invitations.controller.js';
 import { LocalStrategy } from './shared/strategies/local.strategy.js';
 import { JwtStrategy } from './shared/strategies/jwt.strategy.js';
-import { JwtAuthGuard } from './shared/guards/jwt-auth.guard.js';
 import { LocalAuthGuard } from './shared/guards/local-auth.guard.js';
-import { RolesGuard } from './shared/guards/roles.guard.js';
 
 @Module({
   imports: [
@@ -43,10 +41,15 @@ import { RolesGuard } from './shared/guards/roles.guard.js';
     AdminInvitationsService,
     LocalStrategy,
     JwtStrategy,
-    JwtAuthGuard,
     LocalAuthGuard,
-    RolesGuard,
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule],
+  // JwtAuthGuard y RolesGuard viven en CommonModule (@Global) desde EPICA-02:
+  // los necesita cualquier modulo de dominio y tenerlos aqui obligaba a importar
+  // AuthModule entero, lo que dejaba AuthService inyectable donde no corresponde.
+  // LocalAuthGuard se queda: solo lo usa el login.
+  //
+  // Este modulo no exporta nada: ningun otro modulo debe depender de `auth`.
+  // JwtStrategy se registra en Passport al instanciarse, asi que AuthGuard('jwt')
+  // funciona en toda la app con solo tener AuthModule cargado en AppModule.
 })
 export class AuthModule {}

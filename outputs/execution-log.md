@@ -108,6 +108,21 @@
 | 3 | Revisión de código | lider-tecnico | APROBADO | `outputs/revision_codigo.yaml` | `instrucciones_desarrollador: []`, `errores_criticos: []`. **No se apoyó en el análisis del QA**: hizo su propio grep independiente de campos `data` en todos los `*.dto.ts` y de controllers que retornan ese shape (solo 3 en el proyecto: los 2 paginados y `deactivate()`), y verificó a mano los 5 shapes contra la expresión nueva. Corrigió además en su YAML lo de la "partida doble" del ciclo 1. Dejó constancia de que #2b sigue abierto en su totalidad: el interceptor sale de la deuda, pero `validation-exception.filter.ts`, `correlation-id.middleware.ts` y `prisma.service.ts` no se tocaron. |
 | 4 | Evaluación | orquestador | APROBADO | — | Verificado que **ambos** artefactos dicen `APROBADO` antes de presentar el CHECKPOINT 2 — el error que quedó congelado en EPICA-01 y EPICA-09. Los 2 tests del índice parcial en verde por nombre: UNICIDAD y PARCIALIDAD. |
 
+## 2026-08-06 — Guards a `common`: cerrar el acoplamiento con `auth`
+
+Decisión del humano tras el CHECKPOINT 2, sobre la nota no bloqueante que dejó el Líder Técnico.
+
+| # | Paso | Responsable | Estado | Notas |
+|---|------|-------------|--------|-------|
+| 1 | Diagnóstico | humano + Claude | — | `ExercisesModule` importaba `AuthModule` para resolver los guards por DI. Dos problemas distintos: **(a)** `AuthModule` exportaba `AuthService` junto con los guards, así que quedaba inyectable dentro de cualquier módulo que quisiera proteger un endpoint — el acoplamiento que `rulesCodigo` prohíbe, entrando por la puerta de atrás; **(b)** de escala: EPICA-03 a 08 iban a repetir el patrón y `auth` habría quedado como infraestructura compartida de facto. |
+| 2 | Hallazgo que abrió la salida | Claude | — | Ninguno de los dos guards necesitaba vivir en `auth`. `RolesGuard` solo usa `Reflector`, el enum de Prisma y metadatos. `JwtAuthGuard` extiende `AuthGuard('jwt')`, y esa estrategia se registra en Passport cuando `AuthModule` instancia `JwtStrategy` — independientemente de quién consuma el guard. |
+| 3 | Dependencia invertida detectada antes de mover | Claude | BUG evitado | `roles.guard.ts` y `current-user.decorator.ts` importaban el tipo `AuthUser` desde `jwt.strategy.ts`. Moverlos tal cual habría hecho que **`common` dependiera de `auth`** — la dependencia al revés de como está pensada la arquitectura. Se movió `AuthUser` a `common/types/auth-user.interface.ts` y ahora `jwt.strategy.ts` lo importa desde ahí y lo re-exporta por compatibilidad. `common` define el contrato, `auth` lo implementa. |
+| 4 | Movimiento | humano + Claude | OK | A `common/guards/`: `jwt-auth.guard.ts`, `roles.guard.ts` y sus specs. A `common/decorators/`: `public`, `roles`, `current-user`. Nuevo `common/types/auth-user.interface.ts`. `LocalAuthGuard` se queda en `auth` — solo lo usa el login. |
+| 5 | `CommonModule` | humano + Claude | OK | Nuevo módulo `@Global` que provee y exporta los dos guards, mismo patrón que `PrismaModule`. Registrado en `AppModule`. `AuthModule` deja de declarar los guards y **deja de exportar todo**. |
+| 6 | Verificación estructural | Claude | OK | `AuthModule` lo importa únicamente `app.module.ts`. Ningún módulo fuera de `auth` importa nada de `auth/`. `common` no tiene un solo import de `auth` (las coincidencias son comentarios y una URL en un test). |
+| 7 | Gates | humano + Claude | OK | 296 unitarios, e2e 71/71 — este último es el que confirma que la DI resuelve de verdad en runtime y no solo que compila. `tsc --noEmit` OK, lint 0 errores, `format:check` PASS, build OK. |
+| 8 | Rules | humano + Claude | OK | `rulesCodigo § Comunicación entre módulos`: se documenta dónde viven los guards, que `AuthModule` no exporta nada y que ningún módulo debe importarlo, para que EPICA-03 no recree el patrón. |
+
 # Mantenimiento fuera del flujo de épicas
 
 Cambios aplicados directamente en sesión con el humano, sin pasar por la cadena

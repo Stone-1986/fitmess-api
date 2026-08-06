@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '../../../../../generated/prisma/index.js';
+import type { AuthUser } from '../../../common/types/auth-user.interface.js';
 
 export interface JwtPayload {
   sub: string;
@@ -10,11 +11,10 @@ export interface JwtPayload {
   role: UserRole;
 }
 
-export interface AuthUser {
-  id: string;
-  email: string;
-  role: UserRole;
-}
+// AuthUser se define en `common/types`: es el contrato que consumen los guards,
+// los decoradores de parametro y los controllers de cualquier modulo. Tenerlo
+// aqui obligaba a `common` a importar de `auth` para tiparlo.
+export type { AuthUser };
 
 /**
  * JwtStrategy — valida JWT en el header Authorization: Bearer <token>.

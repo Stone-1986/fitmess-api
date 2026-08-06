@@ -1,7 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
-import { BusinessException } from '../../../common/exceptions/business.exception.js';
-import { BusinessError } from '../../../common/exceptions/business-error.enum.js';
+import { BusinessException } from '../exceptions/business.exception.js';
+import { BusinessError } from '../exceptions/business-error.enum.js';
 
 // ── Suite principal ────────────────────────────────────────────────────────────
 

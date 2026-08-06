@@ -1,8 +1,8 @@
 import { Injectable, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
-import { BusinessException } from '../../../common/exceptions/business.exception.js';
-import { BusinessError } from '../../../common/exceptions/business-error.enum.js';
+import { BusinessException } from '../exceptions/business.exception.js';
+import { BusinessError } from '../exceptions/business-error.enum.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 
 /**

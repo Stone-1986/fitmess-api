@@ -1,10 +1,10 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UserRole } from '../../../../../generated/prisma/index.js';
+import { UserRole } from '../../../../generated/prisma/index.js';
 import { ROLES_KEY } from '../decorators/roles.decorator.js';
-import { BusinessException } from '../../../common/exceptions/business.exception.js';
-import { BusinessError } from '../../../common/exceptions/business-error.enum.js';
-import { AuthUser } from '../strategies/jwt.strategy.js';
+import { BusinessException } from '../exceptions/business.exception.js';
+import { BusinessError } from '../exceptions/business-error.enum.js';
+import type { AuthUser } from '../types/auth-user.interface.js';
 
 /**
  * RolesGuard — verifica que el usuario autenticado tenga el rol requerido.

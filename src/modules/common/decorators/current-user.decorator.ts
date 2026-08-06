@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { AuthUser } from '../strategies/jwt.strategy.js';
+import type { AuthUser } from '../types/auth-user.interface.js';
 
 /**
  * @CurrentUser() — extrae el usuario autenticado del request.

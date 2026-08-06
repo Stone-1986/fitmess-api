@@ -9,6 +9,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
+import { CommonModule } from './modules/common/common.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ExercisesModule } from './modules/exercises/exercises.module.js';
@@ -37,6 +38,7 @@ import { CorrelationIdMiddleware } from './modules/common/middlewares/correlatio
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     EventEmitterModule.forRoot(),
     PrismaModule,
+    CommonModule,
     HealthModule,
     AuthModule,
     ExercisesModule,
