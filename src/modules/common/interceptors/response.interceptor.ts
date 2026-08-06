@@ -39,7 +39,15 @@ export class ResponseInterceptor<T> implements NestInterceptor<
       map((data) => ({
         success: true as const,
         statusCode: response.statusCode,
-        data: data?.data ?? data, // Soporta { data, meta } o data plano
+        // Verificacion explicita de presencia de la clave 'data' — NUNCA `??`.
+        // `data?.data ?? data` trataba un `data.data` explicitamente `null`
+        // como "ausente" (igual que `undefined`) y caia al fallback (el
+        // objeto envolvente completo) en vez de preservar el `null`
+        // intencional del patron `{ data: null, message }` (soft-delete,
+        // ver DELETE /exercises/:id). `'data' in data` distingue "la clave
+        // existe con valor null" de "la clave no existe".
+        data:
+          data && typeof data === 'object' && 'data' in data ? data.data : data, // Soporta { data, meta }, { data: null, message } o data plano
         meta: data?.meta, // Solo si viene paginación
         message: data?.message,
         timestamp: new Date().toISOString(),

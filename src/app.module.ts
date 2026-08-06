@@ -11,6 +11,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { ExercisesModule } from './modules/exercises/exercises.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { CorrelationIdMiddleware } from './modules/common/middlewares/correlation-id.middleware.js';
 
@@ -38,6 +39,7 @@ import { CorrelationIdMiddleware } from './modules/common/middlewares/correlatio
     PrismaModule,
     HealthModule,
     AuthModule,
+    ExercisesModule,
     NotificationsModule,
   ],
 })

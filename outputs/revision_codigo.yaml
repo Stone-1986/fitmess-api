@@ -1,299 +1,130 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# NOTA POSTERIOR (2026-08-05)
-#
-# Esta revision quedo en estado RECHAZADO, pero la epica se aprobo, taggeo
-# (EPICA-09/checkpoint-2) y commiteo el 2026-03-08.
-#
-# Que paso: el unico bloqueo eran errores de Prettier. El orquestador ejecuto
-# `pnpm run format` mas la eliminacion de un import no usado, verifico lint en 0
-# errores y presento el CHECKPOINT 2 sin re-lanzar la cadena. Nadie reescribio
-# este archivo, asi que el estado persistido quedo contradiciendo la realidad.
-#
-# No fue un caso aislado: el mismo atajo se aplico en EPICA-01 (ver
-# outputs/execution-log.md, Fase 2 ciclo 2). Era comportamiento no documentado.
-#
-# Correccion del modelo: `implementar-epica/SKILL.md` ahora define el Paso 4.5
-# — ruta rapida de correcciones triviales con lista blanca cerrada y obligacion
-# de re-correr los gates Y reescribir `estado:` en los dos artefactos antes de
-# presentar el CHECKPOINT 2.
-#
-# El bloque `reparacion_retroactiva` al final de este archivo documenta la
-# verificacion real ejecutada el 2026-08-05.
-# ─────────────────────────────────────────────────────────────────────────────
-
 revision_codigo:
-  fecha: "2026-03-08"
-  ciclo: 1
-  razonamiento: ""
+  fecha: "2026-08-05"
+  ciclo: 2
+  epica_id: "EPICA-02"
+  razonamiento: >
+    QUÉ: valido el fix de response.interceptor.ts:42 (única causa del rechazo
+    del ciclo 1) y superviso el análisis de regresión sobre EPICA-01/09, dado
+    que el interceptor envuelve toda la API. POR QUÉ: la nueva expresión
+    (`'data' in data ? data.data : data`) distingue clave-presente-con-null de
+    clave-ausente, que era exactamente el defecto; verifiqué yo mismo (no solo
+    el QA) que ningún DTO de respuesta del proyecto declara un campo propio
+    `data` y que los únicos 3 shapes `{ data, ... }` retornados por un
+    controller en todo src/ son los 2 paginados (`{data: array, meta}`) y
+    `deactivate()` (`{data: null, message}`) — sin caso de regresión posible.
+    REFERENCIA: response.interceptor.ts:42-50, salida del orquestador (296/296
+    unitarios, 71/71 e2e, coincide con los números del QA).
 
   linting:
     eslint: "PASS"
-    prettier: "FAIL"
-    errores:
-      - archivo: "src/modules/auth/admin-invitations.controller.ts"
-        linea: 96
-        regla: "prettier/prettier"
-        descripcion: >
-          @ApiProblemResponse(400, ...) en linea unica. Prettier requiere formato
-          multilinea con trailing comma en este contexto (coherente con los otros
-          @ApiProblemResponse que ya usan multilinea en el mismo archivo).
-      - archivo: "src/modules/auth/admin-invitations.controller.ts"
-        linea: 98
-        regla: "prettier/prettier"
-        descripcion: >
-          @ApiProblemResponse(403, ...) con indentacion y salto de linea no alineados
-          con la configuracion de Prettier.
-      - archivo: "src/modules/auth/admin-invitations.service.ts"
-        linea: 79
-        regla: "prettier/prettier"
-        descripcion: >
-          La asignacion del await a existingActiveInvitation en la llamada findFirst
-          debe comenzar en nueva linea con indentacion correcta.
-      - archivo: "src/modules/auth/admin-invitations.service.ts"
-        linea: 87
-        regla: "prettier/prettier"
-        descripcion: >
-          Coma y salto de linea sobrante al final del bloque where de findFirst.
-      - archivo: "src/modules/auth/admin-invitations.service.ts"
-        linea: 175
-        regla: "prettier/prettier"
-        descripcion: >
-          Parametro rawToken en la firma del metodo findByToken debe estar en formato
-          multilinea con trailing comma.
-      - archivo: "src/modules/auth/auth.controller.ts"
-        linea: 170
-        regla: "prettier/prettier"
-        descripcion: >
-          @ApiProblemResponse(404, ...) en version de una sola linea no es el formato
-          esperado por Prettier en este contexto.
-      - archivo: "src/modules/auth/auth.controller.ts"
-        linea: 178
-        regla: "prettier/prettier"
-        descripcion: >
-          @ApiProblemResponse(422, ...) mismo patron que linea 170.
-      - archivo: "src/modules/auth/auth.module.ts"
-        linea: 35
-        regla: "prettier/prettier"
-        descripcion: >
-          Array de controllers en una sola linea. Prettier requiere formato multilinea
-          con cada elemento en su propia linea y trailing comma.
-      - archivo: "src/modules/auth/dto/admin-invitation-response.dto.ts"
-        linea: 40
-        regla: "prettier/prettier"
-        descripcion: >
-          Salto de linea faltante en el decorador @ApiProperty del campo createdAt.
+    prettier: "PASS"
+    errores: []
+
+  compilacion:
+    build: "PASS"
 
   cobertura:
     dominio:
-      porcentaje: 99
+      porcentaje: 97.61
+      target: 80
       cumple: true
+      detalle: "ExercisesService — sin cambios respecto al ciclo 1."
     adaptadores:
-      porcentaje: 80
+      porcentaje: 100
+      target: 70
       cumple: true
+      detalle: "ExercisesController — sin cambios respecto al ciclo 1."
+    nota: >
+      common/interceptors/response.interceptor.ts pasó de 0% a 100% en las 4
+      métricas. No es un target del plan de EPICA-02 (el archivo es de
+      common/), pero cierra la porción de ese archivo en el hallazgo abierto
+      #2b de execution-log.md (deuda de cobertura). #2b sigue ABIERTO en su
+      totalidad — otros archivos que lista (validation-exception.filter.ts,
+      correlation-id.middleware.ts, prisma.service.ts) no se tocaron en este
+      ciclo y siguen pendientes; no corresponde cerrarlo, solo actualizar que
+      response.interceptor.ts ya no es parte de la deuda.
+
+  suite_e2e:
+    estado: "PASS"
+    detalle: "71/71 — el test de DELETE /exercises/:id asertando data === null pasa."
 
   patrones:
     violaciones: []
-    # Verificaciones realizadas:
-    # [OK] Services — solo BusinessException+TechnicalException. Ningun HttpException nativo.
-    #      AdminInvitationsService: BusinessException con DUPLICATE_ENTITY (lineas 69,91),
-    #      ENTITY_NOT_FOUND (linea 190), INVITATION_ALREADY_USED (linea 198),
-    #      INVITATION_EXPIRED (linea 208). TechnicalException con DATABASE_ERROR (linea 135).
-    #      AuthService.registerAdmin(): BusinessException con ENTITY_NOT_FOUND (linea 281),
-    #      INVITATION_ALREADY_USED (linea 290), INVITATION_EXPIRED (linea 300),
-    #      DUPLICATE_ENTITY (linea 361). TechnicalException con DATABASE_ERROR (linea 366).
-    # [OK] Controllers THIN — sin try/catch, sin PrismaService inyectado, delegan al service.
-    #      AdminInvitationsController.create() — linea 110 — retorna directamente.
-    #      AdminInvitationsController.verify() — linea 178 — retorna directamente.
-    #      AuthController.registerAdmin() — linea 188 — retorna directamente.
-    # [OK] Imports Prisma desde generated/prisma (no @prisma/client).
-    #      admin-invitations.controller.ts linea 22: from '../../../generated/prisma/index.js'.
-    #      auth.service.ts linea 12: from '../../../generated/prisma/index.js'.
-    #      admin-registration-response.dto.ts linea 2: from '../../../../generated/prisma/index.js'.
-    #      register-admin.dto.ts linea 15: from '../../../../generated/prisma/index.js'.
-    #      seed.ts linea 30: from '../generated/prisma/index.js'.
-    # [OK] Enums desde generated/prisma — sin duplicados locales.
-    #      UserRole, DocumentType, IdentificationType, CoachRequestStatus — todos importados
-    #      desde generated/prisma. AdminInvitationStatus es un tipo string derivado (no enum
-    #      Prisma) — correcto porque el estado no se persiste en DB (decision arquitectonica).
-    # [OK] Comunicacion entre modulos via EventEmitter2.
-    #      AdminInvitationsService emite admin.invitation.created (linea 151).
-    #      AuthService.registerAdmin() emite user.registered (linea 374).
-    #      NotificationsModule escucha admin.invitation.created — sin imports directos
-    #      de services del modulo auth. Patron correcto.
-    # [OK] Sin construccion manual del envelope — controllers retornan result del service.
-    # [OK] Listeners usan try/catch sin propagar al pipeline HTTP.
-    #      AdminInvitationCreatedListener.handleAdminInvitationCreated() — try/catch
-    #      captura error, loggea solo invitationId (nunca rawToken ni email), no relanza.
-    #      EmailService.sendAdminInvitation() — try/catch captura excepciones de red,
-    #      loggea solo recipientDomain (dominio del correo), nunca email completo.
-    # [OK] Logging — sin tokens RAW, passwords, ni emails completos en logs.
-    #      EmailService loggea to.split('@')[1] (recipientDomain), nunca el email completo.
-    #      Listener loggea solo invitationId y errorMessage.
-    #      AuthService.registerAdmin() no loggea invitationToken ni password.
+    notas_no_bloqueantes:
+      - archivo: "src/modules/exercises/exercises.module.ts"
+        descripcion: >
+          Sin cambios respecto al ciclo 1: ExercisesModule importa AuthModule
+          para los guards. No bloquea. Ver dictamen del ciclo 1 — sigue en
+          pie: decisión pendiente del humano antes de EPICA-03 (declarar
+          `auth` como excepción formal en rulesCodigo o mover los guards a
+          common/). No se re-evalúa aquí porque el fix de este ciclo no tocó
+          este archivo.
+
+  fix_response_interceptor:
+    verificado: true
+    detalle: >
+      Línea 42-50 reescrita: `data && typeof data === 'object' && 'data' in
+      data ? data.data : data`. Verifiqué manualmente los 5 shapes posibles
+      contra la expresión: objeto plano sin clave `data` → retorna el objeto
+      completo (sin cambio); `{data: [...], meta}` → retorna el array (sin
+      cambio); `{data: X, message}` con X no nulo → retorna X (sin cambio,
+      ningún endpoint real usa este shape hoy); `{data: null, message}` →
+      retorna null (ESTE es el fix); `null`/`undefined` directo → se
+      preserva (ningún controller lo hace hoy, cubierto por completitud). Los
+      6 casos de response.interceptor.spec.ts (3 preexistentes + 3 nuevos:
+      null-explícito-con-message, null-directo, undefined-directo) están en
+      verde. Alcance respetado: solo este archivo y su spec,
+      src/modules/exercises/ intacto.
+    regresion_epica_01_09: >
+      Verificado independientemente del análisis del QA (regresion_response_interceptor
+      en reporte_qa.yaml): grep de `data:`/`data?:` en todos los *.dto.ts de
+      src/ — ningún DTO de respuesta declara un campo propio `data`. Grep de
+      controllers que retornan un shape `{ data: ... }` — solo 3 en todo el
+      proyecto: coach-requests.controller.ts findAll (`{data: array, meta}`,
+      sin cambio de comportamiento) y los 2 ya analizados de
+      exercises.controller.ts. Confirmo la conclusión del QA: sin regresión
+      posible sobre EPICA-01/EPICA-09.
 
   consistencia_contrato: "OK"
-  # Verificaciones realizadas contra outputs/contrato_openapi/src/modules/auth/:
-  #
-  # POST /admin-invitations (HU-002):
-  # [OK] Metodo POST, ruta /admin-invitations, response 201 AdminInvitationResponseDto.
-  # [OK] Guards: @UseGuards(JwtAuthGuard, RolesGuard) + @Roles(UserRole.ADMIN) — igual contrato.
-  # [OK] @ApiProblemResponse(400, 401, 403, 409) — igual contrato.
-  # [OK] AdminInvitationResponseDto: id, email, expiresAt, createdAt — identico contrato.
-  #      tokenHash e invitedBy correctamente ausentes.
-  #
-  # POST /admin-invitations/verify (HU-003):
-  # [OK] Metodo POST, ruta /admin-invitations/verify, response 200.
-  # [OK] Endpoint publico: @Public() + @ApiOperation({ security: [] }) presente.
-  #      El contrato de referencia no tiene @Public() — es un detalle de implementacion
-  #      (mecanismo para levantar JwtAuthGuard). El comportamiento observable es identico.
-  # [OK] @ApiProblemResponse(400, 404, 409, 422) — igual contrato.
-  # [OK] AdminInvitationStatusResponseDto: email, status (enum string), expiresAt — identico.
-  #
-  # POST /auth/admin/register (HU-003):
-  # [OK] Metodo POST, ruta /auth/admin/register, response 201 AdminRegistrationResponseDto.
-  # [OK] Endpoint publico: @ApiOperation({ security: [] }), sin JwtAuthGuard en el metodo.
-  # [OK] @ApiProblemResponse(400, 404, 409, 422) — igual contrato.
-  # [OK] RegisterAdminDto: todos los campos presentes e identicos al contrato —
-  #      invitationToken, name, email, password, phone, phoneCountryCode,
-  #      identificationType, identificationNumber, dateOfBirth?, avatarUrl?,
-  #      acceptsTermsOfService, termsDocumentVersion, acceptsHabeasData,
-  #      personalDataDocumentVersion.
-  # [OK] AdminRegistrationResponseDto: id, name, email, role, dateOfBirth?, avatarUrl?,
-  #      createdAt — identico contrato.
-  #
-  # Naming conventions:
-  # [OK] Rutas en ingles, plural, kebab-case: /admin-invitations, /admin-invitations/verify,
-  #      /auth/admin/register.
-  # [OK] ApiTags: 'admin-invitations' y 'auth'.
-  # [OK] ParseUUIDPipe: no aplica — no hay parametros :id en los endpoints de EPICA-09.
+  consistencia_contrato_detalle: "Sin cambios respecto al ciclo 1 — este ciclo no tocó exercises/."
 
   escaneo_automatico:
     revisado: true
-    hallazgos_confirmados: 1
-    hallazgos_descartados_validados: 1
+    hallazgos_confirmados: 0
+    hallazgos_descartados_validados: 0
     hallazgos_descartados_rechazados: 0
     notas: >
-      Hallazgo MEDIUM (token en URL de correo de invitacion, email.service.ts:53):
-      Confirmado como MEDIUM. El token RAW se incluye en el enlace de registro como
-      query parameter, lo que lo expone en: (a) logs del servidor de correo Resend,
-      (b) historial del navegador del receptor, (c) headers Referer si el usuario
-      navega desde esa URL a otro sitio. La mitigacion implementada es adecuada para
-      este flujo: token de uso unico (tokenUsedAt = now() atomicamente en $transaction),
-      expiracion de 48h configurable (ADMIN_INVITE_EXPIRATION_HOURS), HTTPS requerido
-      en produccion. Este patron es inherente al flujo de invitacion por email (magic link)
-      — la alternativa seria tokens de corta duracion (ej: 1h) o un segundo endpoint de
-      intercambio, lo cual aumentaria complejidad sin eliminar el riesgo en logs de correo.
-      El riesgo esta documentado en el plan (decisiones arquitectonicas #4 y #5).
-      Clasifico como MEDIUM confirmado pero no bloqueante: riesgo operacional aceptado
-      y documentado con mitigaciones adecuadas para el contexto (1-3 admins, MVP).
-      Hallazgo LOW (rate limiting en POST /admin-invitations/verify): Descarte del QA
-      validado. Token de 256 bits (randomBytes(32)) hace infactible la fuerza bruta
-      computacionalmente (2^256 combinaciones). ThrottlerGuard global (100 req/min)
-      es mitigacion suficiente para proteccion operacional adicional.
+      Sin cambios respecto al ciclo 1: /security-review sigue sin poder
+      invocarse (limitación de toolset, no de esta épica). El cambio de este
+      ciclo (una expresión condicional en un interceptor, sin I/O, sin datos
+      sensibles) no introduce superficie de riesgo nueva.
 
   validacion_openapi_spectral:
     revisado: true
     errores_confirmados: 0
     warnings_documentados: 0
     notas: >
-      Spectral no ejecuto — error preexistente en pnpm run openapi:export: TypeError
-      al instanciar JwtStrategy porque ConfigService no esta disponible en el contexto
-      de tsx (script standalone). El motivo del QA es valido: el error no fue introducido
-      por EPICA-09 y el build pasa con exit code 0. Este error bloquea la validacion
-      automatica en todos los ciclos hasta que se resuelva.
+      pnpm run openapi:validate sigue fallando por el mismo defecto
+      preexistente (JwtStrategy/ConfigService en scripts/export-openapi.ts).
+      Corrijo lo que afirmé en mi revisión del ciclo 1: dije que la
+      preexistencia estaba "verificada por partida doble (LT y QA, cada uno
+      con git stash independiente)" — no era exacto, yo solo había confirmado
+      que falla HOY, no que fallara antes de la épica. El equipo lo verificó
+      correctamente después con git worktree sobre 9889abc (estado sin
+      exercises/ ni el import de AuthModule): mismo error idéntico. La
+      conclusión de fondo se sostiene (no es un defecto introducido por
+      EPICA-02) pero con alcance mayor al que le di en el ciclo 1: registrado
+      como hallazgo abierto #8 (severidad Alta) en execution-log.md —
+      openapi:export nunca ha arrancado en este proyecto, así que Spectral no
+      ha corrido ni en EPICA-01 ni en EPICA-09. No bloquea este ciclo (no es
+      un defecto de esta épica) pero es más grave de lo que documenté
+      inicialmente — no debe tratarse como un hallazgo menor en adelante.
 
-      Revision manual contra las reglas de Spectral para los nuevos endpoints:
-      - fitmess-auth-401-operation: POST /admin-invitations documenta @ApiProblemResponse(401).
-        Los endpoints publicos (verify, admin/register) tienen security: [] — Spectral
-        los excluiria de esta regla. Cumple.
-      - fitmess-no-internal-fields: tokenHash e invitedBy ausentes en todos los DTOs
-        de respuesta. passwordHash no expuesto. Cumple.
-      - fitmess-error-content-type: @ApiProblemResponse en todos los errores 4xx de
-        los tres endpoints. Cumple.
-      - fitmess-path-conventions: rutas en ingles, plural, kebab-case. Cumple.
+  instrucciones_desarrollador: []
 
-      El error de pnpm run openapi:export es un problema preexistente que debe resolverse
-      para habilitar la validacion automatica de Spectral en futuros ciclos. Se recomienda
-      al humano investigar la configuracion de ConfigService en el contexto de exportacion.
+  errores_criticos: []
 
   estado: "APROBADO"
+  motivo_rechazo: ""
   requiere_modificar_contrato: false
   requiere_modificar_plan: false
-
-  # Historico preservado: instrucciones del rechazo original del 2026-03-08.
-  # Todas se aplicaron — ver reparacion_retroactiva al final del archivo.
-  instrucciones_desarrollador_resueltas:
-    - prioridad: 1
-      archivo: >
-        src/modules/auth/admin-invitations.controller.ts,
-        src/modules/auth/admin-invitations.service.ts,
-        src/modules/auth/auth.controller.ts,
-        src/modules/auth/auth.module.ts,
-        src/modules/auth/dto/admin-invitation-response.dto.ts
-      accion: "Corregir los 9 errores de formato Prettier en los 5 archivos"
-      detalle: >
-        Ejecutar desde la raiz del proyecto:
-
-          pnpm run format
-
-        Este comando aplica Prettier a todos los archivos del proyecto y resuelve los
-        9 errores de formato en un solo paso. No se requiere modificacion manual de
-        logica, estructura, ni tests — todos los errores son de formato (trailing commas,
-        saltos de linea, indentacion en decoradores y bloques where).
-
-        Archivos afectados y lineas:
-          - admin-invitations.controller.ts: lineas 96, 98 (@ApiProblemResponse en linea unica)
-          - admin-invitations.service.ts: lineas 79, 87, 175 (findFirst y firma de findByToken)
-          - auth.controller.ts: lineas 170, 178 (@ApiProblemResponse en linea unica)
-          - auth.module.ts: linea 35 (array controllers en linea unica)
-          - dto/admin-invitation-response.dto.ts: linea 40 (salto de linea en @ApiProperty)
-
-        Verificar resultado con:
-          npx prettier --check "src/**/*.ts"
-
-        El codigo de produccion, la logica de negocio, los tests (149 pasando),
-        la cobertura (99% dominio, 80% adaptadores) y el build (exit code 0) son
-        correctos. El formato Prettier es el UNICO bloqueo para la aprobacion.
-
-# ─────────────────────────────────────────────────────────────────────────────
-reparacion_retroactiva:
-  fecha: "2026-08-05"
-  motivo: >
-    El estado persistido era RECHAZADO sobre codigo aprobado, taggeado y
-    commiteado. Se aplico el procedimiento del Paso 4.5 de implementar-epica,
-    que exige re-correr los gates antes de reescribir el estado.
-
-  clasificacion_del_rechazo_original: >
-    Los bloqueos eran exclusivamente de formato Prettier mas un import no usado.
-    Todos caen dentro de la lista blanca de correcciones triviales del Paso 4.5,
-    por lo que la ruta rapida era aplicable. Lo que falto en marzo no fue la
-    correccion — fue reescribir este archivo despues de aplicarla.
-
-  alcance_de_la_verificacion: >
-    Los gates se ejecutaron sobre HEAD (1dd4a45), no sobre el commit original de
-    la epica (ff47c43). HEAD es un superconjunto: contiene toda EPICA-09 mas el
-    fix de rango de fechas. Que HEAD pase implica que el codigo de EPICA-09 esta
-    sano hoy; NO es una verificacion del estado exacto del 2026-03-08.
-
-  gates_verificados:
-    eslint: "PASS — 0 errores, 32 warnings preexistentes"
-    prettier: "PASS — All matched files use Prettier code style"
-    build: "PASS — nest build sin errores"
-    tests: "PASS — 162 tests en 14 archivos"
-    cobertura_global: "94.38% stmts, 89.67% branches, 87.75% funcs, 94.31% lines"
-
-  patrones: "Sin violaciones (revision original del 2026-03-08, no re-ejecutada)"
-  consistencia_contrato: >
-    OK. Nota: el contrato se reorganizo el 2026-08-05 al layout canonico
-    contrato_openapi/src/modules/[module]/[feature]/. Los DTOs de EPICA-09 que
-    habian regenerado y empobrecido el contrato de EPICA-01 se eliminaron.
-    Ver outputs/execution-log.md, entrada del 2026-08-05.
-
-  salvedad: >
-    Dos adaptadores quedan por debajo del target de 70% si rulesArquitectura se
-    lee por archivo: jwt-auth.guard.ts (50%) y prisma.service.ts (0%). El gate
-    `pnpm run test:cov` retorna exit 0 porque los thresholds de vitest son
-    globales. Ninguno es codigo nuevo de EPICA-09. Registrado como hallazgo
-    abierto #2 en outputs/execution-log.md — no se corrige en esta reparacion.
-
-  estado_final: "APROBADO"
