@@ -173,3 +173,122 @@ model AdminInvitation {
   @@index([email])
   @@map("admin_invitations")
 }
+
+// --- Modelos EPICA-02 ---
+
+// Biblioteca global de ejercicios. `name` es la identidad del catalogo y vive
+// aqui (no en ExerciseVersion): no se versiona, a diferencia de description/
+// muscleGroup, que son contenido de entrenamiento (RN-05). Decision aceptada
+// por el humano el 2026-08-05: corregir una errata de nombre debe propagarse
+// a los planes historicos que ya referencian este ejercicio.
+//
+// Unicidad de `name`: SOLO entre ejercicios ACTIVOS, case-insensitive
+// (CA-005-2/CA-005-6). NO se declara `@unique` en el campo ni un
+// `@@unique([name])` a nivel de modelo — cualquiera de los dos rechazaria
+// altas legitimas que CA-005-6 permite explicitamente (el nombre de un
+// ejercicio inhabilitado queda libre para uno nuevo). La regla real requiere
+// un indice UNICO PARCIAL con funcion (lower(name) ... WHERE is_active),
+// que el schema declarativo de Prisma no puede expresar (no soporta indices
+// funcionales ni parciales). Ver bloque de instrucciones abajo.
+//
+// ============================================================================
+// INDICE PARCIAL REQUERIDO — el humano lo agrega a mano en la migracion:
+//
+//   CREATE UNIQUE INDEX "exercises_name_lower_active_key"
+//     ON "exercises" (lower("name"))
+//     WHERE "is_active" = true;
+//
+// Por que `lower("name")` sin trim(): el service SIEMPRE persiste `name` ya
+// trimeado (create() y el rename de update()), asi que la columna nunca
+// contiene espacios al inicio/fin — trim() en el indice seria redundante.
+//
+// Workflow recomendado (patron oficial de Prisma "Customizing migrations"):
+//   1. pnpm prisma migrate dev --create-only --name add_exercises_catalog
+//   2. Editar el migration.sql generado: pegar el CREATE UNIQUE INDEX de
+//      arriba al final del archivo, despues de que Prisma cree la tabla
+//      "exercises" y antes/despues de crear "exercise_versions" (el orden
+//      entre ambas tablas no importa, solo que "exercises" ya exista).
+//   3. pnpm prisma migrate dev   (aplica la migracion ya editada)
+//
+// Sobrevivencia ante un futuro `prisma migrate dev`: SI sobrevive. El motor
+// de diff de Prisma Migrate opera sobre su representacion interna del
+// datamodel (modelos/campos/@@index/@@unique declarados en schema.prisma),
+// reconstruida contra una shadow database que re-ejecuta el historial de
+// migraciones. Un indice parcial con WHERE no es expresable en esa
+// representacion — es literalmente invisible para el motor de diff, que
+// nunca genera un DROP INDEX para algo que no reconoce como "propio" del
+// schema. Esto se mantiene SIEMPRE que:
+//   (a) el archivo de migracion con este SQL crudo permanezca en
+//       prisma/migrations/ sin editar ni borrar — se re-ejecuta en cada
+//       `prisma migrate reset` o reconstruccion de la shadow database;
+//   (b) nadie corra `prisma db pull` sobre la tabla "exercises" — la
+//       introspeccion inversa no reconstruye la clausula WHERE (Prisma no
+//       soporta indices parciales en el schema declarativo) y sobreescribiria
+//       schema.prisma desincronizandolo del estado real de la base de datos;
+//   (c) nadie agregue `@unique` en `name` o `@@unique([name])` a este modelo
+//       en una migracion futura — colisionaria con este indice parcial (dos
+//       constraints de unicidad con semantica distinta sobre la misma
+//       columna).
+// Nota de rendimiento (no de correccion): el pre-check de unicidad en el
+// service usa `where: { name: { equals, mode: 'insensitive' }, isActive:
+// true }`, que Prisma traduce en PostgreSQL a `name ILIKE $1`, no a
+// `lower(name) = $1`. Este indice parcial puede no ser aprovechado por el
+// planner para ESA consulta especifica — es un tema de query-shape en el
+// service, no un defecto del indice. Su funcion critica (cerrar la ventana
+// de carrera a nivel de base de datos junto con el catch de P2002) es
+// independiente de como se planifique el SELECT de precheck.
+// ============================================================================
+model Exercise {
+  id        String   @id @default(uuid())
+  name      String   @map("name")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  versions  ExerciseVersion[]
+
+  // Cubre GET /exercises (filtro por defecto isActive=true, paginado).
+  // No se agrega indice propio sobre `name`: la unica consulta que filtra por
+  // el, el pre-check de unicidad de create()/rename, ya queda cubierta por el
+  // indice parcial de arriba en el caso comun, y no hay busqueda de texto
+  // libre por name en el alcance de esta epica.
+  @@index([isActive])
+  @@map("exercises")
+}
+
+// Contenido versionado del ejercicio (RN-05): description y muscleGroup.
+// A diferencia de LegalAcceptance (estrictamente append-only, cero UPDATE en
+// todo el codebase), ExerciseVersion SI recibe una escritura UPDATE real:
+// CA-006-3 edita in-place la version vigente (`exerciseVersion.update(...)`)
+// mientras isUsedInPlan() sea false. Solo cuando el ejercicio ya esta en uso
+// en un plan, update() pasa a comportarse append-only y crea una version
+// nueva (CA-006-1) en vez de tocar la existente. Por eso SI lleva `updatedAt`
+// -- omitirlo ocultaria cuando fue la ultima edicion in-place de la version
+// vigente, informacion real que el service produce. Las versiones que ya
+// fueron superadas por una mas reciente nunca vuelven a escribirse (ni
+// siquiera su updatedAt cambia despues de quedar "vieja").
+model ExerciseVersion {
+  id            String   @id @default(uuid())
+  exerciseId    String   @map("exercise_id")
+  versionNumber Int      @map("version_number")
+  description   String   @map("description")
+  muscleGroup   String   @map("muscle_group")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // onDelete: Cascade — Exercise + ExerciseVersion son un unico agregado
+  // (siempre se crean juntos en la misma $transaction; una ExerciseVersion
+  // no tiene sentido sin su Exercise). Si algun dia se agrega un hard-delete
+  // administrativo de Exercise (no expuesto en esta epica), sus versiones
+  // deben desaparecer con el, igual que el patron ya usado en
+  // CoachRequest/LegalAcceptance/RefreshToken -> User de este mismo schema.
+  exercise      Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  // Cubre la consulta "version vigente" (orderBy versionNumber desc, take 1
+  // filtrando por exerciseId) sin indice adicional: exerciseId es la columna
+  // lider del indice compuesto que este @@unique ya crea. No se agrega un
+  // puntero denormalizado currentVersionId en Exercise (ver decision del
+  // plan de implementacion de EPICA-02).
+  @@unique([exerciseId, versionNumber])
+  @@map("exercise_versions")
+}

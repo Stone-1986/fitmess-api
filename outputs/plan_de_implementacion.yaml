@@ -1,314 +1,511 @@
 plan_de_implementacion:
   version: "1.0"
-  epica_id: "EPICA-09"
+  epica_id: "EPICA-02"
   ciclo: 1
 
   modulos_afectados:
-    - auth (nuevos endpoints HU-002 y HU-003 + script seed HU-001)
-    - notifications (tarea tecnica transversal — EmailService con Resend)
-
-  # ── Nota sobre HU-001 ───────────────────────────────────────────────────────
-  # HU-001 (seed) NO genera endpoints HTTP. Se implementa como script
-  # prisma/seed.ts invocado con `prisma db seed`. No hay controller ni service
-  # nuevo — el script instancia PrismaClient directamente (contexto standalone,
-  # no NestJS runtime). Los criterios de aceptacion se validan manualmente.
-  # El script se registra en package.json bajo prisma.seed.
-  # ──────────────────────────────────────────────────────────────────────────────
+    - exercises (modulo nuevo — no existe hoy en src/modules/)
 
   endpoints:
 
-    # ── HU-002: Crear invitacion de administrador ──────────────────────────────
-    - hu_id: "HU-002"
+    # ── HU-005: Crear ejercicio en la biblioteca global ────────────────────────
+    - hu_id: "HU-005"
       metodo: POST
-      ruta: /admin-invitations
+      ruta: /exercises
       proposito: >
-        Crea una AdminInvitation en base de datos con token unico (generado con
-        randomBytes(32), almacenado hasheado con sha256) y expiracion configurable
-        via ADMIN_INVITE_EXPIRATION_HOURS (default 48h). Verifica previamente que
-        no exista un User con ese email y que no exista una invitacion activa
-        (no expirada, no utilizada) para ese email. Emite admin.invitation.created
-        con el token RAW para que el listener de notifications construya y envie
-        el correo al invitado. Requiere rol ADMIN autenticado.
-      request_body: CreateAdminInvitationDto
-      response: AdminInvitationResponseDto (201)
+        Crea un Exercise y su primera ExerciseVersion (versionNumber = 1) en una
+        sola $transaction atomica — un Exercise sin ninguna version es un estado
+        invalido del dominio. Verifica previamente que no exista otro ejercicio
+        ACTIVO con el mismo name (comparacion case-insensitive, con trim() antes
+        de comparar y de persistir) y rechaza con DUPLICATE_ENTITY si lo hay
+        (CA-005-2). Un name que solo existe en ejercicios inhabilitados NO
+        bloquea la creacion — CA-005-6 confirma explicitamente que crear con el
+        name de uno inhabilitado procede con exito. isActive queda en true por
+        defecto (default del schema). Accesible para COACH y ADMIN (RN-22);
+        ATHLETE no accede a la gestion del catalogo.
+      request_body: CreateExerciseDto
+      response: ExerciseResponseDto (201)
       errores:
-        - 400  # Validacion: email invalido o campo faltante
-        - 401  # No autenticado — token JWT ausente o invalido
-        - 403  # Rol insuficiente — no es ADMIN
-        - 409  # Ya existe un User con ese email O ya existe AdminInvitation activa para ese email
+        - 400  # Validacion: name/description/muscleGroup vacios o exceden longitud
+        - 401  # No autenticado
+        - 403  # Rol insuficiente — no es COACH ni ADMIN
+        - 409  # DUPLICATE_ENTITY — ya existe un ejercicio ACTIVO con ese name (CA-005-2)
       guards:
         - JwtAuthGuard
-        - RolesGuard(ADMIN)
-      eventos:
-        - admin.invitation.created
+        - RolesGuard(COACH, ADMIN)
+      eventos: []
       dependencias: []
 
-    # ── HU-003: Consultar estado de invitacion por token ──────────────────────
-    - hu_id: "HU-003"
-      metodo: POST
-      ruta: /admin-invitations/verify
+    # ── HU-005 (CA-005-3) + HU-007 (CA-007-2): Listado del catalogo ────────────
+    - hu_id: "HU-005"
+      metodo: GET
+      ruta: /exercises
       proposito: >
-        Permite al frontend verificar si un token de invitacion es valido y vigente
-        antes de mostrar el formulario de registro al invitado. El token se recibe
-        en el body (no en URL) para evitar exposicion en access logs del servidor,
-        historial del navegador y headers Referer — consistente con la decision
-        arquitectonica de POST /auth/admin/register y con OWASP. El service hashea
-        el token RAW con sha256 y busca por tokenHash. Endpoint publico — no requiere
-        JWT. Retorna informacion basica de la invitacion (email del invitado, estado
-        derivado) sin exponer el tokenHash ni datos del admin invitante. Patron
-        consistente con OAuth 2.0 Token Introspection (RFC 7662).
-      request_body: VerifyAdminInvitationDto
-      response: AdminInvitationStatusResponseDto (200)
+        Lista el catalogo global de ejercicios con su version vigente embebida
+        (name, description, muscleGroup, versionNumber de la ExerciseVersion de
+        mayor versionNumber). Por defecto filtra isActive = true — los
+        inhabilitados no aparecen (CA-007-2). Acepta includeInactive=true como
+        query param para que un COACH/ADMIN audite el catalogo completo desde el
+        listado ("por defecto" en CA-007-2 implica una via no-default; no hay
+        endpoint de reactivacion, asi que esta es la unica forma de ver
+        inhabilitados en bloque). Paginado con page/limit — la biblioteca es
+        global y crece sin techo. Con includeInactive=true el listado puede
+        mostrar dos filas con el mismo name (una activa, una inhabilitada) —
+        ver riesgo LOW documentado sobre unicidad solo-entre-activos.
+      request_body: null
+      response: "{ data: ExerciseSummaryResponseDto[], meta: PaginationMeta } (200)"
       errores:
-        - 400  # Validacion: token faltante o formato invalido (ValidationPipe + VerifyAdminInvitationDto)
-        - 404  # Token no encontrado (inexistente o adulterado — mismo error, anti-enumeracion)
-        - 409  # Invitacion ya utilizada (tokenUsedAt != null)
-        - 422  # Invitacion expirada (expiresAt < now())
-      guards: []
+        - 400  # Validacion de query params (page/limit fuera de rango, tipo invalido)
+        - 401  # No autenticado
+        - 403  # Rol insuficiente — no es COACH ni ADMIN
+      guards:
+        - JwtAuthGuard
+        - RolesGuard(COACH, ADMIN)
       eventos: []
       dependencias:
-        - POST /admin-invitations
+        - POST /exercises
 
-    # ── HU-003: Registro de administrador via token de invitacion ─────────────
-    - hu_id: "HU-003"
-      metodo: POST
-      ruta: /auth/admin/register
+    # ── HU-006 (CA-006-2) + HU-007 (CA-007-3): Detalle con historial ───────────
+    - hu_id: "HU-006"
+      metodo: GET
+      ruta: /exercises/:id
       proposito: >
-        Endpoint publico (sin JWT). Crea User con role ADMIN usando un token de
-        invitacion valido y vigente. En una $transaction atomica: valida el token
-        (hash + expiracion + uso), crea User (ADMIN), registra
-        LegalAcceptance(HABEAS_DATA) + LegalAcceptance(TERMS_OF_SERVICE), y marca
-        la AdminInvitation como utilizada (tokenUsedAt = now()). Emite user.registered
-        despues del commit. El admin creado inicia sesion con el flujo estandar
-        POST /auth/login.
-      request_body: RegisterAdminDto
-      response: AdminRegistrationResponseDto (201)
+        Retorna el detalle de un ejercicio: sus datos vigentes (name, isActive,
+        description/muscleGroup/versionNumber de la version de mayor
+        versionNumber) mas el historial completo de versiones (versionNumber +
+        createdAt de cada una — CA-006-2). No filtra por isActive: un ejercicio
+        inhabilitado se lee igual, junto con su estado inactivo, para que un plan
+        historico pueda mostrarlo indicando que ya no esta activo en la
+        biblioteca (CA-007-3). El historial va embebido en este endpoint, no en
+        uno propio: es un arreglo acotado (una entrada nueva solo se agrega
+        cuando se edita un ejercicio ya usado en un plan) que no justifica
+        paginacion ni ruta separada.
+      request_body: null
+      response: ExerciseDetailResponseDto (200)
       errores:
-        - 400  # Validacion de campos personales (nombre, email, password, etc.) o legales
-        - 404  # Token de invitacion no encontrado
-        - 409  # Email o identificationNumber ya registrados en la plataforma (mensaje neutro)
-        - 422  # Token expirado o ya utilizado
-      guards: []
-      eventos:
-        - user.registered
+        - 401  # No autenticado
+        - 403  # Rol insuficiente — no es COACH ni ADMIN
+        - 404  # ENTITY_NOT_FOUND — el ejercicio no existe
+      guards:
+        - JwtAuthGuard
+        - RolesGuard(COACH, ADMIN)
+      eventos: []
       dependencias:
-        - POST /admin-invitations
-        - POST /admin-invitations/verify
+        - POST /exercises
+
+    # ── HU-006: Modificar ejercicio (versiona segun uso) ───────────────────────
+    - hu_id: "HU-006"
+      metodo: PATCH
+      ruta: /exercises/:id
+      proposito: >
+        Actualiza un ejercicio existente. Orden de validaciones en update(): (1)
+        findOrFail — 404 si no existe (CA-006-4); (2) si isActive = false,
+        rechaza inmediatamente con EXERCISE_INACTIVE sin crear version nueva ni
+        alterar la vigente (CA-006-6) — esta verificacion va ANTES de
+        isUsedInPlan() para no gastar esa consulta en un camino que de todos
+        modos va a rechazar; (3) solo si el ejercicio esta activo, procede con
+        la logica de actualizacion. name es identidad del catalogo y vive en
+        Exercise (no versionado): si se envia, se actualiza directamente sobre
+        Exercise, con el mismo chequeo de unicidad que la creacion — case-
+        insensitive, con trim(), y comparando SOLO contra otros ejercicios
+        ACTIVOS excluyendo el propio (como en create(), un name que solo existe
+        en un ejercicio inhabilitado no bloquea el rename) — rechazando con
+        DUPLICATE_ENTITY si colisiona. Como el paso (2) ya garantiza que solo
+        ejercicios activos llegan aqui, el propio ejercicio editado siempre
+        cuenta como activo en esa comparacion. description/muscleGroup son el
+        contenido de entrenamiento (RN-05) y viven en ExerciseVersion: la
+        decision entre editar en el lugar o crear una version nueva depende de
+        isUsedInPlan(exerciseId) — metodo privado del service que HOY siempre
+        retorna false (ver decision de aislamiento). Si el metodo retorna true:
+        crea ExerciseVersion nueva con versionNumber = version_actual + 1
+        (CA-006-1). Si retorna false: hace update() in-place sobre la
+        ExerciseVersion vigente (CA-006-3).
+      request_body: UpdateExerciseDto
+      response: ExerciseResponseDto (200)
+      errores:
+        - 400  # Validacion: campos exceden longitud o formato invalido
+        - 401  # No autenticado
+        - 403  # Rol insuficiente — no es COACH ni ADMIN
+        - 404  # ENTITY_NOT_FOUND (CA-006-4)
+        - 409  # DUPLICATE_ENTITY — el nuevo name colisiona con otro ejercicio ACTIVO
+        - 422  # EXERCISE_INACTIVE — el ejercicio ya esta inhabilitado (CA-006-6)
+      guards:
+        - JwtAuthGuard
+        - RolesGuard(COACH, ADMIN)
+      eventos: []
+      dependencias:
+        - POST /exercises
+
+    # ── HU-007: Inhabilitar ejercicio ───────────────────────────────────────────
+    - hu_id: "HU-007"
+      metodo: DELETE
+      ruta: /exercises/:id
+      proposito: >
+        Inhabilita un ejercicio (isActive = false). Sigue el patron de soft-delete
+        del proyecto (DELETE → actualizacion de un flag, nunca borrado fisico),
+        aunque el campo interno sea isActive y no archivedAt (convencion propia
+        de ejercicios, ver skill design-patterns §5). La operacion SIEMPRE
+        procede, este o no el ejercicio en uso — NUNCA se verifica ni se bloquea
+        por EXERCISE_IN_USE (CA-007-1, decision del humano 2026-08-05). Las
+        versiones y el ejercicio no se tocan; solo isActive cambia, por lo que
+        los planes existentes conservan intacta la version que ya referenciaban
+        (RN-07). Al pasar a isActive=false, el name del ejercicio queda
+        disponible para que otro ejercicio nuevo o renombrado lo use (CA-005-6),
+        porque la unicidad de name aplica solo entre activos. Si el ejercicio ya
+        estaba inhabilitado, rechaza con EXERCISE_INACTIVE (CA-007-4).
+      request_body: null
+      response: "{ data: null, message: string } (200)"
+      errores:
+        - 401  # No autenticado
+        - 403  # Rol insuficiente — no es COACH ni ADMIN
+        - 404  # ENTITY_NOT_FOUND — el ejercicio no existe
+        - 422  # EXERCISE_INACTIVE — el ejercicio ya estaba inhabilitado (CA-007-4)
+      guards:
+        - JwtAuthGuard
+        - RolesGuard(COACH, ADMIN)
+      eventos: []
+      dependencias:
+        - POST /exercises
 
   orden_de_implementacion:
-    - "1. [TAREA TECNICA] Crear src/modules/notifications/ con EmailService (Resend) + NotificationsModule"
-    - "2. [SCHEMA] Agregar modelo AdminInvitation a prisma/schema.prisma + migracion"
-    - "3. [SEED HU-001] Crear prisma/seed.ts — logica idempotente del primer admin"
-    - "4. [CATALOGO] Agregar admin.invitation.created al catalogo de eventos en design-patterns §7"
-    - "5. POST /admin-invitations (HU-002)"
-    - "6. POST /admin-invitations/verify (HU-003)"
-    - "7. POST /auth/admin/register (HU-003)"
+    - "1. [SCHEMA] Agregar modelos Exercise y ExerciseVersion a prisma/schema.prisma (ver decision de schema) — el DBA finaliza tipos, nullability e indices en su fase"
+    - "2. POST /exercises (HU-005, incluye unicidad solo-entre-activos CA-005-2/CA-005-6)"
+    - "3. GET /exercises (HU-005 CA-005-3, HU-007 CA-007-2)"
+    - "4. GET /exercises/:id (HU-006 CA-006-2, HU-007 CA-007-3)"
+    - "5. PATCH /exercises/:id (HU-006, incluye bloqueo CA-006-6 y unicidad solo-entre-activos en el rename)"
+    - "6. DELETE /exercises/:id (HU-007)"
+    - "7. [E2E] test/exercises.e2e-spec.ts: los dos tests de comportamiento del indice parcial (unicidad y parcialidad) descritos en criterios_de_aceptacion_tecnicos"
 
   decisiones_arquitectonicas:
 
     - decision: >
-        Nuevo modelo AdminInvitation en Prisma:
-        id (uuid @id @default(uuid())), email (String), tokenHash (String @unique),
-        invitedBy (String @map("invited_by")), expiresAt (DateTime @map("expires_at")),
-        tokenUsedAt (DateTime? @map("token_used_at")), createdAt (DateTime @default(now())
-        @map("created_at")). Sin updatedAt por semantica append-only. Sin enum de estado
-        persistido — el estado es derivado en el service: USED si tokenUsedAt != null,
-        EXPIRED si expiresAt < now(), ACTIVE en caso contrario.
+        Schema de referencia para el DBA: Exercise (id, name String @unique
+        consideracion-abajo, isActive Boolean @default(true), createdAt,
+        updatedAt) y ExerciseVersion (id, exerciseId, versionNumber Int,
+        description String, muscleGroup String, createdAt, @@unique([exerciseId,
+        versionNumber])). Exactamente el modelo prescrito en design-patterns
+        §1/data-patterns.md seccion 1, sin campos adicionales — name vive en
+        Exercise (no versionado), description y muscleGroup viven en
+        ExerciseVersion (versionado). Señalado para el DBA: description figura
+        como String? (nullable) en el patron de referencia, pero CA-005-1 exige
+        el campo en toda creacion — el DBA debe decidir si lo deja NOT NULL dado
+        que el flujo de creacion siempre lo completa. La anotacion "name String
+        @unique" del patron de referencia YA NO aplica literal: ver decision
+        sobre unicidad solo-entre-activos, que requiere un indice parcial, no
+        un @unique simple de Prisma.
       justificacion: >
-        La epica especifica en HU-002 notas: "Se necesita un nuevo modelo AdminInvitation".
-        Estado derivado evita inconsistencias entre un campo de estado almacenado y las
-        fechas reales. El tokenHash sigue el patron ya establecido por RefreshToken en el
-        codebase. Sin enum de estado porque el estado no se persiste — se calcula.
+        La epica es explicita: "El skill design-patterns prescribe... el modelo
+        Exercise + ExerciseVersion... es el punto de partida esperado, no una
+        sugerencia." No hay ninguna decision del humano que lo reabra en cuanto
+        a los campos; si en cuanto a como se expresa la unicidad de name.
 
     - decision: >
-        Nuevo servicio AdminInvitationsService en src/modules/auth/admin-invitations.service.ts
-        y nuevo controller AdminInvitationsController en
-        src/modules/auth/admin-invitations.controller.ts. Ambos registrados en AuthModule
-        existente (no se crea un modulo nuevo).
+        La unicidad de name aplica UNICAMENTE entre ejercicios ACTIVOS
+        (isActive = true), no contra la biblioteca completa. La verificacion en
+        create() y en el rename de update() filtra where: { name: { equals:
+        nombreNormalizado, mode: 'insensitive' }, isActive: true } (mas
+        exclusion del propio id en update()). Un name que solo existe en
+        ejercicios inhabilitados NO bloquea la creacion ni el rename
+        (CA-005-6). El valor de name se normaliza con trim() antes de comparar
+        y antes de persistir, para que "Sentadilla " y "Sentadilla" no se
+        traten como distintos.
       justificacion: >
-        La escala de la epica (1-3 admins, 2 endpoints HTTP) no justifica un modulo nuevo.
-        AuthModule ya maneja el ciclo de vida de usuarios y contiene los guards, strategies
-        y DTOs relevantes. Patron consistente con CoachRequestsController/CoachRequestsService
-        que ya viven en AuthModule. Un modulo nuevo solo implicaria exports/imports sin valor.
+        Hallazgo del Analista sobre la version anterior de este plan: con
+        CA-006-6 bloqueando la edicion de un ejercicio inhabilitado, y sin
+        reactivacion definida en esta epica, un name de un ejercicio
+        inhabilitado quedaba reservado para siempre — un entrenador que
+        inhabilitara "Sentadilla" por error perdia ese nombre de forma
+        permanente y no podia recrearlo. Decision del humano: CA-005-2 se
+        reescribio para exigir la comparacion solo contra activos, y CA-005-6
+        (nuevo) confirma explicitamente que la creacion con el name de un
+        inhabilitado procede con exito.
 
     - decision: >
-        La logica de validacion del token (hash + busqueda + verificacion de expiracion y uso)
-        vive en AdminInvitationsService, no en AuthService. El metodo registerAdmin de
-        AuthService recibe el email validado y el adminInvitationId para marcar la invitacion
-        como usada dentro de la misma $transaction.
+        La verificacion "¿este ejercicio ya fue usado en un plan?" se aisla en
+        un metodo privado ExercisesService.isUsedInPlan(exerciseId: string):
+        Promise<boolean>, invocado unicamente desde update(). Hoy retorna
+        siempre false — comentario en el codigo debe explicar que EPICA-03 debe
+        reemplazar el cuerpo del metodo por una query real (ej.
+        this.prisma.planExercise.count({ where: { exerciseVersion: { exerciseId }
+        } }) > 0, o el nombre de tabla que defina el DBA de EPICA-03) sin tocar
+        ninguna otra linea de update(). Las dos ramas (true/false) se cubren
+        mockeando este metodo en tests unitarios de update(), no con fixtures
+        de planes reales.
       justificacion: >
-        Separacion de responsabilidades. AuthService ya tiene registerAthlete y registerCoach.
-        Agregar la logica de tokens lo sobrecarga y acopla dos responsabilidades distintas.
-        AdminInvitationsService encapsula la logica de tokens para poder reutilizarla desde
-        POST /admin-invitations/verify sin duplicar codigo.
+        Decision del humano del 2026-08-05: la epica se implementa completa
+        aislando el punto de integracion futuro detras de un unico metodo. Evita
+        que EPICA-03 tenga que tocar la logica de ramificacion de update(), solo
+        el cuerpo de un metodo.
 
     - decision: >
-        POST /admin-invitations/verify recibe el token en el body (VerifyAdminInvitationDto),
-        no como path param. Devuelve 404 para tokens inexistentes Y para tokens cuyo hash no
-        coincide (adulterados). El 422 aplica solo para token valido pero expirado. El 409
-        aplica para token valido pero ya utilizado.
+        PATCH /exercises/:id rechaza con EXERCISE_INACTIVE (422) si el
+        ejercicio tiene isActive = false, sin crear version nueva ni alterar la
+        vigente (CA-006-6). Esta verificacion es el primer paso de update()
+        despues de findOrFail() — se ejecuta ANTES de invocar isUsedInPlan(),
+        para no pagar el costo de esa consulta (hoy trivial, pero sera una
+        query real desde EPICA-03) en un camino que de todos modos termina en
+        rechazo. Usa el mismo guard/patron ya establecido en deactivate() para
+        CA-007-4, reutilizando la misma entrada del catalogo de errores.
       justificacion: >
-        Correccion de seguridad: el endpoint original era POST /admin-invitations/verify, pero
-        el token en URL aparece en access logs del servidor, historial del navegador y headers
-        Referer. Se aplica el mismo criterio de seguridad que POST /auth/admin/register
-        (decision #5). El patron POST para verificacion de tokens es consistente con
-        OAuth 2.0 Token Introspection (RFC 7662). Anti-enumeracion (Ley 1273/2009): el 404
-        no revela si un token existio. El 422 y 409 son estados distintos que el frontend
-        necesita para mensajes especificos al usuario.
+        Decision del humano del 2026-08-05 (CA-006-6 agregado a la epica): un
+        ejercicio retirado del catalogo no debe seguir mutandose. Como esta
+        epica no define reactivacion, en la practica el ejercicio queda
+        congelado tras inhabilitarse — coherente con RN-06. Cierra el riesgo
+        MEDIUM que este plan tenia abierto en su version anterior. La perdida
+        permanente del name que esto hubiera causado se resuelve por separado
+        con la decision de unicidad solo-entre-activos.
 
     - decision: >
-        POST /auth/admin/register recibe el invitationToken en el body (campo String en
-        RegisterAdminDto), no como path param ni como header Authorization.
+        La version vigente de un ejercicio se obtiene por versionNumber
+        descendente (Prisma include: { versions: { orderBy: { versionNumber:
+        'desc' }, take: 1 } }), tanto en el listado (GET /exercises) como en el
+        detalle y en las respuestas de create/update/deactivate. NO se agrega un
+        puntero denormalizado (ej. currentVersionId) en Exercise.
       justificacion: >
-        Un token en path param aparece en logs de acceso del servidor (access logs de nginx,
-        load balancers, etc.), exponiendo el token RAW. En body, el AuditInterceptor nunca
-        loggea el body completo en produccion (rules: solo en debug en dev). Consistente con
-        el patron de registro existente (todo via body).
+        El patron de referencia (ya corregido) elimina explicitamente la
+        referencia a un campo currentVersionId inexistente. Mantener un puntero
+        denormalizado exige una escritura adicional sincronizada en cada
+        append() y un vector de inconsistencia si algun flujo futuro crea una
+        version sin actualizar el puntero. El costo de la alternativa (JOIN con
+        ORDER BY + LIMIT 1 por ejercicio) es trivial con el indice unico
+        @@unique([exerciseId, versionNumber]) ya definido, e incluso en el
+        listado paginado Prisma resuelve el include con take:1 en una sola
+        consulta por relacion, no N+1. A la escala esperada (biblioteca global
+        de una plataforma, no millones de filas) esto no es un cuello de
+        botella; si el DBA mide lo contrario en produccion, es una decision de
+        el, no de este plan.
 
     - decision: >
-        admin.invitation.created es emitido por AdminInvitationsService. El listener
-        AdminInvitationCreatedListener vive en src/modules/notifications/listeners/.
-        El listener construye el enlace de registro con el token RAW del evento y llama
-        a EmailService.sendAdminInvitation(). Los errores de envio se capturan en try/catch
-        del listener y se loggean sin propagar. El token RAW nunca se loggea.
+        GET /exercises no usa POST /search como coach-requests (que tiene
+        filtros avanzados combinables). Usa GET con query params: page, limit
+        (mismos defaults que el resto del proyecto: page=1, limit=20 min1
+        max100) e includeInactive (boolean, default false). No se agrega
+        filtro por texto libre (name) ni por muscleGroup: ninguna CA de esta
+        epica lo pide, y agregarlo seria alcance no solicitado.
       justificacion: >
-        Restriccion explicita de la epica: "Los errores de envio nunca interrumpen el flujo
-        de negocio principal." El patron de listener con try/catch ya esta establecido en el
-        codebase (nestjs-conventions §7). Comunicacion entre modulos exclusivamente via
-        eventos (@nestjs/event-emitter) — las rules prohiben imports directos entre modulos
-        de dominio.
+        La tabla de convenciones de naming del skill api-first define GET
+        /[recursos] para "Listar" sin filtros complejos — el listado del
+        catalogo es una consulta simple con paginacion, no una busqueda
+        multi-criterio que amerite un body. includeInactive resuelve
+        literalmente la palabra "por defecto" de CA-007-2: sin un modo
+        no-default, esa frase de la HU no tendria contraparte, y como no existe
+        reactivacion, esta es la unica via para que un COACH/ADMIN vea
+        inhabilitados en bloque (no solo por id directo, que ya cubre
+        CA-007-3).
 
     - decision: >
-        El script prisma/seed.ts accede a PrismaClient directamente (standalone, sin
-        levantar el runtime NestJS). Lee credenciales desde process.env. Si
-        ADMIN_SEED_EMAIL o ADMIN_SEED_PASSWORD no estan definidas, el seed imprime
-        un mensaje informativo y termina con exit(0) sin error. Si el email ya existe
-        en User, el seed se omite (idempotencia). Si la password no cumple requisitos
-        (minimo 8 chars, al menos una letra y un numero), termina con exit(1) y mensaje
-        descriptivo. La password se hashea con bcrypt 10 rondas.
+        El historial de versiones de CA-006-2 se expone embebido en
+        ExerciseDetailResponseDto (GET /exercises/:id), no en un endpoint propio
+        (ej. GET /exercises/:id/versions).
       justificacion: >
-        El comando `prisma db seed` usa scripts standalone por convencion de Prisma.
-        No tiene sentido levantar NestJS para un seed. La idempotencia protege contra
-        ejecuciones repetidas en CI/CD. Variables de entorno alineadas con la restriccion
-        de la epica: "credenciales del seed provienen exclusivamente de variables de
-        entorno, nunca hardcodeadas."
+        El volumen de versiones por ejercicio es acotado por diseno: una entrada
+        nueva solo se crea cuando se edita un ejercicio ya usado en un plan
+        (evento infrecuente, no un log de auditoria de crecimiento continuo). No
+        justifica paginacion propia ni una ruta de sub-recurso. El "supuesto" de
+        la epica ya define el contenido exacto (versionNumber + fecha de
+        creacion), consistente con un array embebido.
 
     - decision: >
-        Dos nuevos BusinessError se agregan al catalogo business-error.enum.ts:
-        INVITATION_EXPIRED (422 UNPROCESSABLE_ENTITY, title: "La invitacion ha expirado")
-        e INVITATION_ALREADY_USED (409 CONFLICT, title: "La invitacion ya fue utilizada").
+        DELETE /exercises/:id inhabilita el ejercicio y retorna { data: null,
+        message: string }, igual que el patron establecido para archive() de
+        Plan en data-patterns.md seccion 2, aunque el campo interno sea
+        isActive (Boolean) en vez de archivedAt (DateTime).
       justificacion: >
-        Las rules prohiben crear clases de excepcion por modulo — el catalogo centralizado
-        en business-error.enum.ts es la unica fuente de verdad. Estos dos errores son
-        semanticamente distintos de los existentes INVALID_STATE_TRANSITION y DUPLICATE_ENTITY.
-        El frontend necesita distinguirlos para mostrar mensajes de accion especificos al usuario.
+        El skill design-patterns es explicito en que isActive es la convencion
+        de naming propia de ejercicios dentro del mismo patron de "no
+        eliminar, solo marcar" (seccion 5: "Convencion: usar archivedAt...
+        Para ejercicios, usar isActive"). La forma de respuesta se mantiene
+        igual para no introducir un contrato distinto para el mismo tipo de
+        operacion (retirar un recurso del catalogo activo sin borrarlo).
 
     - decision: >
-        AdminRegistrationResponseDto es un nuevo DTO que incluye: id, name, email, role.
-        No reutiliza AthleteRegistrationResponseDto aunque la estructura sea similar.
+        Los 5 endpoints usan uniformemente JwtAuthGuard + RolesGuard(COACH,
+        ADMIN). Ningun endpoint de esta epica admite ATHLETE.
       justificacion: >
-        Los DTOs de respuesta son contratos de API. Compartir un DTO entre contextos distintos
-        acopla sus evoluciones futuras. El admin puede requerir campos distintos en iteraciones
-        futuras sin afectar el contrato del registro de atleta.
+        La restriccion de la epica dice "El atleta no accede a la gestion del
+        catalogo" para create/update/deactivate. Ninguna CA de HU-005/006/007
+        ejercita el acceso de ATHLETE al listado o detalle tampoco (CA-005-3
+        habla de "cualquier entrenador"). El acceso de ATHLETE al catalogo de
+        ejercicios (vía planes) es contenido de EPICA-03, no de esta epica —
+        abrir GET /exercises a ATHLETE aqui seria construir contra un
+        requisito no especificado.
 
     - decision: >
-        RegisterAdminDto replica los campos de datos personales y legales de RegisterAthleteDto:
-        name, email, password, phone, phoneCountryCode, identificationType,
-        identificationNumber, acceptsTermsOfService, termsDocumentVersion,
-        acceptsHabeasData, personalDataDocumentVersion. Agrega el campo
-        invitationToken (String). dateOfBirth y avatarUrl son opcionales igual que en atleta.
+        No se emite ningun evento (@nestjs/event-emitter) en esta epica.
       justificacion: >
-        La restriccion de la epica: "El registro requiere los mismos datos personales que
-        cualquier usuario de la plataforma" y "La creacion de cuentas admin tambien debe
-        registrar aceptaciones legales" (Ley 1581/2012). La re-creacion del DTO (en lugar de
-        herencia) evita acoplamiento y es explicita sobre el contrato del endpoint.
+        El catalogo de eventos (design-patterns §7) no tiene listeners
+        definidos para acciones sobre ejercicios, y ninguna HU de esta epica
+        pide notificar a otro modulo. Emitir un evento sin consumidor conocido
+        seria especular sobre un contrato futuro. Si una iteracion posterior lo
+        requiere (ej. notifications avisando a coaches de un nuevo ejercicio),
+        se agrega sin romper los endpoints ya definidos.
 
     - decision: >
-        CreateAdminInvitationDto contiene solo el campo email (String, @IsEmail).
-        AdminInvitationResponseDto contiene: id, email, expiresAt, createdAt.
-        NO expone tokenHash ni invitedBy. AdminInvitationStatusResponseDto contiene:
-        email, status (string derivado: ACTIVE | EXPIRED | USED), expiresAt.
+        No se agregan entradas nuevas al catalogo de BusinessError. Se
+        reutilizan ENTITY_NOT_FOUND (404), DUPLICATE_ENTITY (409),
+        EXERCISE_INACTIVE (422), todas ya existentes.
       justificacion: >
-        Rules: NUNCA exponer campos internos en DTOs de respuesta. tokenHash es un campo
-        interno de seguridad. invitedBy es un UUID de admin que no tiene valor para el
-        invitado. El status derivado permite al frontend tomar decisiones sin calcular fechas.
+        La epica confirma que EXERCISE_INACTIVE y EXERCISE_IN_USE ya fueron
+        agregadas de forma anticipada al catalogo. EXERCISE_IN_USE
+        explicitamente NO se usa en esta epica (CA-007-1 y decision del humano
+        2026-08-05 lo prohiben). No hay ningun error de esta epica que no
+        encaje en una entrada existente.
+
+    - decision: >
+        La verificacion de name duplicado usa comparacion case-insensitive con
+        trim() (Prisma where: { name: { equals: nombreNormalizado, mode:
+        'insensitive' }, isActive: true }) tanto en create() como en el rename
+        de update(). Ademas, el catch de la escritura debe capturar el codigo
+        de error P2002 (violacion de constraint unico) de Prisma y traducirlo a
+        BusinessException(BusinessError.DUPLICATE_ENTITY) como red de
+        seguridad ante condiciones de carrera.
+      justificacion: >
+        El check-then-insert sin transaccion serializable tiene una ventana de
+        carrera entre dos requests concurrentes con el mismo name. Capturar
+        P2002 como fallback evita que una condicion de carrera se traduzca en
+        un TechnicalException/500 en vez de un 409 de negocio claro. El
+        indice que cierra la ventana de carrera a nivel de base de datos ya NO
+        es un UNIQUE(lower(name)) simple: debe ser un indice UNICO PARCIAL —
+        CREATE UNIQUE INDEX ... ON exercises (lower(name)) WHERE is_active =
+        true — para que el constraint de base de datos refleje la misma regla
+        de negocio de unicidad solo-entre-activos (CA-005-2/CA-005-6). Un
+        UNIQUE simple rechazaria creaciones legitimas que la regla de negocio
+        permite. Queda asignado al DBA (ver riesgos_identificados).
+
+    - decision: >
+        Dos tests e2e en test/exercises.e2e-spec.ts (DB real, test:e2e es gate
+        duro) blindan el comportamiento del indice parcial en lugar de su
+        implementacion: (1) UNICIDAD — insertar dos ejercicios ACTIVOS cuyos
+        names difieren solo en mayusculas ('Sentadilla' y 'sentadilla')
+        escribiendo directo a la base (raw SQL o Prisma sin pasar por el
+        service, saltando el pre-check), esperando que el segundo INSERT sea
+        rechazado por la base de datos; (2) PARCIALIDAD — insertar un
+        ejercicio INHABILITADO y luego uno ACTIVO con el mismo name, por la
+        misma via directa, esperando que el segundo INSERT proceda sin error
+        (protege CA-005-6). Ambos limpian sus filas al terminar, como el resto
+        de la suite e2e.
+      justificacion: >
+        Verificar el indice contra pg_indexes solo confirma que existe una fila
+        con ese nombre de indice — pasaria igual si alguien lo reemplazara por
+        un UNIQUE (name) normal con el mismo nombre, que es exactamente el
+        error que rompe CA-005-6 en silencio. Los tests de comportamiento
+        (insertar y observar si la base de datos rechaza o acepta) detectan esa
+        regresion aunque cambie la implementacion del indice. Van en e2e con DB
+        real porque un unitario con Prisma mockeado no puede ver un indice de
+        Postgres; test:e2e es gate duro desde hoy. Escriben directo a la tabla
+        (no via create()) porque el objetivo es probar la garantia de la base
+        de datos, no la del service — esa ya esta cubierta por los tests de
+        create(). Decision del humano en respuesta al hallazgo abierto #7 de
+        outputs/execution-log.md: el DBA sostiene que el indice sobrevive a
+        futuros `prisma migrate dev`, pero no esta comprobado en este proyecto,
+        y si desapareciera en silencio nada se rompe hasta que existan dos
+        ejercicios activos con el mismo nombre.
 
   criterios_de_aceptacion_tecnicos:
-    - "Cobertura de dominio (AdminInvitationsService, metodo registerAdmin en AuthService) >= 80%"
-    - "Cobertura de adaptadores (AdminInvitationsController, endpoint POST /auth/admin/register en AuthController) >= 70%"
-    - "Todos los endpoints documentan errores con @ApiProblemResponse segun tabla de errores del plan"
-    - "POST /auth/admin/register usa security: [] en @ApiOperation (endpoint publico — Spectral)"
-    - "POST /admin-invitations/verify usa security: [] en @ApiOperation (endpoint publico — Spectral)"
-    - "El token RAW nunca aparece en logs — tests verifican que el logger no recibe el token (Ley 1273/2009)"
-    - "La password del admin nunca aparece en logs — tests verifican ausencia en llamadas al logger"
-    - "La $transaction de POST /auth/admin/register cubre: User.create + LegalAcceptance.create (x2) + AdminInvitation.update(tokenUsedAt)"
-    - "El seed prisma/seed.ts es idempotente: ejecutarlo dos veces con el mismo email no lanza error ni crea duplicados"
-    - "El seed termina con exit(0) y mensaje informativo si ADMIN_SEED_EMAIL o ADMIN_SEED_PASSWORD no estan definidas"
-    - "El seed termina con exit(1) y mensaje descriptivo si la password no cumple los requisitos de seguridad"
-    - "Variables nuevas documentadas en .env.example: ADMIN_SEED_EMAIL, ADMIN_SEED_NAME, ADMIN_SEED_PASSWORD, ADMIN_INVITE_EXPIRATION_HOURS"
-    - "BusinessError.INVITATION_EXPIRED e INVITATION_ALREADY_USED agregados a business-error.enum.ts"
-    - "EmailService captura excepciones internamente — el listener nunca propaga errores al pipeline HTTP"
-    - "El listener de admin.invitation.created NO loggea el token RAW del evento"
+    - "Cobertura de dominio (ExercisesService) >= 80%"
+    - "Cobertura de adaptadores (ExercisesController) >= 70%"
+    - "isUsedInPlan() cubierto con ambas ramas (true/false) mockeadas en tests unitarios de update() — cubre CA-006-1 y CA-006-3 a nivel unitario"
+    - "Todos los endpoints documentan sus errores con @ApiProblemResponse segun la tabla de este plan"
+    - "La creacion de un ejercicio (Exercise + ExerciseVersion versionNumber=1) ocurre dentro de una sola $transaction — nunca queda un Exercise sin ninguna ExerciseVersion"
+    - "El chequeo de name duplicado (create y rename) filtra isActive=true y normaliza con trim() antes de comparar — un name que solo existe en un ejercicio inhabilitado NO bloquea la creacion ni el rename (CA-005-6)"
+    - "El rechazo por name duplicado usa BusinessError.DUPLICATE_ENTITY (409) tanto en create() como en el rename de update(), solo cuando el name colisiona con un ejercicio ACTIVO"
+    - "El rechazo por doble inhabilitacion usa BusinessError.EXERCISE_INACTIVE (422), nunca EXERCISE_IN_USE"
+    - "update() verifica isActive === false ANTES de invocar isUsedInPlan() y rechaza con EXERCISE_INACTIVE (422) sin crear version nueva ni alterar la vigente (CA-006-6) — test unitario debe verificar que isUsedInPlan() NO se invoca en este camino"
+    - "GET /exercises filtra isActive=true por defecto y solo incluye inhabilitados si includeInactive=true"
+    - "GET /exercises/:id retorna un ejercicio inhabilitado sin filtrarlo, con isActive=false visible en la respuesta (CA-007-3)"
+    - "test/exercises.e2e-spec.ts — test de UNICIDAD del indice parcial: insertar dos ejercicios ACTIVOS con names que difieren solo en mayusculas ('Sentadilla'/'sentadilla') escribiendo directo a la base (no via service, saltando el pre-check); el segundo INSERT debe ser rechazado por la base de datos. Limpia sus filas al terminar."
+    - "test/exercises.e2e-spec.ts — test de PARCIALIDAD del indice: insertar un ejercicio INHABILITADO y luego uno ACTIVO con el mismo name, escribiendo directo a la base; el segundo INSERT debe proceder sin error (protege CA-005-6). Limpia sus filas al terminar."
     - "pnpm run build pasa sin errores — gate duro"
     - "npx tsc --noEmit pasa sin errores — gate duro"
 
   riesgos_identificados:
 
     - riesgo: >
-        El seed accede a PrismaClient standalone sin el adapter pg configurado en NestJS
-        (prisma.config.ts usa @prisma/adapter-pg). La conexion directa de PrismaClient
-        funciona con DATABASE_URL pero puede no usar pooling. En produccion con Supabase
-        esto puede generar conexiones directas en exceso.
+        CA-006-1 y CA-006-3 (la rama de version-nueva vs edicion-en-el-lugar de
+        update()) no son verificables end-to-end en esta epica: no existe tabla
+        de planes contra la cual isUsedInPlan() pueda resolverse todavia. Solo
+        quedan cubiertas por tests unitarios que mockean el metodo.
       mitigacion: >
-        Usar la conexion directa de Prisma Client (sin adapter) solo en el seed — es una
-        operacion de setup puntual, no recurrente. Documentar en comentario del script.
-        No es un problema de correctitud, solo de performance en setup inicial.
+        Ya documentado explicitamente en la epica (notas de HU-006) como gap
+        aceptado. El reporte de QA debe registrarlo como gap explicito, no
+        omitirlo. La cobertura e2e real llega con EPICA-03 cuando conecte
+        isUsedInPlan() a una query real.
       nivel: LOW
 
     - riesgo: >
-        El EmailService usa Resend (dependencia de red externa). En tests unitarios del
-        listener, si Resend no esta mockeado, los tests realizaran llamadas reales y
-        fallaran en CI sin RESEND_API_KEY configurada.
+        La unicidad case-insensitive de name (ahora acotada a activos, con
+        trim()) se verifica en el service (check-then-insert + catch de P2002
+        como red de seguridad), pero el indice a nivel de base de datos debe
+        ser un UNIQUE PARCIAL, no un @unique simple de Prisma. Dos requests
+        concurrentes con variantes de mayusculas/espacios del mismo name,
+        ambos sobre ejercicios que quedarian activos, podrian pasar el check
+        de aplicacion antes de que el indice de base de datos exista o si el
+        indice no queda bien formado, generando un duplicado real entre dos
+        ejercicios activos. Ademas, si el indice parcial se pierde en un
+        futuro `prisma migrate dev` (el DBA sostiene que sobrevive, pero no
+        esta comprobado en este proyecto) o se reemplaza por error por un
+        UNIQUE simple, la garantia desaparece EN SILENCIO — nada se rompe hasta
+        que aparezcan dos ejercicios activos con el mismo name. Hallazgo
+        abierto #7 en outputs/execution-log.md.
       mitigacion: >
-        Mockear el cliente Resend en todos los tests del listener y del EmailService.
-        El contrato del listener (captura errores, no propaga) debe tener test explicito
-        que verifique que un error de Resend no lanza excepcion al caller.
+        Asignado al DBA: crear un indice unico PARCIAL por SQL crudo en la
+        migracion de EPICA-02 — CREATE UNIQUE INDEX ... ON exercises
+        (lower(name)) WHERE is_active = true. Un indice simple
+        UNIQUE(lower(name)) ya NO aplica: la regla de negocio es unicidad solo
+        entre activos (CA-005-2/CA-005-6), asi que el constraint de base de
+        datos debe reflejar la misma condicion parcial que el check de
+        aplicacion, o el constraint rechazaria creaciones legitimas que la
+        regla de negocio permite (name repetido con un inhabilitado). Ademas,
+        ya no descansa solo en esa instruccion de migracion: dos tests e2e en
+        test/exercises.e2e-spec.ts (ver criterios_de_aceptacion_tecnicos y la
+        decision arquitectonica correspondiente) prueban el COMPORTAMIENTO del
+        indice contra la base de datos real — uno confirma que rechaza el
+        duplicado case-insensitive entre activos, otro confirma que permite el
+        duplicado cuando uno de los dos esta inhabilitado. Si el indice
+        desaparece o se reemplaza por un UNIQUE simple, alguno de los dos falla
+        en CI (test:e2e es gate duro) antes de llegar a produccion.
       nivel: LOW
 
     - riesgo: >
-        Ley 1581/2012: la creacion del admin via POST /auth/admin/register recolecta
-        datos personales. RegisterAdminDto debe incluir los checkboxes de aceptacion
-        legal identicos a RegisterAthleteDto. Si el frontend no envIA estos campos,
-        el registro falla con 400 por validacion. Riesgo de que el frontend asuma que
-        el admin no necesita aceptaciones legales.
+        design-patterns/data-patterns.md seccion 1 declara description como
+        String? (nullable) en ExerciseVersion, pero CA-005-1 exige el campo en
+        toda creacion (DTO lo marca @IsNotEmpty). Si el DBA copia el schema de
+        referencia literal, el schema permitiria description NULL aunque
+        ningun flujo de la API lo produzca, dejando una inconsistencia entre
+        el contrato HTTP y el schema de base de datos.
       mitigacion: >
-        Documentar explicitamente en los decoradores @ApiProperty del RegisterAdminDto
-        que los campos legales son obligatorios. Incluir en los criterios de aceptacion
-        del Documentador que el contrato OpenAPI muestre estos campos como required.
-        El $transaction rechaza si los campos legales no se registran.
-      nivel: MEDIUM
-
-    - riesgo: >
-        La verificacion de invitacion activa en POST /admin-invitations requiere una
-        query con condicion compuesta: email = X AND tokenUsedAt IS NULL AND expiresAt > now().
-        Esta query no tiene indice compuesto en el schema propuesto. Con escala 1-3 admins
-        el impacto es nulo, pero si se reutiliza el modelo para otros flujos de invitacion
-        en el futuro, puede requerir indexacion.
-      mitigacion: >
-        Agregar @@index([email]) en AdminInvitation. Escala actual (1-3 admins) hace el
-        riesgo irrelevante en produccion. Documentar para evaluacion futura.
+        Ya senalado en la decision de schema de este plan. El DBA decide si
+        description pasa a String (NOT NULL) al disenar el schema final de
+        EPICA-02 — no requiere cambios en el plan de endpoints ni en los DTOs,
+        que ya tratan el campo como requerido.
       nivel: LOW
 
     - riesgo: >
-        El modulo notifications no existe en el codebase. Crearlo como tarea tecnica
-        previa introduce una dependencia de implementacion que bloquea HU-002. Si la
-        tarea tecnica no esta completada, el listener de admin.invitation.created no existe
-        y el correo de invitacion no se envia (la invitacion se crea en DB pero el invitado
-        no recibe el enlace).
+        name no se versiona (vive en Exercise, no en ExerciseVersion). Un
+        rename afecta retroactivamente como se ve el ejercicio en todos los
+        planes historicos que lo referencian — no hay forma de recuperar el
+        nombre exacto que un plan vio al construirse.
       mitigacion: >
-        El orden de implementacion documenta explicitamente la tarea tecnica como paso 1.
-        El Desarrollador debe completar EmailService + NotificationsModule antes de
-        implementar POST /admin-invitations. El evento se emite independientemente del
-        listener — si el listener no existe, el evento se emite sin efecto (no bloquea).
-        Esto es un riesgo funcional (el invitado no recibe el correo), no tecnico.
-      nivel: MEDIUM
+        Revisado y aceptado por el humano el 2026-08-05: se mantiene name en
+        Exercise (no versionado) tal como prescribe design-patterns §1. El
+        caso comun es corregir una errata de tipeo, y ahi propagar el nombre
+        corregido a planes historicos es el comportamiento deseado. Riesgo
+        cerrado — no reabrir en revision de Lider Tecnico salvo que aparezca
+        un requisito nuevo en EPICA-03 que exija el nombre historico exacto.
+      nivel: LOW
+
+    - riesgo: >
+        Dos ejercicios pueden compartir el mismo name si uno esta inhabilitado
+        — consecuencia directa de CA-005-2/CA-005-6 (unicidad solo entre
+        activos). Los planes historicos que ya referencian al inhabilitado
+        conservan su exerciseVersionId intacto, asi que no hay ambiguedad en
+        los datos — pero un listado con includeInactive=true puede mostrar dos
+        filas con el mismo name (una activa, una inhabilitada), lo cual puede
+        sorprender a un cliente que asuma unicidad global del catalogo.
+      mitigacion: >
+        Documentado explicitamente en este plan para que EPICA-03 y el
+        frontend no asuman unicidad global de name — solo es unico entre
+        activos. El campo isActive ya viaja en ExerciseSummaryResponseDto y
+        permite al cliente diferenciar ambas filas sin cambios de contrato
+        adicionales si se necesita distinguirlas visualmente.
+      nivel: LOW

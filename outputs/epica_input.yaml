@@ -1,107 +1,109 @@
 epica:
-  id: "EPICA-09"
-  titulo: "Registro y Autenticacion de Administradores"
+  id: "EPICA-02"
+  titulo: "Catalogo Global de Ejercicios"
   objetivo_de_negocio: >
-    Habilitar la creacion y gestion de cuentas de administrador para desbloquear
-    la operacion de la plataforma. Sin administradores, los endpoints de aprobacion
-    y rechazo de entrenadores son inaccesibles, impidiendo que los entrenadores
-    registrados puedan operar.
+    Centralizar la biblioteca de ejercicios disponibles en la plataforma, garantizando
+    trazabilidad, inmutabilidad del historial y gestion controlada del contenido. La
+    biblioteca es el insumo con el que los entrenadores construyen los planes de
+    entrenamiento (EPICA-03): sin ella no hay nada que agendar en una sesion.
   contexto_de_aplicacion: >
-    Plataforma de entrenamiento deportivo personalizado (fitmess-api). Actualmente
-    se pueden registrar y autenticar atletas y entrenadores (EPICA-01), pero no
-    existe mecanismo para crear administradores. El rol ADMIN ya existe en el schema
-    de Prisma (enum UserRole) y los guards de autorizacion ya lo soportan. El login
-    existente (POST /auth/login) funciona para cualquier rol, incluyendo ADMIN.
-    El modelo User no requiere campos adicionales para administradores — solo cambia
-    el valor del campo role. Patron elegido: Seed para el primer admin + Invitacion
-    por email para administradores adicionales. Escala esperada: 1-3 administradores.
-    El paquete Resend (v6.9.2) esta instalado y la variable RESEND_API_KEY esta
-    en .env.example, pero no existe modulo de notificaciones ni servicio de email
-    implementado — se debe crear como tarea tecnica precondicion de HU-002.
+    Plataforma de entrenamiento deportivo personalizado (fitmess-api). Hoy existen
+    registro y autenticacion de atletas, entrenadores y administradores (EPICA-01 y
+    EPICA-09), con los roles ATHLETE, COACH y ADMIN operativos en el enum UserRole y
+    los guards JwtAuthGuard + RolesGuard funcionando. No existe ningun modulo de
+    dominio mas alla de auth: el schema de Prisma tiene User, CoachRequest,
+    LegalAcceptance, AuditLog, RefreshToken y AdminInvitation, y ninguna tabla de
+    ejercicios ni de planes.
+
+    El catalogo de errores en src/modules/common/exceptions/business-error.enum.ts ya
+    contiene las entradas EXERCISE_IN_USE y EXERCISE_INACTIVE, agregadas de forma
+    anticipada. EXERCISE_INACTIVE aplica a esta epica; EXERCISE_IN_USE no se usa aqui
+    (ver restricciones) y queda disponible para EPICA-03.
+
+    El skill design-patterns prescribe en su seccion 1 el modelo Exercise +
+    ExerciseVersion con el schema de Prisma y la logica de append-only ya redactados.
+    Ese patron es el punto de partida esperado, no una sugerencia.
   restricciones_conocidas:
-    - "El administrador NO se puede auto-registrar publicamente — solo por seed o invitacion"
-    - "El login utiliza el flujo existente de EPICA-01 (POST /auth/login) — no se crea endpoint nuevo de login para admin"
-    - "El modelo User no requiere campos adicionales para el rol admin — solo cambia el valor de role a ADMIN"
-    - "Las credenciales del seed provienen exclusivamente de variables de entorno, nunca hardcodeadas"
-    - "El token de invitacion es de uso unico y su tiempo de expiracion es configurable via variable de entorno (por defecto 48 horas)"
-    - "Ley 1581 de 2012: la creacion de cuentas admin tambien debe registrar aceptaciones legales"
-    - "El servicio de email es una tarea tecnica transversal (no HU) que se implementa como precondicion de HU-002 en src/modules/notifications/ usando Resend. Los errores de envio nunca interrumpen el flujo de negocio principal. Fuera de alcance: templates HTML elaborados, colas de reintento, preferencias de notificacion"
+    - "La biblioteca es global y unica: no hay bibliotecas por entrenador ni ejercicios privados (RN-04)"
+    - "Los ejercicios NUNCA se eliminan fisicamente, solo se inhabilitan con isActive = false (RN-06)"
+    - "Un ejercicio ya utilizado en un plan es inmutable: editarlo crea una version nueva y la anterior se conserva intacta (RN-05, RN-07)"
+    - "La inhabilitacion SIEMPRE procede, este el ejercicio en uso o no. Inhabilitar solo saca al ejercicio del catalogo para planes nuevos; los planes existentes conservan la version que ya referenciaban. NUNCA lanzar EXERCISE_IN_USE al inhabilitar — decision del humano del 2026-08-05 que resuelve la contradiccion entre CA-007-1 y la version anterior de design-patterns seccion 1, ya corregida"
+    - "Los campos del ejercicio son exactamente name, description y muscleGroup. Decision del humano del 2026-08-05: se descarto agregar equipo, dificultad y multimedia para no ampliar la superficie que hay que versionar"
+    - "El modelo de planes NO existe todavia (es EPICA-03) y el de instancias de ejecucion tampoco (EPICA-05). La consulta '¿este ejercicio ya fue usado?' no tiene tabla contra la cual resolverse en esta epica"
+    - "Tanto COACH como ADMIN pueden crear, modificar e inhabilitar ejercicios (RN-22). El atleta no accede a la gestion del catalogo"
   supuestos:
-    - "El tiempo de expiracion por defecto (48 horas) es razonable para tokens de invitacion, pero es configurable via ADMIN_INVITE_EXPIRATION_HOURS"
-    - "No se necesita un CRUD completo de gestion de administradores dado que la escala es 1-3 admins"
-    - "El seed se ejecuta manualmente por el operador como parte del despliegue inicial"
+    - "El nombre del ejercicio es unico entre los ejercicios ACTIVOS de la biblioteca, no en toda ella. CA-005-2 exige avisar ante un nombre repetido, lo que implica una restriccion de unicidad; el documento original no lo declara de forma explicita ni distingue activos de inhabilitados. Decision del humano del 2026-08-05: la unicidad aplica solo entre activos, porque de lo contrario el nombre de un ejercicio inhabilitado quedaba reservado para siempre — no se puede editar (CA-006-6), no se puede eliminar (RN-06) y no existe reactivacion, asi que ese nombre resultaba inutilizable sin salida"
+    - "El aviso de nombre duplicado de CA-005-2 se resuelve con un rechazo de la creacion (DUPLICATE_ENTITY, 409) y no con una creacion condicionada. La HU dice que el usuario 'puede revisar el existente o cambiar el nombre', lo que es comportamiento de cliente, no de API"
+    - "El historial de versiones de CA-006-2 se expone con el numero de version y su fecha de creacion, que es lo que la HU pide de forma literal"
+    - "muscleGroup es texto libre en esta epica. Convertirlo en enum exigiria un catalogo de grupos musculares que ninguna HU define"
   glosario:
-    seed: "Script de inicializacion que pobla la base de datos con datos esenciales para el funcionamiento del sistema"
-    token_de_invitacion: "Codigo unico y temporal que permite a una persona invitada registrarse como administrador"
-    bootstrap: "Proceso de crear el primer administrador del sistema cuando no existe ninguno"
-    operador: "Persona con acceso al servidor o entorno de despliegue que ejecuta comandos de infraestructura"
+    biblioteca_global: "Coleccion unica de ejercicios compartida por todos los entrenadores de la plataforma. No hay copias ni bibliotecas privadas"
+    version_de_ejercicio: "Registro inmutable del contenido de un ejercicio en un momento dado. Cada modificacion de un ejercicio ya usado agrega una version nueva sin tocar las anteriores"
+    version_vigente: "La version de mayor versionNumber de un ejercicio. Es la que se ofrece al construir planes nuevos"
+    ejercicio_inhabilitado: "Ejercicio con isActive = false. No aparece en el catalogo para planes nuevos, pero sigue existiendo y sus versiones siguen siendo legibles desde los planes que ya lo referenciaban"
+    append_only: "Estrategia de escritura en la que los registros se agregan y nunca se modifican ni se borran, de modo que el historial completo queda disponible"
   dependencias:
-    - desde: "HU-002"
-      hacia: "HU-001"
-      descripcion: "Se necesita al menos un administrador existente (creado por seed) para poder enviar invitaciones"
-    - desde: "HU-003"
-      hacia: "HU-002"
-      descripcion: "Se necesita una invitacion vigente para completar el registro de un nuevo administrador"
+    - desde: "HU-006"
+      hacia: "HU-005"
+      descripcion: "No se puede modificar ni versionar un ejercicio que no existe. HU-005 crea el ejercicio y su primera version"
+    - desde: "HU-007"
+      hacia: "HU-005"
+      descripcion: "No se puede inhabilitar un ejercicio que no existe"
   historias_de_usuario:
-    - id: "HU-001"
-      titulo: "Crear administrador inicial mediante seed de base de datos"
-      como: "operador de la plataforma"
-      quiero: "crear el primer administrador mediante un script de seed"
-      para: "que la plataforma pueda ser gestionada desde el primer despliegue"
+    - id: "HU-005"
+      titulo: "Creacion de ejercicio en la biblioteca global"
+      como: "entrenador o administrador"
+      quiero: "agregar un nuevo ejercicio a la biblioteca global de la plataforma"
+      para: "que pueda usarse en la construccion de planes de entrenamiento"
       criterios_de_aceptacion:
-        - "Dado que el operador ha configurado los datos del administrador inicial en el entorno, cuando ejecuta el comando de seed de la base de datos, entonces se crea un usuario con rol administrador con los datos proporcionados"
-        - "Dado que el seed creo el administrador exitosamente, cuando el administrador inicia sesion con las credenciales configuradas, entonces accede a la plataforma con permisos de administrador"
-        - "Dado que las credenciales del administrador no estan configuradas en el entorno, cuando se ejecuta el comando de seed, entonces el seed se omite sin errores mostrando un mensaje informativo y no se crea ningun usuario administrador"
-        - "Dado que ya existe un administrador con el correo configurado, cuando se ejecuta el comando de seed nuevamente, entonces el seed se omite sin errores y el administrador existente no se modifica"
-        - "Dado que los datos del administrador no cumplen las validaciones (correo invalido o contrasena que no cumple requisitos minimos), cuando se ejecuta el seed, entonces falla con un mensaje indicando que validacion no se cumple y no se crea ningun usuario"
-        - "Dado que el seed crea el administrador exitosamente, cuando se verifican los registros legales, entonces existen registros inmutables de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con documentVersion, ip del entorno de despliegue y acceptedAt"
+        - "CA-005-1: Dado que un entrenador o administrador accede a la biblioteca de ejercicios, Cuando completa la informacion del ejercicio (name, description, muscleGroup) y lo guarda, Entonces el ejercicio queda disponible en la biblioteca para ser usado en planes, con isActive = true y su primera version (versionNumber = 1)"
+        - "CA-005-2: Dado que el entrenador o administrador esta creando un ejercicio, Cuando ingresa un nombre que coincide con el de un ejercicio ACTIVO de la biblioteca, comparando sin distinguir mayusculas de minusculas y recortando los espacios al inicio y al final, Entonces la creacion se rechaza indicando que ya existe un ejercicio con ese nombre, sin crear el registro"
+        - "CA-005-6: Dado que existe en la biblioteca un ejercicio inhabilitado con un nombre determinado, Cuando un entrenador o administrador crea un ejercicio nuevo con ese mismo nombre, Entonces la creacion procede con exito: el nombre de un ejercicio inhabilitado queda liberado para reutilizarse"
+        - "CA-005-3: Dado que un ejercicio fue guardado exitosamente en la biblioteca, Cuando cualquier entrenador consulta el catalogo, Entonces puede ver y seleccionar el ejercicio recien creado, sin ningun paso de aprobacion intermedio"
+        - "CA-005-4: Dado que un usuario con rol ATHLETE intenta crear un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-005-5: Dado que un usuario sin autenticar intenta crear un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
       reglas_de_negocio:
-        - "La contrasena del administrador inicial se hashea con el mismo algoritmo que el registro normal (bcrypt)"
-        - "La contrasena debe cumplir los mismos requisitos de seguridad que cualquier usuario (minimo 8 caracteres, al menos una letra y un numero)"
-        - "El seed es idempotente: ejecutarlo multiples veces no crea duplicados"
-        - "Las credenciales provienen exclusivamente de variables de entorno, nunca hardcodeadas"
-        - "El administrador creado por seed requiere los mismos datos obligatorios que cualquier usuario"
+        - "RN-04: La biblioteca de ejercicios es global y unica, visible para todos los entrenadores"
+        - "RN-22: El Administrador tambien puede crear ejercicios, ademas del Entrenador"
       notas:
-        - "El seed se integra con el mecanismo estandar de Prisma (prisma db seed)"
-        - "Se deben agregar variables al .env.example con placeholders para documentar los campos requeridos"
-
-    - id: "HU-002"
-      titulo: "Invitar nuevo administrador por correo electronico"
-      como: "administrador de la plataforma"
-      quiero: "invitar a una persona a ser administrador enviandole un correo electronico"
-      para: "incorporar nuevos administradores sin necesidad de acceso directo a la base de datos"
+        - "El supuesto original de la HU ('los campos del ejercicio no estan especificados; el equipo debe definirlos') quedo RESUELTO por decision del humano el 2026-08-05: name, description y muscleGroup, sin campos adicionales"
+        - "La creacion debe generar el ejercicio y su primera version en una sola operacion atomica ($transaction): un Exercise sin ninguna ExerciseVersion es un estado invalido del dominio"
+        - "CA-005-2 se preciso y CA-005-6 se agrego el 2026-08-05. La unicidad de nombre es case-insensitive, con trim, y aplica SOLO entre ejercicios activos. En Postgres se implementa con un indice unico parcial y funcional: CREATE UNIQUE INDEX ON exercises (lower(name)) WHERE is_active = true. El schema declarativo de Prisma no expresa ni el lower() ni el WHERE, asi que la migracion de esta epica lleva SQL escrito a mano"
+    - id: "HU-006"
+      titulo: "Modificacion de un ejercicio existente genera nueva version"
+      como: "entrenador o administrador"
+      quiero: "modificar la informacion de un ejercicio de la biblioteca"
+      para: "mantener el contenido actualizado sin afectar los planes que ya usan la version anterior"
       criterios_de_aceptacion:
-        - "Dado que el administrador esta autenticado, cuando envia una invitacion con el correo electronico de la persona, entonces la invitacion queda registrada con estado pendiente"
-        - "Dado que la invitacion fue registrada exitosamente, cuando el sistema procesa el envio, entonces la persona recibe un correo con un enlace de registro"
-        - "Dado que ya existe un usuario con el correo proporcionado, cuando el administrador intenta enviar la invitacion, entonces ve un mensaje indicando que ya existe un usuario con ese correo y la invitacion no se envia"
-        - "Dado que ya existe una invitacion pendiente y vigente para ese correo, cuando el administrador intenta enviar otra invitacion al mismo correo, entonces ve un mensaje indicando que ya existe una invitacion activa y la invitacion no se envia"
-        - "Dado que un usuario con rol diferente a administrador esta autenticado, cuando intenta enviar una invitacion, entonces ve un mensaje de acceso denegado y la invitacion no se envia"
+        - "CA-006-1: Dado que un entrenador o administrador edita un ejercicio que ya fue incluido en al menos un plan, Cuando guarda los cambios, Entonces se crea una version nueva con versionNumber incrementado en uno, Y la version anterior permanece sin cambios y sigue siendo la que referencian los planes que ya la usaban"
+        - "CA-006-2: Dado que un entrenador consulta el detalle de un ejercicio de la biblioteca, Cuando el ejercicio tiene mas de una version, Entonces obtiene el historial de versiones con el numero y la fecha de creacion de cada una"
+        - "CA-006-3: Dado que un entrenador o administrador edita un ejercicio que aun no ha sido incluido en ningun plan, Cuando guarda los cambios, Entonces la version vigente se actualiza en el lugar y NO se crea una version nueva"
+        - "CA-006-4: Dado que un entrenador o administrador intenta modificar un ejercicio que no existe, Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio no fue encontrado"
+        - "CA-006-5: Dado que un usuario con rol ATHLETE intenta modificar un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-006-6: Dado que un entrenador o administrador intenta modificar un ejercicio que ya fue inhabilitado (isActive = false), Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio ya no esta activo, sin crear una version nueva ni alterar la vigente"
       reglas_de_negocio:
-        - "Solo usuarios con rol administrador pueden crear invitaciones"
-        - "No se permiten invitaciones duplicadas al mismo correo mientras haya una activa"
-        - "La invitacion registra quien la creo para auditoria"
+        - "RN-05: Los ejercicios son inmutables una vez usados; los cambios generan una version nueva"
+        - "RN-07: Los planes activos conservan la version original del ejercicio"
       notas:
-        - "Se necesita un nuevo modelo en Prisma (AdminInvitation) para persistir tokens de invitacion"
-        - "Precondicion tecnica: implementar servicio de email transversal en src/modules/notifications/ usando Resend (paquete instalado, sin codigo funcional)"
-
-    - id: "HU-003"
-      titulo: "Completar registro de administrador mediante token de invitacion"
-      como: "persona invitada"
-      quiero: "completar mi registro como administrador usando el enlace que recibi por correo"
-      para: "acceder a las funciones de gestion de la plataforma"
+        - "La decision entre versionar y editar en el lugar depende de si el ejercicio fue usado en algun plan. El modelo de planes es EPICA-03 y el de instancias EPICA-05: en esta epica no existe la tabla contra la cual consultarlo"
+        - "Por decision del humano del 2026-08-05 la epica se implementa completa: la verificacion de uso se aisla detras de un unico metodo del service que hoy devuelve siempre false, para que EPICA-03 lo conecte cambiando un solo punto. Las dos ramas (usado y no usado) se cubren con tests unitarios mockeando ese metodo"
+        - "Consecuencia aceptada: CA-006-1 y CA-006-3 no son verificables end-to-end en esta epica, solo en tests unitarios. Su cobertura e2e llega con EPICA-03. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio"
+        - "CA-006-6 se agrego el 2026-08-05 por decision del humano, tras detectar el Arquitecto que ninguna CA definia el comportamiento del PATCH sobre un ejercicio inhabilitado. Usa EXERCISE_INACTIVE, la misma entrada del catalogo que la doble inhabilitacion. Racional: un ejercicio retirado del catalogo no debe seguir mutandose, y como esta epica no define reactivacion, en la practica queda congelado — que es lo coherente con RN-06"
+    - id: "HU-007"
+      titulo: "Inhabilitacion de un ejercicio en la biblioteca"
+      como: "entrenador o administrador"
+      quiero: "inhabilitar un ejercicio de la biblioteca"
+      para: "que no pueda ser seleccionado en nuevos planes, sin borrar el historial de planes donde ya se uso"
       criterios_de_aceptacion:
-        - "Dado que la persona tiene un enlace de invitacion valido y vigente, cuando completa sus datos personales y confirma el registro, entonces se crea su cuenta de administrador"
-        - "Dado que el registro fue exitoso, cuando la persona consulta el estado de la invitacion, entonces la invitacion aparece como utilizada"
-        - "Dado que el registro fue exitoso, cuando la persona inicia sesion con sus credenciales, entonces accede a la plataforma con permisos de administrador"
-        - "Dado que ha transcurrido el tiempo de expiracion configurado desde que se envio la invitacion, cuando la persona intenta registrarse con ese enlace, entonces ve un mensaje indicando que la invitacion ha expirado y se le sugiere solicitar una nueva invitacion"
-        - "Dado que la invitacion ya fue utilizada para crear una cuenta, cuando alguien intenta registrarse con el mismo enlace, entonces ve un mensaje indicando que la invitacion ya fue utilizada y el registro no se completa"
-        - "Dado que la persona tiene una invitacion valida, cuando intenta registrarse con datos incompletos o invalidos, entonces ve los errores de validacion correspondientes y puede corregir los datos y reintentar"
-        - "Dado que el registro fue exitoso, cuando se verifican los registros legales, entonces existen registros inmutables de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con userId, documentVersion, ip, userAgent y acceptedAt"
+        - "CA-007-1: Dado que un entrenador o administrador accede a un ejercicio activo de la biblioteca, Cuando lo inhabilita, Entonces el ejercicio pasa a isActive = false, deja de aparecer en el catalogo de ejercicios disponibles, Y la operacion procede sin importar si el ejercicio esta siendo usado en algun plan"
+        - "CA-007-2: Dado que un entrenador consulta el catalogo para construir un plan, Cuando un ejercicio esta inhabilitado, Entonces no aparece en los resultados por defecto ni puede seleccionarse"
+        - "CA-007-3: Dado que se consulta un ejercicio inhabilitado por su identificador, Cuando la consulta es directa y no un listado, Entonces el ejercicio es legible junto con sus versiones y su estado inactivo, de modo que un plan historico pueda mostrarlo indicando que ya no esta activo en la biblioteca"
+        - "CA-007-4: Dado que un entrenador o administrador intenta inhabilitar un ejercicio que ya esta inhabilitado, Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio ya no esta activo"
+        - "CA-007-5: Dado que un usuario con rol ATHLETE intenta inhabilitar un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
       reglas_de_negocio:
-        - "El token de invitacion expira segun el tiempo configurado en la variable de entorno (por defecto 48 horas)"
-        - "Cada token es de uso unico — una vez utilizado no puede reutilizarse"
-        - "El registro requiere los mismos datos personales que cualquier usuario de la plataforma"
-        - "La contrasena del nuevo administrador debe cumplir los mismos requisitos de seguridad (minimo 8 caracteres, al menos una letra y un numero)"
-        - "El nuevo administrador inicia sesion con el flujo estandar de autenticacion existente"
+        - "RN-06: Los ejercicios no se eliminan, solo se inhabilitan"
+        - "RN-07: Los planes activos conservan el ejercicio aunque este sea inhabilitado despues"
       notas:
-        - "El endpoint de registro por invitacion es publico (no requiere JWT) pero si requiere un token de invitacion valido"
+        - "La inhabilitacion NUNCA se bloquea por uso. Bloquearla haria imposible retirar un ejercicio popular, y contradice CA-007-1. La entrada EXERCISE_IN_USE del catalogo de errores NO se usa en esta epica"
+        - "CA-007-4 usa la entrada EXERCISE_INACTIVE, que ya existe en el catalogo de errores"
+        - "No se define reactivacion de un ejercicio inhabilitado: ninguna HU la pide y agregarla ampliaria el alcance"

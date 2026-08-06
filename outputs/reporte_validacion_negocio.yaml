@@ -1,328 +1,393 @@
 validacion_producto:
-  epica_id: "EPICA-09"
-  fecha: "2026-03-08"
+  epica_id: "EPICA-02"
+  fecha: "2026-08-05"
   analista: "Analista de Producto — fitmess-api"
 
   resumen_ejecutivo: >
-    La epica EPICA-09 "Registro y Autenticacion de Administradores" define tres historias de
-    usuario que cubren el ciclo completo de incorporacion de administradores: seed inicial,
-    invitacion por email, y completar registro via token. El objetivo de negocio es claro y
-    necesario: sin administradores, los endpoints de aprobacion de entrenadores son inaccesibles
-    y la plataforma no puede operar. El patron elegido (Seed + Invitacion) es consistente con
-    las mejores practicas de la industria para plataformas de escala reducida (1-3 admins).
-    Las tres HU son aprobadas con condiciones. Existen dos condiciones bloqueantes de naturaleza
-    legal: (1) HU-001 no incluye ningun criterio de aceptacion que exija el registro de
-    aceptaciones legales en el seed, pese a que la propia restriccion de la epica lo declara
-    obligatorio; (2) HU-003 menciona las aceptaciones legales solo como nota, sin convertirlas
-    en criterio verificable. Ambas condiciones deben resolverse antes de que el Documentador
-    inicie. Las condiciones no bloqueantes son mejoras de seguridad y trazabilidad.
+    La epica EPICA-02 "Catalogo Global de Ejercicios" define tres historias de usuario que
+    cubren el ciclo de vida del contenido del catalogo: creacion (HU-005), versionado por
+    modificacion (HU-006) e inhabilitacion (HU-007). El objetivo de negocio es claro: sin
+    biblioteca de ejercicios no hay insumo para construir planes en EPICA-03. La cadena de
+    dependencias HU-006 -> HU-005 y HU-007 -> HU-005 es correcta y no presenta contradicciones.
+
+    Las tres decisiones originales del humano del 2026-08-05 siguen incorporadas de forma
+    consistente: (1) los campos exactos del ejercicio (name, description, muscleGroup); (2) la
+    inhabilitacion sin bloqueo por uso (EXERCISE_IN_USE efectivamente no se referencia en ningun
+    criterio, verificado contra business-error.enum.ts); (3) la epica se implementa completa
+    aceptando que CA-006-1 y CA-006-3 no son verificables end-to-end hasta EPICA-03.
+
+    Desde la version anterior de este reporte el humano tomo dos decisiones adicionales, ambas
+    ya incorporadas en `epica_input.yaml` y validadas aqui: agregar CA-006-6 (bloquea el PATCH
+    sobre un ejercicio inhabilitado) y, tras la interaccion que esto genero con CA-005-2 y con la
+    ausencia de reactivacion, precisar CA-005-2 (unicidad de nombre solo entre ejercicios ACTIVOS,
+    case-insensitive, con trim) y agregar CA-005-6 (el nombre de un ejercicio inhabilitado queda
+    libre para un ejercicio nuevo). Esta segunda decision resuelve la condicion no bloqueante que
+    yo mismo habia marcado sobre el caracter terminal de la inhabilitacion. Tambien revise la
+    consecuencia directa de permitir que un ejercicio activo y uno inhabilitado compartan nombre
+    (dos filas con el mismo `name` en una consulta que incluya inhabilitados): no es un problema
+    funcional — ver argumento en HU-005.
+
+    Validacion legal: esta epica gestiona contenido de catalogo (ejercicios), no datos
+    personales ni datos sensibles de salud de ningun individuo. Ley 1581/2012 (consentimiento
+    y datos personales) y Ley 527/1999 (validez de documentos digitales) NO aplican a ninguna
+    de las tres HU — exigir aviso de privacidad, consentimiento explicito o registro en
+    legal_acceptances aqui seria sobre-ingenieria sin sustento legal, porque no hay un titular
+    de datos personales involucrado en la creacion/edicion/inhabilitacion de un ejercicio.
+    Ley 1273/2009 (seguridad de la informacion) SI aplica siempre. La parte de control de
+    acceso esta cubierta: las cinco HU tienen criterios explicitos de autenticacion (401) y
+    autorizacion por rol (403) para ATHLETE. La parte de trazabilidad de auditoria NO esta
+    cubierta hoy: verifique contra el codigo (`src/modules/common/interceptors/` solo contiene
+    `response.interceptor.ts`, y `grep -rn "auditLog" src` no devuelve escrituras) que no existe
+    ningun interceptor que capture las mutaciones en la tabla `audit_logs`. Es un hallazgo
+    preexistente y transversal a todo el sistema, ya registrado como hallazgo abierto #1 en
+    `outputs/execution-log.md` (severidad Media, 2026-08-05), no algo que esta epica introduzca.
+    Ver condicion no bloqueante al respecto mas abajo.
+
+    Quedan dos condiciones no bloqueantes abiertas, ninguna de naturaleza legal que impida
+    avanzar: HU-006 requiere que el reporte de QA documente explicitamente el gap E2E de
+    CA-006-1/CA-006-3, condicion que la propia HU ya exige en sus notas y que aqui se ratifica
+    como condicion de aprobacion; y las tres HU heredan la ausencia de un log de auditoria real
+    para sus mutaciones, gap preexistente que no corresponde resolver dentro del alcance de esta
+    epica. La condicion sobre precision de CA-005-2 y la condicion sobre el caracter terminal de
+    la inhabilitacion, ambas senaladas en la version anterior de este reporte, quedan RESUELTAS
+    por las decisiones del humano incorporadas hoy en `epica_input.yaml` — ver detalle en HU-005.
 
   historias_de_usuario:
 
-    - id: "HU-001"
-      titulo: "Crear administrador inicial mediante seed de base de datos"
-      decision: "APROBADA_CON_CONDICIONES"
+    - id: "HU-005"
+      titulo: "Creacion de ejercicio en la biblioteca global"
+      decision: "APROBADA"
       observaciones: >
-        La HU cubre correctamente el caso de bootstrap del primer administrador. El criterio
-        de idempotencia (no duplicar si ya existe el correo) es funcional y verificable. La
-        restriccion de credenciales exclusivamente por variables de entorno elimina el riesgo
-        de hardcoding. Los cinco criterios de aceptacion cubren el happy path y los principales
-        casos de error: configuracion ausente, duplicado existente, y validaciones fallidas.
-        Las reglas de negocio (bcrypt, requisitos de contrasena, idempotencia) son correctas
-        y alineadas con lo implementado en EPICA-01.
+        Los seis criterios de aceptacion son claros, atomicos y verificables. CA-005-1 fija
+        correctamente el estado inicial (isActive = true, versionNumber = 1) y la nota de la
+        HU exige crear Exercise + ExerciseVersion en una sola operacion atomica, lo cual es
+        consistente con el principio de que "un Exercise sin ninguna ExerciseVersion es un
+        estado invalido del dominio". CA-005-3 (visibilidad inmediata sin aprobacion) y
+        CA-005-4/CA-005-5 (control de acceso por rol y autenticacion) son correctos y
+        consistentes con RN-04 y RN-22.
 
-        Sin embargo, existe una omision legal relevante: la restriccion conocida de la epica
-        declara explicitamente que "la creacion de cuentas admin tambien debe registrar
-        aceptaciones legales" (Ley 1581/2012), pero ninguno de los cinco criterios de
-        aceptacion exige ni verifica el registro de aceptaciones legales (TERMS_OF_SERVICE y
-        HABEAS_DATA) al crear el administrador via seed. Esta omision deja sin mecanismo de
-        verificacion una obligacion declarada por el propio Product Owner.
+        RESUELTA la condicion no bloqueante de la version anterior de este reporte: CA-005-2 ya
+        precisa que la comparacion es "sin distinguir mayusculas de minusculas y recortando los
+        espacios al inicio y al final" contra ejercicios ACTIVOS. Cubre exactamente el caso que
+        senale ("Sentadilla" vs "sentadilla " con espacio final ya no pueden coexistir). Doy por
+        cerrada esta condicion.
 
-        Adicionalmente, el seed opera fuera del pipeline HTTP normal, por lo que el
-        AuditInterceptor global no captura automaticamente la operacion de creacion. No
-        existe ningun criterio que exija trazabilidad de auditoria para esta accion critica
-        de bootstrapping.
+        CA-005-6 (agregada el 2026-08-05) es clara y verificable: si existe un ejercicio
+        inhabilitado con un nombre X, crear un ejercicio nuevo con nombre X debe proceder con
+        exito. Valido que CA-005-2 y CA-005-6 son complementarias y no contradictorias: CA-005-2
+        acota la unicidad a activos, CA-005-6 confirma explicitamente que un nombre inhabilitado
+        queda libre. Juntas resuelven la interaccion que yo habia senalado como condicion en la
+        version anterior de este reporte (ver HU-006 y HU-007): con esta decision, un entrenador
+        que detecte una errata en un ejercicio ya inhabilitado puede crear de inmediato un
+        ejercicio nuevo y corregido con el mismo nombre — el bloqueo de edicion de CA-006-6 deja
+        de ser un callejon sin salida a nivel de negocio, aunque el registro original en si mismo
+        siga congelado (eso es coherente con RN-06 y es la intencion declarada: contenido
+        retirado no se resucita, se reemplaza).
 
-        CONDICION BLOQUEANTE (legal): Agregar un criterio de aceptacion que exija el registro
-        inmutable de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances al momento de crear
-        el administrador por seed, con documentVersion, ip del entorno y acceptedAt.
+        Consecuencia revisada de CA-005-6: un ejercicio activo y uno inhabilitado pueden terminar
+        compartiendo el mismo `name` (el original inhabilitado y su reemplazo activo). Evaluo si
+        esto es un problema funcional y concluyo que NO, por tres razones. Primera: no hay
+        ambiguedad de datos — un plan referencia un `exerciseVersionId` concreto, nunca un nombre,
+        asi que dos ejercicios con el mismo nombre nunca se confunden a nivel de persistencia.
+        Segunda: CA-007-3 ya exige que un ejercicio inhabilitado se muestre "junto con... su
+        estado inactivo" cuando se consulta directamente; ese mismo principio cubre por extension
+        cualquier listado que decida incluir inhabilitados (si el Arquitecto agrega un parametro
+        tipo `includeInactive`), porque cada fila ya debe traer su estado — no hace falta una CA
+        nueva para que la ambiguedad visual se resuelva, ya esta gobernada por un criterio
+        existente. Tercera: es el comportamiento esperado de un catalogo con soft-delete/versionado
+        (retirar y reemplazar bajo el mismo nombre es una operacion normal en este tipo de
+        sistemas), no un defecto de diseno. No declaro condicion por este punto; queda cerrado.
 
-        CONDICION NO BLOQUEANTE (trazabilidad): Agregar un criterio que exija que el seed
-        registre en el log de auditoria (o mecanismo equivalente documentado) la creacion del
-        administrador con timestamp, sin exponer la contrasena.
+        Investigacion de industria: los datasets de ejercicios de referencia (wger, exercemus,
+        API Ninjas) usan nombres unicos por ejercicio como clave funcional de identificacion, lo
+        que valida CA-005-2 como practica correcta. Acotar la unicidad a activos (en vez de a
+        todo el historico) tambien es coherente con el patron RN-06 de inhabilitacion sin borrado:
+        un dataset de referencia no necesita reservar el nombre de contenido retirado.
+
+        No quedan condiciones abiertas propias de esta HU.
 
       guardarrails_aplicables:
         - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: true
-          cumple: "pendiente"
+          aplica: false
+          cumple: true
           accion_requerida: >
-            Agregar criterio de aceptacion que exija el registro de TERMS_OF_SERVICE y
-            HABEAS_DATA en legal_acceptances al crear el administrador por seed. La propia
-            restriccion de la epica lo declara obligatorio pero ningun criterio lo verifica.
-            Condicion bloqueante — el Documentador no puede iniciar hasta que este criterio
-            quede incorporado en epica_input.yaml.
+            No aplica. El ejercicio (name, description, muscleGroup) es contenido de catalogo,
+            no un dato personal de un individuo identificado ni identificable. No hay titular
+            de datos involucrado en la creacion de un ejercicio. Exigir aviso de privacidad o
+            consentimiento aqui seria sobre-ingenieria sin base legal.
 
         - ley: "Ley 1273/2009 — Seguridad de la informacion"
           aplica: true
-          cumple: true
+          cumple: false
           accion_requerida: >
-            Ningun criterio de aceptacion ni regla de negocio expone la contrasena. La
-            exigencia de bcrypt esta documentada en las reglas de negocio, alineada con el
-            patron de EPICA-01. Aceptable. La condicion de trazabilidad de auditoria es
-            una mejora no bloqueante.
-
-        - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Aplica porque el seed registra el consentimiento digital del administrador inicial,
-            que es un documento con valor legal. La autenticidad se garantiza porque el
-            operador esta autenticado en el entorno de despliegue. La integridad y disponibilidad
-            dependen de que el registro en legal_acceptances sea inmutable. Estas garantias
-            solo pueden verificarse si existe el criterio de aceptacion exigido en la condicion
-            bloqueante de Ley 1581. Queda pendiente hasta que dicha condicion se resuelva.
-
-      fuentes_consultadas:
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
-          resumen: >
-            Ley 1581 de 2012: el consentimiento para tratamiento de datos debe ser previo,
-            expreso e informado antes de incorporar los datos. La creacion de una cuenta de
-            administrador — incluso por seed — constituye una incorporacion de datos personales
-            y requiere registro de autorizacion.
-        - url: "https://medium.com/@musanziwilfried/nestjs-database-seeding-daa11f32e066"
-          resumen: >
-            Mejores practicas para seeding en NestJS: hashear contrasenas con bcrypt, asociar
-            roles explicitamente, usar variables de entorno para credenciales. La HU ya
-            incorpora estas practicas en sus reglas de negocio.
-
-    - id: "HU-002"
-      titulo: "Invitar nuevo administrador por correo electronico"
-      decision: "APROBADA_CON_CONDICIONES"
-      observaciones: >
-        La HU cubre los flujos principales de invitacion con buena cobertura de casos de
-        error: usuario existente con ese correo, invitacion duplicada activa, y acceso denegado
-        para roles no admin. El diseno de token de uso unico con expiracion configurable es
-        consistente con las mejores practicas de OWASP para tokens de invitacion. La regla de
-        negocio de registrar quien creo la invitacion es una buena practica de auditoria.
-
-        Se identifican tres condiciones no bloqueantes:
-
-        CONDICION NO BLOQUEANTE 1 (funcional): El criterio sobre invitaciones duplicadas define
-        correctamente el comportamiento cuando hay una invitacion "pendiente y vigente". Sin
-        embargo, no define el comportamiento cuando existe una invitacion expirada para el mismo
-        correo. El flujo logico indica que una invitacion expirada debe poder reemplazarse con
-        una nueva; si no se explicita, el Arquitecto podria interpretar que cualquier invitacion
-        previa (incluso expirada) bloquea futuras invitaciones, generando una inconsistencia
-        operativa.
-
-        CONDICION NO BLOQUEANTE 2 (seguridad, Ley 1273): Los criterios de aceptacion y reglas
-        de negocio no mencionan que el token de invitacion debe generarse con aleatoriedad
-        criptografica. Segun OWASP Forgot Password Cheat Sheet, los tokens de este tipo deben
-        tener minimo 128 bits de entropia generados con CSPRNG. Un token predecible representa
-        un riesgo de acceso no autorizado (Ley 1273/2009 art. 269A). Debe quedar como regla de
-        negocio explicita para que el equipo de implementacion no use Math.random() ni UUID v4
-        estandar para este proposito.
-
-        CONDICION NO BLOQUEANTE 3 (seguridad, Ley 1273): No existe criterio de rate limiting
-        en el endpoint de envio de invitaciones. Un administrador comprometido o un error en
-        la aplicacion podria usar este endpoint para spam masivo de correos o para enumerar
-        si un correo ya existe en el sistema (a traves de los mensajes de error diferenciados).
-
-      guardarrails_aplicables:
-        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: true
-          cumple: true
-          accion_requerida: >
-            La HU procesa el correo electronico del invitado (dato personal). El correo se
-            usa exclusivamente para enviar la invitacion (finalidad declarada y especifica).
-            El consentimiento se registra en HU-003 al completar el registro, no en esta HU.
-            La regla de negocio de registrar quien creo la invitacion cubre la trazabilidad
-            requerida. Aceptable sin cambios.
-
-        - ley: "Ley 1273/2009 — Seguridad de la informacion"
-          aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            Agregar regla de negocio que exija generacion del token con aleatoriedad
-            criptografica (CSPRNG, minimo 128 bits de entropia) segun OWASP. Agregar criterio
-            de rate limiting en el endpoint. El criterio de acceso denegado para roles no
-            admin esta presente y es correcto. Condiciones no bloqueantes.
+            Parcialmente cubierto. CA-005-4 y CA-005-5 exigen 403/401 para ATHLETE y usuarios no
+            autenticados respectivamente — eso si esta resuelto. Lo que NO esta cubierto es la
+            trazabilidad de auditoria: no existe un interceptor global que registre en
+            `audit_logs` quien creo el ejercicio, cuando y desde donde. Verificado contra el
+            codigo: no hay ningun `AuditInterceptor` en `src/modules/common/interceptors/` ni
+            escrituras a `auditLog` en `src/`. Es el hallazgo abierto #1 de
+            `outputs/execution-log.md`, preexistente a esta epica y transversal a todo el
+            sistema. No propongo que HU-005 lo resuelva — construir un interceptor global de
+            auditoria es una tarea de infraestructura cross-cutting fuera del alcance de una HU
+            de catalogo — pero no puede darse por cumplido.
 
         - ley: "Ley 527/1999 — Validez de documentos digitales"
           aplica: false
           cumple: true
           accion_requerida: >
-            No aplica directamente en esta HU. La invitacion es un mecanismo operativo, no
-            un documento con valor legal. El valor legal se establece en HU-003 al registrar
-            las aceptaciones.
+            No aplica. No hay firma de contrato, transaccion economica ni documento con valor
+            legal involucrado en crear un ejercicio de catalogo.
 
       fuentes_consultadas:
-        - url: "https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html"
+        - url: "https://github.com/exercemus/exercises"
           resumen: >
-            OWASP: tokens de un solo uso, minimo 128 bits de entropia con CSPRNG, expiracion
-            con tiempo limitado. Para invitaciones (no reset de contrasena), 48 horas es
-            acceptable dado que el administrador que invita tiene control del proceso y la
-            escala es de 1-3 admins. Tokens nunca en texto plano en base de datos — almacenar
-            hash seguro.
-        - url: "https://www.rippling.com/blog/iam-best-practices"
+            Dataset de ejercicios open source curado desde exercemus, wger.de y exercises.json.
+            Usa el nombre del ejercicio como identificador funcional unico dentro de la
+            biblioteca, lo que valida la restriccion de unicidad de nombre de CA-005-2.
+        - url: "https://hivo.co/blog/creating-a-fitness-taxonomy-template-for-your-needs"
           resumen: >
-            IAM best practices: identidades externas aprovisionadas con invitaciones deben
-            pasar por un proceso de verificacion previo. Para plataformas de escala reducida,
-            el patron de invitacion por email de admin existente es apropiado y suficiente.
+            Las taxonomias de fitness organizan grupos musculares y equipamiento en categorias
+            jerarquicas. Confirma que muscleGroup como texto libre (decision ya tomada por el
+            humano) es una simplificacion deliberada frente al estandar de industria (que suele
+            usar taxonomia estructurada), aceptable dado que ninguna HU de esta epica requiere
+            filtrado o agregacion por grupo muscular.
 
-    - id: "HU-003"
-      titulo: "Completar registro de administrador mediante token de invitacion"
+    - id: "HU-006"
+      titulo: "Modificacion de un ejercicio existente genera nueva version"
       decision: "APROBADA_CON_CONDICIONES"
       observaciones: >
-        La HU es la mas completa de la epica en cobertura de criterios de aceptacion: cubre
-        el happy path, expiracion del token, uso ya consumido, y errores de validacion. La
-        nota de que el endpoint es publico pero requiere token valido es correcta y elimina
-        una posible ambiguedad. El flujo de autenticacion posterior usa el mecanismo estandar
-        de EPICA-01, lo que es correcto.
+        Los seis criterios son claros. CA-006-2 (historial de versiones con numero y fecha)
+        y CA-006-4/CA-006-5 (no encontrado, control de acceso) son directamente verificables.
+        RN-05 y RN-07 son consistentes entre si y con HU-007.
 
-        Sin embargo, existe una condicion bloqueante y dos condiciones no bloqueantes:
+        CA-006-6 es clara y, a diferencia de CA-006-1 y CA-006-3, SI es completamente verificable
+        end-to-end en esta epica: no depende de la consulta de uso en planes (que no existe
+        todavia) sino del campo isActive, que ya existe desde HU-007. No contradice RN-05, RN-06
+        ni RN-07: RN-06 exige que el ejercicio inhabilitado no se elimine, y se cumple (sigue
+        existiendo y es legible por CA-007-3); RN-05/RN-07 rigen el comportamiento de un ejercicio
+        activo usado en planes, y CA-006-6 simplemente antepone una verificacion de isActive antes
+        de que esa logica se evalue. El orden logico para el service queda sin solapamientos:
+        (1) existe el ejercicio (CA-006-4), (2) esta activo (CA-006-6), (3) esta en uso o no
+        (CA-006-1/CA-006-3). Usa EXERCISE_INACTIVE (422), consistente con CA-007-4.
 
-        CONDICION BLOQUEANTE (legal): La nota de la HU menciona que "el registro debe incluir
-        aceptaciones legales (TERMS_OF_SERVICE y HABEAS_DATA) igual que cualquier usuario",
-        pero no existe ningun criterio de aceptacion que lo verifique. Las notas no son
-        criterios verificables — el equipo de QA no puede probar una nota. Debe existir un
-        criterio de aceptacion explicito que exija el registro inmutable de TERMS_OF_SERVICE
-        y HABEAS_DATA en legal_acceptances con userId, documentVersion, ip, userAgent y
-        acceptedAt. Este criterio es la evidencia funcional del cumplimiento de Ley 1581/2012
-        y Ley 527/1999. Sin el, la HU esta legalmente incompleta.
+        CA-006-1 y CA-006-3 dependen de una consulta ("¿este ejercicio ya fue usado en un
+        plan?") que no tiene tabla contra la cual resolverse en esta epica, porque el modelo
+        de planes es EPICA-03. La epica ya reconoce esto de forma explicita en sus notas y
+        propone una mitigacion funcionalmente razonable: aislar la verificacion detras de un
+        unico metodo del service que hoy siempre devuelve false, cubriendo ambas ramas (usado
+        / no usado) con tests unitarios que mockean ese metodo. Esto es aceptable como
+        implementacion completa de la epica bajo la decision del humano del 2026-08-05, siempre
+        que el gap quede visible y no se presente como cobertura end-to-end real.
 
-        CONDICION NO BLOQUEANTE 1 (seguridad, Ley 1273): La regla de negocio "cada token es
-        de uso unico" es correcta, y el criterio sobre "invitacion ya utilizada" lo verifica
-        despues del hecho. Sin embargo, no existe criterio que exija invalidacion atomica del
-        token en la misma transaccion que crea la cuenta. Sin invalidacion atomica, existe
-        un riesgo de race condition donde dos solicitudes concurrentes con el mismo token
-        podrian crear dos cuentas.
+        CONDICION NO BLOQUEANTE (trazabilidad): ratifico como condicion de aprobacion lo que
+        la propia HU ya exige en sus notas: el reporte de QA debe declarar explicitamente que
+        CA-006-1 y CA-006-3 estan verificados solo a nivel unitario (mock) y no de forma
+        end-to-end, y que su cobertura e2e real llega con EPICA-03. Esta condicion no bloquea
+        la implementacion; bloquea que el gap se presente en el reporte de QA como si fuera
+        una cobertura completa.
 
-        CONDICION NO BLOQUEANTE 2 (seguridad, Ley 1273): El criterio de errores de validacion
-        permite reintentos con datos corregidos, lo que es funcionalmente correcto. Sin
-        embargo, no limita la cantidad de intentos fallidos con un token valido. Sin este
-        limite, un atacante con un token interceptado podria iterar sobre distintas
-        combinaciones de datos personales.
+        RESUELTA la condicion no bloqueante de la version anterior de este reporte sobre el
+        caracter terminal de la inhabilitacion: yo habia senalado que CA-006-6, combinado con
+        CA-005-2 (que no distinguia activos de inhabilitados) y la ausencia de reactivacion,
+        dejaba un ejercicio inhabilitado sin ninguna via de correccion — ni editarlo ni
+        reemplazarlo con el mismo nombre. El humano resolvio esto el 2026-08-05 acotando CA-005-2
+        a ejercicios ACTIVOS y agregando CA-005-6, que libera explicitamente el nombre de un
+        ejercicio inhabilitado para un ejercicio nuevo. Con esto, el registro inhabilitado en si
+        mismo sigue sin poder editarse (coherente con CA-006-6 y con RN-06), pero el bloqueo ya
+        no es un callejon sin salida a nivel de negocio: existe una via de correccion (crear un
+        ejercicio nuevo con el mismo nombre). Validado en detalle en HU-005. No queda condicion
+        abierta por este punto.
 
       guardarrails_aplicables:
         - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: true
-          cumple: "pendiente"
+          aplica: false
+          cumple: true
           accion_requerida: >
-            Convertir la nota de aceptaciones legales en criterio de aceptacion verificable.
-            El criterio debe exigir: registro inmutable de TERMS_OF_SERVICE y HABEAS_DATA en
-            legal_acceptances, con userId, documentVersion, ip, userAgent y acceptedAt. El
-            consentimiento es explicito porque el usuario realiza la accion de completar el
-            registro (accion afirmativa, no pre-marcado). La finalidad (gestion de la
-            plataforma de entrenamiento deportivo) debe ser visible antes de confirmar el
-            registro. Condicion bloqueante — el Documentador no puede iniciar hasta que este
-            criterio quede en epica_input.yaml.
+            No aplica. Modificar el contenido de un ejercicio (name, description, muscleGroup)
+            no involucra datos personales de ningun usuario.
 
         - ley: "Ley 1273/2009 — Seguridad de la informacion"
           aplica: true
-          cumple: "pendiente"
+          cumple: false
           accion_requerida: >
-            Agregar criterio que exija invalidacion atomica del token en la misma transaccion
-            que crea la cuenta (no solo verificar intentos posteriores). Evaluar criterio de
-            rate limiting por token para intentos fallidos de completar el registro. Ambas
-            son condiciones no bloqueantes.
+            Parcialmente cubierto. CA-006-5 exige 403 para ATHLETE — resuelto. La modificacion
+            de un ejercicio (creacion de nueva version o edicion in-place) NO queda registrada
+            en `audit_logs` porque, verificado contra el codigo, ningun `AuditInterceptor`
+            existe ni escribe ahi (mismo hallazgo abierto #1 de `outputs/execution-log.md`,
+            preexistente y transversal). No corresponde a esta HU resolverlo.
 
         - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: true
-          cumple: "pendiente"
+          aplica: false
+          cumple: true
           accion_requerida: >
-            Aplica porque en esta HU se registra el consentimiento digital con valor legal
-            (TERMS_OF_SERVICE y HABEAS_DATA). Para cumplir Ley 527: (i) autenticidad se
-            garantiza con el token de invitacion valido como mecanismo de verificacion de
-            identidad; (ii) integridad se garantiza con el registro inmutable en
-            legal_acceptances sin UPDATE ni DELETE; (iii) disponibilidad se garantiza con
-            la persistencia en base de datos. Estos tres elementos solo pueden verificarse
-            si existe el criterio de aceptacion de la condicion bloqueante de Ley 1581.
-            Queda pendiente hasta que dicha condicion se resuelva.
+            No aplica. No hay contrato ni transaccion economica en juego al versionar contenido
+            de catalogo.
 
-      fuentes_consultadas:
-        - url: "https://www.suin-juriscol.gov.co/viewDocument.asp?ruta=Leyes/1684507"
-          resumen: >
-            Ley 1581 de 2012: la autorizacion para tratamiento de datos debe ser previa,
-            expresa e informada. En el registro por token, la accion de completar el
-            formulario y confirmar constituye el consentimiento expreso. Debe quedar
-            registrado en legal_acceptances con los campos obligatorios.
-        - url: "http://www.secretariasenado.gov.co/senado/basedoc/ley_0527_1999.html"
-          resumen: >
-            Ley 527 de 1999: los mensajes de datos tienen validez legal si garantizan
-            autenticidad, integridad y disponibilidad. El registro inmutable en base de datos
-            con timestamp y datos del solicitante cumple estos tres requisitos.
-        - url: "https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html"
-          resumen: >
-            OWASP: tokens de invitacion deben ser de uso unico con invalidacion inmediata al
-            ser consumidos. El sistema debe prevenir race conditions en el consumo del token
-            mediante transacciones atomicas.
+      fuentes_consultadas: []
+
+    - id: "HU-007"
+      titulo: "Inhabilitacion de un ejercicio en la biblioteca"
+      decision: "APROBADA"
+      observaciones: >
+        Los cinco criterios son claros, verificables y coherentes entre si. CA-007-1 refleja
+        con precision la decision del humano del 2026-08-05: la inhabilitacion procede siempre,
+        independientemente del uso, y EXERCISE_IN_USE efectivamente no aparece en ningun
+        criterio de esta HU (se verifico contra el catalogo de errores real en
+        business-error.enum.ts). CA-007-2 y CA-007-3 distinguen correctamente el listado
+        (oculta inhabilitados) de la consulta directa por id (los muestra con su estado), lo
+        que es necesario para que un plan historico pueda seguir mostrando un ejercicio que ya
+        no esta activo en el catalogo — consistente con RN-07 y con el glosario de la epica.
+        CA-007-4 usa EXERCISE_INACTIVE correctamente para el caso de doble inhabilitacion, y
+        esa entrada tambien se verifico existente en el catalogo.
+
+        Historial de esta observacion sobre reactivacion: en la primera version de este reporte
+        conclui que la ausencia de reactivacion no generaba vacio funcional. Al agregarse
+        CA-006-6, retracte esa conclusion: sin edicion posible sobre un ejercicio inhabilitado y
+        sin reactivacion, una errata quedaba sin remedio. El humano resolvio la interaccion el
+        2026-08-05 (ver HU-005 y HU-006): CA-005-2 ahora se compara solo contra activos y CA-005-6
+        libera el nombre de un ejercicio inhabilitado. Con esto, la ausencia de reactivacion vuelve
+        a ser sostenible sin vacio funcional — no porque el ejercicio inhabilitado pueda corregirse
+        (sigue sin poder), sino porque existe una via de reemplazo inmediata bajo el mismo nombre.
+        Es una diferencia real frente a "reactivar": el reemplazo es una entidad nueva (id nuevo,
+        versionNumber = 1), no una continuacion del historial de versiones del ejercicio original;
+        un plan que referenciaba el ejercicio inhabilitado sigue apuntando a esa version original,
+        no al reemplazo. Esto es coherente con RN-06/RN-07 y no requiere ninguna HU nueva.
+
+        Consecuencia de CA-005-6 revisada aqui tambien porque toca CA-007-2/CA-007-3: un ejercicio
+        activo y uno inhabilitado pueden compartir `name`. Evaluado en detalle en la entrada de
+        HU-005 — no es un problema funcional. Para esta HU el punto relevante es que CA-007-3 ya
+        exige mostrar el estado inactivo al consultar directamente, principio que cubre cualquier
+        listado futuro que incluya inhabilitados. Cerrado, sin condicion nueva.
+
+        No se identifican condiciones abiertas propias de esta HU. Comparte la condicion
+        transversal sobre ausencia de log de auditoria (ver guardarrail Ley 1273/2009 abajo).
+
+      guardarrails_aplicables:
+        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
+          aplica: false
+          cumple: true
+          accion_requerida: >
+            No aplica. Inhabilitar un ejercicio de catalogo no involucra datos personales.
+
+        - ley: "Ley 1273/2009 — Seguridad de la informacion"
+          aplica: true
+          cumple: false
+          accion_requerida: >
+            Parcialmente cubierto. CA-007-5 exige 403 para ATHLETE — resuelto. La inhabilitacion
+            de un ejercicio (quien la ejecuto y cuando) NO queda registrada en `audit_logs`:
+            verificado contra el codigo, no existe interceptor de auditoria (mismo hallazgo
+            abierto #1 de `outputs/execution-log.md`). Especialmente relevante aqui porque
+            inhabilitar es una accion con impacto operativo (retira el ejercicio del catalogo
+            para planes nuevos) sin rastro de quien la tomo. No corresponde a esta HU resolver
+            el interceptor global, pero el riesgo queda documentado.
+
+        - ley: "Ley 527/1999 — Validez de documentos digitales"
+          aplica: false
+          cumple: true
+          accion_requerida: >
+            No aplica. No hay documento con valor legal ni transaccion economica involucrada.
+
+      fuentes_consultadas: []
 
   conflictos_con_arquitecto: []
 
   escalamiento_requerido: false
   motivo_escalamiento: ""
 
-  condiciones_bloqueantes_resumen:
-    - hu: "HU-001"
-      ley: "Ley 1581/2012 + Ley 527/1999"
-      condicion: >
-        Agregar criterio de aceptacion que exija el registro inmutable de TERMS_OF_SERVICE y
-        HABEAS_DATA en legal_acceptances al crear el administrador por seed, con documentVersion,
-        ip del entorno de despliegue y acceptedAt. La restriccion de la epica lo declara
-        obligatorio pero ningun criterio de la HU lo verifica.
-
-    - hu: "HU-003"
-      ley: "Ley 1581/2012 + Ley 527/1999"
-      condicion: >
-        Convertir la nota de aceptaciones legales en criterio de aceptacion verificable: registro
-        inmutable de TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances con userId,
-        documentVersion, ip, userAgent y acceptedAt. Las notas no son criterios verificables
-        por el equipo de QA.
+  nota_sobre_comparacion_con_arquitecto: >
+    Al momento de esta validacion, outputs/plan_de_implementacion.yaml corresponde todavia a
+    EPICA-09 (la epica anterior) — el plan del Arquitecto para EPICA-02 no estaba disponible
+    para comparar. No se detectan conflictos porque no hay artefacto contra el cual detectarlos
+    todavia, no porque se haya verificado ausencia de conflicto. Si el plan del Arquitecto para
+    EPICA-02 introduce, por ejemplo, un bloqueo por uso al inhabilitar, o campos adicionales al
+    ejercicio mas alla de name/description/muscleGroup, eso seria un conflicto directo con esta
+    validacion y debe escalarse al humano en cuanto se detecte.
 
   condiciones_no_bloqueantes_resumen:
-    - hu: "HU-001"
-      ley: "Ley 1273/2009"
-      condicion: >
-        Agregar criterio de trazabilidad de auditoria para la creacion del administrador fuera
-        del pipeline HTTP (el AuditInterceptor global no cubre el seed).
-
-    - hu: "HU-002"
+    - hu: "HU-005"
       ley: "funcional"
+      estado: "RESUELTA (2026-08-05)"
       condicion: >
-        Definir el comportamiento cuando existe una invitacion expirada para el mismo correo
-        (debe poder reemplazarse con una nueva invitacion).
+        [Resuelta] Precisar en CA-005-2 que la deteccion de nombre duplicado es case-insensitive
+        y con trim de espacios. El humano incorporo la precision directamente en el texto de
+        CA-005-2 en epica_input.yaml. Se mantiene en el reporte por trazabilidad, no requiere
+        accion adicional.
 
-    - hu: "HU-002"
-      ley: "Ley 1273/2009"
+    - hu: "HU-006"
+      ley: "funcional / trazabilidad de QA"
+      estado: "ABIERTA"
       condicion: >
-        Agregar regla de negocio que exija generacion del token con aleatoriedad criptografica
-        (CSPRNG, minimo 128 bits de entropia) segun OWASP Forgot Password Cheat Sheet.
+        El reporte de QA debe documentar explicitamente que CA-006-1 y CA-006-3 solo estan
+        verificados a nivel unitario (mock del metodo de verificacion de uso) y no de forma
+        end-to-end en esta epica, con su cobertura e2e real pendiente hasta EPICA-03. Esta
+        condicion ya la exige la propia HU en sus notas; se ratifica aqui como condicion de
+        aprobacion de negocio.
 
-    - hu: "HU-002"
-      ley: "Ley 1273/2009"
+    - hu: "HU-006 y HU-007 (interaccion CA-006-6 x CA-005-2 x ausencia de reactivacion)"
+      ley: "funcional"
+      estado: "RESUELTA (2026-08-05)"
       condicion: >
-        Agregar criterio de rate limiting en el endpoint de envio de invitaciones para prevenir
-        spam y enumeracion de correos existentes.
+        [Resuelta] Yo habia senalado que CA-006-6, combinado con la version original de CA-005-2
+        (que no distinguia activos de inhabilitados) y la ausencia de reactivacion, dejaba un
+        ejercicio inhabilitado sin ninguna via de correccion. El humano lo resolvio acotando
+        CA-005-2 a ejercicios ACTIVOS y agregando CA-005-6 (libera el nombre de un ejercicio
+        inhabilitado para uno nuevo). Se mantiene en el reporte por trazabilidad, no requiere
+        accion adicional.
 
-    - hu: "HU-003"
-      ley: "Ley 1273/2009"
+    - hu: "HU-005 y HU-007 (consecuencia de CA-005-6: nombre compartido entre activo e inhabilitado)"
+      ley: "funcional"
+      estado: "EVALUADA — NO ES UN PROBLEMA FUNCIONAL"
       condicion: >
-        Agregar criterio que exija invalidacion atomica del token en la misma transaccion que
-        crea la cuenta, para prevenir race conditions en el consumo concurrente del token.
+        Revisado a pedido del equipo: con CA-005-6, un ejercicio activo y uno inhabilitado pueden
+        terminar compartiendo el mismo `name`. No se declara como condicion porque: (1) no hay
+        ambiguedad de datos, los planes referencian `exerciseVersionId`, nunca `name`; (2) CA-007-3
+        ya exige mostrar el estado inactivo al consultar un ejercicio inhabilitado, principio que
+        cubre por extension cualquier listado que en el futuro incluya inhabilitados — no requiere
+        una CA nueva porque ya esta gobernado por un criterio existente; (3) es el comportamiento
+        esperado de un catalogo con soft-delete (retirar y reemplazar bajo el mismo nombre), no un
+        defecto. Se deja constancia de que se evaluo y se cerro, no que se paso por alto.
 
-    - hu: "HU-003"
+    - hu: "HU-005, HU-006, HU-007 (transversal)"
       ley: "Ley 1273/2009"
+      estado: "ABIERTA"
       condicion: >
-        Evaluar criterio de rate limiting por token de invitacion para intentos fallidos de
-        completar el registro, previniendo iteracion sobre datos personales con token interceptado.
+        Ninguna mutacion de esta epica (crear, editar, inhabilitar un ejercicio) queda registrada
+        en `audit_logs`, porque el `AuditInterceptor` global nunca se implemento en el codebase
+        (verificado: `src/modules/common/interceptors/` solo tiene `response.interceptor.ts`;
+        `grep -rn "auditLog" src` no devuelve escrituras). Es el hallazgo abierto #1 de
+        `outputs/execution-log.md` (severidad Media, 2026-08-05), preexistente desde EPICA-01 y
+        transversal a todo el sistema, no algo que EPICA-02 introduzca ni deba resolver por si
+        sola. No lo marco como bloqueante para esta epica porque construir el interceptor es una
+        tarea de infraestructura cross-cutting, no una HU de catalogo de ejercicios — pero el
+        reporte no puede afirmar que la trazabilidad de auditoria esta cubierta. Corresponde al
+        humano decidir si resolver el hallazgo #1 se prioriza antes, junto con, o despues de
+        EPICA-02.
 
   notas_finales: >
-    El patron arquitectonico elegido (Seed + Invitacion por email) es correcto y alineado con
-    las mejores practicas de IAM para plataformas de escala reducida. La cadena de dependencias
-    HU-001 -> HU-002 -> HU-003 es coherente y no presenta contradicciones internas. El diseno
-    de token de uso unico con expiracion configurable es consistente con OWASP. Las condiciones
-    bloqueantes son ajustes menores a los criterios de aceptacion existentes, no cambios de
-    alcance ni de objetivo. Una vez el Product Owner incorpore los criterios faltantes en
-    epica_input.yaml, las tres HU pueden considerarse listas para planificacion tecnica.
-    El Documentador NO debe iniciar hasta que las dos condiciones bloqueantes esten resueltas.
+    Las decisiones del humano del 2026-08-05 (campos exactos del ejercicio, inhabilitacion sin
+    bloqueo por uso, implementacion completa de la epica aceptando el gap E2E de HU-006, y las
+    dos decisiones mas recientes: CA-006-6 y la pareja CA-005-2 acotada + CA-005-6) no se reabren
+    en este reporte y se verificaron incorporadas de forma consistente en las tres HU. CA-006-6
+    es clara, verificable end-to-end sin las limitaciones de CA-006-1/CA-006-3, y no contradice
+    RN-05, RN-06 ni RN-07. Su efecto secundario sobre el caracter terminal de la inhabilitacion —
+    que yo mismo habia marcado como condicion no bloqueante pendiente de aceptacion consciente —
+    quedo resuelto por la decision del humano de acotar CA-005-2 a activos y agregar CA-005-6: un
+    ejercicio inhabilitado sigue sin poder editarse, pero su nombre queda disponible de inmediato
+    para un reemplazo corregido, lo que evita el vacio funcional que yo habia senalado. Tambien se
+    evaluo la consecuencia directa de esa misma decision (un ejercicio activo y uno inhabilitado
+    pueden compartir nombre) y se concluyo que no es un problema funcional: no genera ambiguedad
+    de datos y ya esta cubierta por el principio de CA-007-3 de mostrar el estado del ejercicio.
+
+    La epica no maneja datos personales ni datos sensibles de salud: es contenido de catalogo,
+    por lo que Ley 1581/2012 y Ley 527/1999 no aplican a ninguna HU, y aplicarlas seria
+    sobre-ingenieria. Ley 1273/2009 aplica siempre; su parte de control de acceso esta cubierta
+    por los criterios 401/403 de cada HU, pero su parte de trazabilidad de auditoria NO esta
+    cubierta porque el `AuditInterceptor` global nunca se construyo (hallazgo abierto #1,
+    preexistente y transversal, no introducido por esta epica). Quedan dos condiciones abiertas
+    (gap E2E de HU-006 y ausencia de log de auditoria transversal), dos condiciones resueltas por
+    decisiones del humano ya incorporadas (precision de duplicados en HU-005, caracter terminal de
+    la inhabilitacion en HU-006/HU-007), y un punto adicional evaluado y cerrado sin necesidad de
+    condicion (nombre compartido entre activo e inhabilitado). Ninguna condicion abierta es
+    bloqueante ni de naturaleza legal. El Documentador puede iniciar una vez el Arquitecto cierre
+    su plan, sujeto a que no surjan conflictos con esta validacion (ver
+    nota_sobre_comparacion_con_arquitecto).
