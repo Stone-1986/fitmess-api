@@ -33,17 +33,17 @@ import { BusinessError } from '../common/exceptions/business-error.enum';
 async update(exerciseId: string, dto: UpdateExerciseDto): Promise<ExerciseVersion> {
   const exercise = await this.findOrFail(exerciseId);
 
+  const latestVersion = await this.prisma.exerciseVersion.findFirst({
+    where: { exerciseId },
+    orderBy: { versionNumber: 'desc' },
+  });
+
   const isUsedInPlan = await this.prisma.instanceBlock.count({
     where: { exerciseVersion: { exerciseId } },
   }) > 0;
 
   if (isUsedInPlan) {
     // Append-only: crear nueva version
-    const latestVersion = await this.prisma.exerciseVersion.findFirst({
-      where: { exerciseId },
-      orderBy: { versionNumber: 'desc' },
-    });
-
     return this.prisma.exerciseVersion.create({
       data: {
         exerciseId,
@@ -53,32 +53,28 @@ async update(exerciseId: string, dto: UpdateExerciseDto): Promise<ExerciseVersio
     });
   }
 
-  // No usado → edicion directa de la version existente
+  // No usado → edicion directa de la version vigente.
+  // La version vigente es la de mayor versionNumber. No hay un puntero
+  // `currentVersionId` en Exercise: seria un dato denormalizado que habria que
+  // mantener en sincronia con cada append. Si el listado del catalogo llega a
+  // necesitarlo por rendimiento, es una decision del DBA, no de este patron.
   return this.prisma.exerciseVersion.update({
-    where: { id: exercise.currentVersionId },
+    where: { id: latestVersion.id },
     data: dto,
   });
 }
 
 async deactivate(exerciseId: string): Promise<Exercise> {
-  const exercise = await this.findOrFail(exerciseId);
+  await this.findOrFail(exerciseId);
 
-  const isUsedInActivePlan = await this.prisma.instanceBlock.count({
-    where: {
-      exerciseVersion: { exerciseId },
-      instanceSession: { instance: { status: InstanceStatus.ACTIVE } },
-    },
-  }) > 0;
-
-  if (isUsedInActivePlan) {
-    throw new BusinessException(
-      BusinessError.EXERCISE_IN_USE,
-      `El ejercicio '${exerciseId}' esta en uso en planes activos`,
-      { exerciseId },
-    );
-  }
-
-  // isActive = false, pero las versiones persisten
+  // La inhabilitacion SIEMPRE procede, este o no en uso. isActive = false solo
+  // saca al ejercicio del catalogo para planes NUEVOS; los planes existentes
+  // apuntan a un exerciseVersionId que no se toca, asi que conservan su
+  // contenido intacto (RN-06, RN-07 y CA-007-1 de HU-007).
+  //
+  // NO bloquear con EXERCISE_IN_USE: una version anterior de este patron lo
+  // hacia, y contradecia la HU. Bloquear la inhabilitacion mientras exista un
+  // plan activo haria que un ejercicio popular fuera imposible de retirar.
   return this.prisma.exercise.update({
     where: { id: exerciseId },
     data: { isActive: false },
