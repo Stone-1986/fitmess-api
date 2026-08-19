@@ -4,6 +4,7 @@ import {
   ArgumentsHost,
   BadRequestException,
 } from '@nestjs/common';
+import type { AuditedRequest } from '../types/audited-request.interface.js';
 import { ProblemDetail } from '../exceptions/problem-detail.dto.js';
 import { BASE_ERROR_URI } from '../exceptions/problem-detail.constants.js';
 import { TechnicalError } from '../exceptions/technical-error.enum.js';
@@ -22,7 +23,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
   catch(exception: BadRequestException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse();
-    const request = ctx.getRequest<Request & { correlationId?: string }>();
+    const request = ctx.getRequest<AuditedRequest>();
     const exceptionResponse = exception.getResponse() as Record<
       string,
       unknown
@@ -33,13 +34,14 @@ export class ValidationExceptionFilter implements ExceptionFilter {
 
     if (isValidationError) {
       const validationEntry = TechnicalError.VALIDATION_ERROR;
+      request.auditErrorCode = validationEntry.code;
 
       const problemDetail: ProblemDetail = {
         type: `${BASE_ERROR_URI}/${validationEntry.code}`,
         title: validationEntry.title,
         status: validationEntry.httpStatus,
         detail: 'Los datos enviados no cumplen con las validaciones requeridas',
-        instance: (request as any).url,
+        instance: request.url,
         errorCode: validationEntry.code,
         correlationId: request.correlationId,
         timestamp: new Date().toISOString(),
@@ -56,6 +58,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
     } else {
       // BadRequestException genérico (no de ValidationPipe)
       const badRequestEntry = TechnicalError.BAD_REQUEST;
+      request.auditErrorCode = badRequestEntry.code;
 
       response
         .status(badRequestEntry.httpStatus)
@@ -65,7 +68,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
           title: badRequestEntry.title,
           status: badRequestEntry.httpStatus,
           detail: (exceptionResponse?.message as string) ?? exception.message,
-          instance: (request as any).url,
+          instance: request.url,
           errorCode: badRequestEntry.code,
           correlationId: request.correlationId,
           timestamp: new Date().toISOString(),

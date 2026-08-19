@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import type { AuditedRequest } from '../types/audited-request.interface.js';
 import { Prisma } from '../../../../generated/prisma/index.js';
 import { ProblemDetail } from '../exceptions/problem-detail.dto.js';
 import { BASE_ERROR_URI } from '../exceptions/problem-detail.constants.js';
@@ -60,7 +61,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
   ): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse();
-    const request = ctx.getRequest<Request & { correlationId?: string }>();
+    const request = ctx.getRequest<AuditedRequest>();
 
     const mapping = PRISMA_MAP[exception.code];
 
@@ -69,12 +70,14 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         `[Prisma ${exception.code}] ${mapping.code}: ${exception.message}`,
       );
 
+      request.auditErrorCode = mapping.code;
+
       const problemDetail: ProblemDetail = {
         type: `${BASE_ERROR_URI}/${mapping.code}`,
         title: mapping.title,
         status: mapping.status,
         detail: `Error de base de datos: ${exception.message.split('\n').pop()?.trim()}`,
-        instance: (request as any).url,
+        instance: request.url,
         errorCode: mapping.code,
         correlationId: request.correlationId,
         timestamp: new Date().toISOString(),
@@ -96,6 +99,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       );
 
       const internalEntry = TechnicalError.INTERNAL_ERROR;
+      request.auditErrorCode = internalEntry.code;
 
       response
         .status(internalEntry.httpStatus)
@@ -105,7 +109,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
           title: internalEntry.title,
           status: internalEntry.httpStatus,
           detail: 'Error interno del servidor',
-          instance: (request as any).url,
+          instance: request.url,
           errorCode: internalEntry.code,
           correlationId: request.correlationId,
           timestamp: new Date().toISOString(),

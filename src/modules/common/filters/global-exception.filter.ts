@@ -5,6 +5,7 @@ import {
   HttpException,
   Logger,
 } from '@nestjs/common';
+import type { AuditedRequest } from '../types/audited-request.interface.js';
 import { ProblemDetail } from '../exceptions/problem-detail.dto.js';
 import { BASE_ERROR_URI } from '../exceptions/problem-detail.constants.js';
 import { TechnicalError } from '../exceptions/technical-error.enum.js';
@@ -26,7 +27,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse();
-    const request = ctx.getRequest<Request & { correlationId?: string }>();
+    const request = ctx.getRequest<AuditedRequest>();
 
     // HttpException nativa de NestJS (Unauthorized, Forbidden de guards, etc.)
     if (exception instanceof HttpException) {
@@ -46,12 +47,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           : (((exceptionResponse as Record<string, unknown>)
               .message as string) ?? exception.message);
 
+      request.auditErrorCode = httpEntry.code;
+
       const problemDetail: ProblemDetail = {
         type: `${BASE_ERROR_URI}/${httpEntry.code}`,
         title,
         status,
         detail,
-        instance: (request as any).url,
+        instance: request.url,
         errorCode: httpEntry.code,
         correlationId: request.correlationId,
         timestamp: new Date().toISOString(),
@@ -72,13 +75,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const internalEntry = TechnicalError.INTERNAL_ERROR;
 
+    request.auditErrorCode = internalEntry.code;
+
     const problemDetail: ProblemDetail = {
       type: `${BASE_ERROR_URI}/${internalEntry.code}`,
       title: internalEntry.title,
       status: internalEntry.httpStatus,
       detail:
         'Ocurrió un error inesperado. Contacte soporte con el correlationId.',
-      instance: (request as any).url,
+      instance: request.url,
       errorCode: internalEntry.code,
       correlationId: request.correlationId,
       timestamp: new Date().toISOString(),

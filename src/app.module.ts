@@ -10,6 +10,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
 import { CommonModule } from './modules/common/common.module.js';
+import { AuditMiddleware } from './modules/common/middlewares/audit.middleware.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ExercisesModule } from './modules/exercises/exercises.module.js';
@@ -47,6 +48,11 @@ import { CorrelationIdMiddleware } from './modules/common/middlewares/correlatio
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(CorrelationIdMiddleware).forRoutes('{*path}');
+    // El orden importa: CorrelationIdMiddleware debe correr primero para que
+    // AuditMiddleware pueda leer `request.correlationId` al cerrar la respuesta
+    // y así ligar la fila de auditoría con las líneas del log de la aplicación.
+    consumer
+      .apply(CorrelationIdMiddleware, AuditMiddleware)
+      .forRoutes('{*path}');
   }
 }

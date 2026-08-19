@@ -1,4 +1,5 @@
 import { Catch, ExceptionFilter, ArgumentsHost, Logger } from '@nestjs/common';
+import type { AuditedRequest } from '../types/audited-request.interface.js';
 import { BusinessException } from '../exceptions/business.exception.js';
 import { TechnicalException } from '../exceptions/technical.exception.js';
 import { ProblemDetail } from '../exceptions/problem-detail.dto.js';
@@ -23,7 +24,7 @@ export class ProblemDetailFilter implements ExceptionFilter {
   ): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse();
-    const request = ctx.getRequest<Request & { correlationId?: string }>();
+    const request = ctx.getRequest<AuditedRequest>();
     const status = exception.getStatus();
 
     // Log técnico completo (con stack trace si es TechnicalException)
@@ -36,12 +37,14 @@ export class ProblemDetailFilter implements ExceptionFilter {
       this.logger.warn(`[${exception.errorEntry.code}] ${exception.detail}`);
     }
 
+    request.auditErrorCode = exception.errorEntry.code;
+
     const problemDetail: ProblemDetail = {
       type: `${BASE_ERROR_URI}/${exception.errorEntry.code}`,
       title: exception.errorEntry.title,
       status,
       detail: exception.detail,
-      instance: (request as any).url,
+      instance: request.url,
       errorCode: exception.errorEntry.code,
       correlationId: request.correlationId,
       timestamp: new Date().toISOString(),
