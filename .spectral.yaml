@@ -40,10 +40,18 @@ rules:
   # Para agregar un campo prohibido: añadir un entry falsy al array.
   # Ventaja vs reglas separadas: un solo lugar para mantener la lista.
   # Ventaja vs schema+not: error individual por campo con path exacto.
+  # El `given` apunta SOLO a los DTOs de respuesta (sufijo ResponseDto). La
+  # primera version apuntaba a `$.components.schemas[*]`, o sea a todos, y
+  # marcaba como error el campo `password` de RegisterAthleteDto,
+  # RegisterCoachDto y RegisterAdminDto — que son DTOs de ENTRADA, donde la
+  # contrasena es el dato que el usuario envia. Nadie lo noto porque
+  # `openapi:validate` nunca llego a ejecutarse (hallazgo #8): el comando
+  # reventaba al bootstrapear, asi que Spectral no corrio ni una vez desde que
+  # se escribio esta regla.
   fitmess-no-internal-fields:
     description: "DTOs de respuesta no deben exponer campos internos o sensibles"
     severity: error
-    given: "$.components.schemas[*].properties"
+    given: "$.components.schemas[?(@property.match(/ResponseDto$/))].properties"
     then:
       - field: "archivedAt"
         function: falsy
@@ -53,6 +61,16 @@ rules:
         function: falsy
       - field: "passwordHash"
         function: falsy
+
+  # Los tokens se prohiben en todo DTO de respuesta MENOS AuthTokenResponseDto,
+  # cuya razon de ser es justamente devolverlos: es la respuesta de POST /auth/login.
+  # Se separa en una regla propia en vez de sacar los tokens de la lista de arriba,
+  # para que siga siendo un error exponerlos en cualquier otra respuesta.
+  fitmess-no-tokens-outside-auth-response:
+    description: "Solo AuthTokenResponseDto puede exponer tokens de sesion"
+    severity: error
+    given: "$.components.schemas[?(@property.match(/ResponseDto$/) && @property !== 'AuthTokenResponseDto')].properties"
+    then:
       - field: "refreshToken"
         function: falsy
       - field: "accessToken"

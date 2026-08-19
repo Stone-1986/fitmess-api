@@ -75,6 +75,13 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - `tsconfig.build.json` define su propio `exclude` que REEMPLAZA (no hereda) el `exclude` del `tsconfig.json` padre — si se agrega una exclusión a `tsconfig.json`, TAMBIÉN debe agregarse a `tsconfig.build.json`
 - Cualquier archivo `.ts` en la raíz del proyecto (ej: `prisma.config.ts`, `vitest.config.ts`) DEBE estar excluido en `tsconfig.build.json`, de lo contrario TypeScript usa la raíz como `rootDir` y genera `dist/src/` en vez de `dist/`
 
+## Validación del contrato OpenAPI
+
+- `pnpm run openapi:validate` DEBE pasar sin errores — es un gate duro, verificado por el orquestador en el Paso 2.5 además de por el QA
+- `openapi:export` genera el contrato a partir de `dist/`, NO del código fuente: se ejecuta `build` primero. El artefacto documentado es el mismo que se despliega
+- NUNCA volver a ejecutar el export con `tsx`: esbuild no soporta `emitDecoratorMetadata`, así que Nest no puede resolver dependencias por tipo y el bootstrap muere con `Cannot read properties of undefined`. El comando estuvo roto desde su creación por esta causa y Spectral no corrió ni una vez en EPICA-01 ni en EPICA-09
+- Las reglas de `.spectral.yaml` que apuntan a `$.components.schemas[*]` alcanzan DTOs de entrada y de respuesta por igual. Si una regla solo aplica a respuestas, filtrar por el sufijo `ResponseDto` en el `given`
+
 ## Escaneo de seguridad automatizado
 
 - El QA invoca `/security-review` como parte del paso de detección de vulnerabilidades

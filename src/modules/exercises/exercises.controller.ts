@@ -310,7 +310,9 @@ export class ExercisesController {
     schema: {
       type: 'object',
       properties: {
-        data: { type: 'null', example: null },
+        // `type: 'null'` es JSON Schema 2020-12 / OpenAPI 3.1, y DocumentBuilder
+        // genera 3.0. En 3.0 la forma de expresar un valor nulo es `nullable`.
+        data: { nullable: true, example: null },
         message: {
           type: 'string',
           example: 'Ejercicio inhabilitado exitosamente',

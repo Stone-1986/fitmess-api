@@ -119,14 +119,15 @@ Esperar a que termine.
 
 Ningún agente califica su propio trabajo: el QA escribe los tests, mide la cobertura de esos mismos tests y reporta si alcanzó el target. El Líder Técnico no tiene Bash y no puede contrastar nada. Sin este paso, la decisión final del flujo descansa en números autorreportados.
 
-Ejecutar los cinco comandos y **guardar la salida cruda**:
+Ejecutar los seis comandos y **guardar la salida cruda**:
 
 ```bash
-pnpm run test:cov 2>&1      # timeout 300000
-pnpm run test:e2e 2>&1      # timeout 300000 — requiere DB, ver abajo
+pnpm run test:cov 2>&1        # timeout 300000
+pnpm run test:e2e 2>&1        # timeout 300000 — requiere DB, ver abajo
 pnpm run lint 2>&1
-pnpm run format:check 2>&1  # cubre src/ y test/ — no usar `npx prettier --check 'src/**/*.ts'`
+pnpm run format:check 2>&1    # cubre src/ y test/ — no usar `npx prettier --check 'src/**/*.ts'`
 pnpm run build 2>&1
+pnpm run openapi:validate 2>&1  # timeout 300000 — corre build + Spectral
 ```
 
 Comparar con lo que declara `outputs/reporte_qa.yaml`:
@@ -138,7 +139,10 @@ Comparar con lo que declara `outputs/reporte_qa.yaml`:
 | `cobertura.dominio.porcentaje` | tabla de `test:cov` (services) |
 | `cobertura.adaptadores.porcentaje` | tabla de `test:cov` (controllers, guards, listeners) |
 | `tests.e2e` | conteo de passed/failed de `pnpm run test:e2e` |
+| `validacion_openapi` | salida de `pnpm run openapi:validate` |
 | `errores_criticos` de tipo `error_de_compilacion` | salida de `pnpm run build` |
+
+**Sobre `openapi:validate`:** hasta el 2026-08-19 este comando no arrancaba — `openapi:export` moría al bootstrapear porque corría con tsx, y esbuild no emite `emitDecoratorMetadata`. Spectral no se ejecutó ni una vez en EPICA-01 ni en EPICA-09 pese a estar en el proceso del QA (hallazgo #8). Ahora corre contra `dist/`, o sea contra el mismo artefacto que se despliega. Se verifica aquí, y no solo en el reporte del QA, por la misma razón que los demás: es la única forma de saber que corrió de verdad.
 
 #### El e2e y su dependencia de la base de datos
 
@@ -181,6 +185,8 @@ SALIDA VERIFICADA DE LOS GATES (ejecutada por el orquestador, no por el QA):
 --- pnpm run format:check ---
 [pegar salida real]
 --- pnpm run build ---
+[pegar salida real]
+--- pnpm run openapi:validate ---
 [pegar salida real]
 
 Estos números son la fuente de verdad. Si el reporte del QA los contradice,
@@ -240,7 +246,7 @@ Si **un solo** rechazo cae fuera de la lista blanca, la ruta rápida no aplica: 
 **Procedimiento obligatorio (los cuatro pasos, sin omitir ninguno):**
 
 1. Aplicar la corrección (`pnpm run format`, eliminar el import, etc.)
-2. **Re-ejecutar los cinco gates del Paso 2.5.** Si alguno falla, la ruta rápida se aborta: incrementar ciclo y volver al Paso 1
+2. **Re-ejecutar los seis gates del Paso 2.5.** Si alguno falla, la ruta rápida se aborta: incrementar ciclo y volver al Paso 1
 3. **Reescribir `estado:` en los DOS artefactos** — `outputs/reporte_qa.yaml` y `outputs/revision_codigo.yaml` — a `"APROBADO"`, vaciar `errores_criticos` / `instrucciones_desarrollador`, y agregar en `razonamiento` qué se corrigió y que fue por ruta rápida
 4. **Log:** fila con agente `orquestador`, estado `CORRECCION_TRIVIAL`, y el detalle de qué se tocó
 

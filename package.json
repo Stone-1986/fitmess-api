@@ -21,7 +21,7 @@
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "validate:epica": "tsx scripts/validate-epica.ts",
-    "openapi:export": "tsx scripts/export-openapi.ts",
+    "openapi:export": "pnpm run build && node scripts/export-openapi.mjs",
     "openapi:lint": "spectral lint outputs/openapi.json --ruleset .spectral.yaml",
     "openapi:validate": "pnpm run openapi:export && pnpm run openapi:lint",
     "prepare": "husky"

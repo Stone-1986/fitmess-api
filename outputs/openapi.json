@@ -1,0 +1,2550 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "description": "Ejecuta los indicadores de salud registrados. Hoy solo verifica la conectividad con PostgreSQL mediante un SELECT 1. Responde 200 si todos los indicadores estan arriba y 503 si alguno falla. Endpoint publico, pensado para los probes de infraestructura; no requiere autenticacion.",
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Todos los indicadores responden correctamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "info": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up"
+                        }
+                      },
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "example": {},
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "example": {
+                        "database": {
+                          "status": "up"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Alguno de los indicadores de salud no responde (por ejemplo, la base de datos)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Verificar el estado de la API y sus dependencias",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "description": "Crea un nuevo usuario con rol ATHLETE. Registra HABEAS_DATA y TERMS_OF_SERVICE en legal_acceptances de forma atomica (Ley 1581/2012, Ley 527/1999). HEALTH_DATA_CONSENT se difiere a la inscripcion al plan (EPICA-04). Endpoint publico — ThrottlerGuard aplica automaticamente (100 req/min).",
+        "operationId": "AuthController_registerAthlete",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAthleteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Atleta registrado exitosamente. Aceptaciones legales registradas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AthleteRegistrationResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del registro",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El correo electronico o numero de identificacion ya esta registrado en la plataforma",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Registrar nuevo atleta en la plataforma",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/coaches/register": {
+      "post": {
+        "description": "Crea una solicitud de registro para entrenador en estado PENDING. Los datos personales se almacenan en User; los datos de solicitud en CoachRequest. Registra TERMS_OF_SERVICE y HABEAS_DATA en legal_acceptances de forma atomica (Ley 1581/2012, Decreto 1377/2013, Ley 527/1999). El administrador revisara la solicitud antes de habilitar al entrenador. Endpoint publico — ThrottlerGuard aplica automaticamente (100 req/min).",
+        "operationId": "AuthController_registerCoach",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterCoachDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Solicitud de registro recibida. Pendiente de revision por el administrador.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachRequestResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de la solicitud",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El correo electronico o numero de identificacion ya esta registrado en la plataforma",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Enviar solicitud de registro como entrenador",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/admin/register": {
+      "post": {
+        "description": "Crea un nuevo usuario con rol ADMIN usando un token de invitacion valido. En una transaccion atomica ($transaction): valida el token, crea User (ADMIN), registra HABEAS_DATA y TERMS_OF_SERVICE en legal_acceptances, y marca la invitacion como utilizada (tokenUsedAt = now()). La invalidacion atomica del token en la misma transaccion previene race conditions. Registra aceptaciones legales de forma inmutable (Ley 1581/2012, Ley 527/1999). El token de invitacion se recibe en el body para evitar que aparezca en access logs del servidor (nginx, load balancers) — Ley 1273/2009. Emite user.registered despues del commit. Endpoint publico — ThrottlerGuard aplica automaticamente (100 req/min). El administrador inicia sesion con POST /auth/login despues del registro.",
+        "operationId": "AuthController_registerAdmin",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Administrador registrado exitosamente. Aceptaciones legales registradas. Iniciar sesion con POST /auth/login.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRegistrationResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del registro o en los campos legales obligatorios",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Token de invitacion no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El correo electronico o numero de identificacion ya esta registrado en la plataforma (mensaje neutro, anti-enumeracion)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Token de invitacion expirado o ya utilizado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Registrar nuevo administrador via token de invitacion",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "description": "Autentica al usuario con email y password via Passport LocalStrategy. Retorna accessToken JWT y refreshToken. El mensaje de error es identico para email inexistente y password incorrecto (anti-enumeracion, Ley 1273/2009). Bloqueo por cuenta tras 5 intentos fallidos consecutivos durante 15 minutos (Ley 1273/2009, OWASP 2025). ThrottlerGuard aplica automaticamente como medida adicional contra fuerza bruta (100 req/min). El entrenador con solicitud PENDING o REJECTED no puede iniciar sesion.",
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Autenticacion exitosa. Retorna tokens de acceso.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de inicio de sesion",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciales invalidas",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El entrenador aun no ha sido aprobado por el administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cuenta bloqueada temporalmente tras multiples intentos fallidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Iniciar sesion en la plataforma",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/coach-requests/search": {
+      "post": {
+        "description": "Busca solicitudes de registro de entrenadores. Todos los filtros son opcionales — body vacio {} retorna todas las solicitudes con paginacion por defecto (page=1, limit=10). Los filtros se combinan con logica AND. Los campos uuid y status aceptan arrays. El campo nombre usa busqueda parcial. createdAtFrom y createdAtTo delimitan un rango inclusivo de fechas de creacion; cada extremo es opcional por separado y se interpreta en hora local de Colombia (UTC-5). Enviar el mismo valor en ambos filtra por un solo dia. Solo accesible para usuarios con rol Administrador (Ley 1581/2012).",
+        "operationId": "CoachRequestsController_search",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchCoachRequestsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lista paginada de solicitudes que coinciden con los filtros",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CoachRequestSummaryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los filtros de busqueda",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Buscar solicitudes de entrenadores con filtros opcionales",
+        "tags": [
+          "coach-requests"
+        ]
+      }
+    },
+    "/api/coach-requests/{id}": {
+      "get": {
+        "description": "Retorna todos los campos de la solicitud para revision administrativa: datos personales del solicitante, descripcion del plan, URLs de imagenes y estado actual. Solo accesible para usuarios con rol Administrador (Ley 1581/2012).",
+        "operationId": "CoachRequestsController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle completo de la solicitud encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachRequestDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Solicitud de entrenador no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener detalle completo de una solicitud de entrenador",
+        "tags": [
+          "coach-requests"
+        ]
+      }
+    },
+    "/api/coach-requests/{id}/approve": {
+      "post": {
+        "description": "Transiciona la solicitud del estado PENDING al estado APPROVED, habilitando al entrenador para operar en la plataforma. State machine: solo solicitudes en estado PENDING pueden ser aprobadas. Emite el evento coach.request.approved para notificar al entrenador.",
+        "operationId": "CoachRequestsController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud aprobada exitosamente. El entrenador ha sido habilitado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachRequestResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Solicitud de entrenador no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Transicion de estado invalida — la solicitud no esta en estado PENDING",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Aprobar solicitud de entrenador (PENDING → APPROVED)",
+        "tags": [
+          "coach-requests"
+        ]
+      }
+    },
+    "/api/coach-requests/{id}/reject": {
+      "post": {
+        "description": "Transiciona la solicitud del estado PENDING al estado REJECTED. El motivo de rechazo es obligatorio y debe ser texto libre informativo para el entrenador. El motivo no debe incluir informacion tecnica interna ni datos de otros solicitantes (HU-002 condicion 2). State machine: solo solicitudes en estado PENDING pueden ser rechazadas. Emite el evento coach.request.rejected para notificar al entrenador con el motivo.",
+        "operationId": "CoachRequestsController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectCoachRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solicitud rechazada exitosamente. El entrenador sera notificado con el motivo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachRequestResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion — el motivo de rechazo es obligatorio y debe tener al menos 10 caracteres",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Solicitud de entrenador no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Transicion de estado invalida — la solicitud no esta en estado PENDING",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rechazar solicitud de entrenador (PENDING → REJECTED)",
+        "tags": [
+          "coach-requests"
+        ]
+      }
+    },
+    "/api/admin-invitations": {
+      "post": {
+        "description": "Crea una invitacion de administrador con token de uso unico. El token se genera con aleatoriedad criptografica (CSPRNG, 256 bits de entropia, Ley 1273/2009 + OWASP). El token RAW se envia al invitado por correo via el evento admin.invitation.created; nunca se expone en la respuesta HTTP ni en logs. Solo se permite una invitacion activa (no expirada, no utilizada) por correo; una invitacion expirada para el mismo correo si permite crear una nueva invitacion. Requiere rol ADMIN autenticado.",
+        "operationId": "AdminInvitationsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdminInvitationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invitacion creada exitosamente. El invitado recibira el enlace de registro por correo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInvitationResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion — correo invalido o campo faltante",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya existe un usuario con ese correo O ya existe una invitacion activa (no expirada, no utilizada) para ese correo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Crear invitacion para nuevo administrador",
+        "tags": [
+          "admin-invitations"
+        ]
+      }
+    },
+    "/api/admin-invitations/verify": {
+      "post": {
+        "description": "Endpoint publico — no requiere autenticacion JWT. Verifica si el token de invitacion es valido y vigente antes de mostrar el formulario de registro. El token se recibe en el body (no en URL) para evitar exposicion en access logs, historial del navegador y headers Referer (Ley 1273/2009, OWASP). Patron consistente con OAuth 2.0 Token Introspection (RFC 7662). El service hashea el token internamente (sha256) para la busqueda. Retorna informacion basica de la invitacion sin exponer tokenHash ni datos del admin invitante. Anti-enumeracion: el error 404 se retorna tanto para tokens inexistentes como para tokens adulterados (hash no coincide). ThrottlerGuard aplica automaticamente (100 req/min).",
+        "operationId": "AdminInvitationsController_verify",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyAdminInvitationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Invitacion valida y vigente (status: ACTIVE). El formulario de registro puede mostrarse.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInvitationStatusResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion — token faltante o formato invalido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Token de invitacion no encontrado — inexistente o adulterado (mismo error, anti-enumeracion)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La invitacion ya fue utilizada para crear una cuenta de administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "La invitacion ha expirado — solicitar una nueva invitacion al administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "summary": "Verificar estado de una invitacion de administrador por token",
+        "tags": [
+          "admin-invitations"
+        ]
+      }
+    },
+    "/api/exercises": {
+      "post": {
+        "description": "Crea un Exercise y su primera ExerciseVersion (versionNumber = 1) en una sola transaccion atomica ($transaction) — un Exercise sin ninguna version es un estado invalido del dominio (CA-005-1). isActive queda en true por defecto. Verifica previamente que no exista otro ejercicio ACTIVO con el mismo name (comparacion case-insensitive, con trim de espacios) y rechaza con DUPLICATE_ENTITY si lo hay (CA-005-2). Un name que solo existe en un ejercicio inhabilitado NO bloquea la creacion — puede reutilizarse de inmediato (CA-005-6). Visible de inmediato en el catalogo, sin ningun paso de aprobacion (CA-005-3). Solo accesible para COACH y ADMIN (RN-22).",
+        "operationId": "ExercisesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExerciseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ejercicio creado exitosamente con su primera version (versionNumber = 1).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExerciseResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del ejercicio (name, description o muscleGroup vacios o exceden longitud)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador o Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya existe un ejercicio activo con ese nombre (CA-005-2) — comparacion case-insensitive con trim",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Crear ejercicio en la biblioteca global",
+        "tags": [
+          "exercises"
+        ]
+      },
+      "get": {
+        "description": "Lista el catalogo de ejercicios con la version vigente embebida (name, description, muscleGroup y versionNumber de la ExerciseVersion de mayor versionNumber). Por defecto filtra isActive=true — los ejercicios inhabilitados no aparecen (CA-007-2). Con includeInactive=true se incluyen tambien los inhabilitados, unica via para auditar el catalogo completo en bloque ya que esta epica no define reactivacion. Con includeInactive=true el listado puede mostrar dos filas con el mismo name (una activa, una inhabilitada) — consecuencia aceptada de CA-005-6, el campo isActive de cada fila permite distinguirlas. Paginado (page=1, limit=20 por defecto, max 100). Solo accesible para COACH y ADMIN.",
+        "operationId": "ExercisesController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "includeInactive",
+            "required": false,
+            "in": "query",
+            "description": "Incluir ejercicios inhabilitados en el listado (default false)",
+            "schema": {
+              "default": false,
+              "example": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de ejercicios que coinciden con el filtro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExerciseSummaryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los query params (page/limit fuera de rango, tipo invalido)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador o Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar el catalogo global de ejercicios",
+        "tags": [
+          "exercises"
+        ]
+      }
+    },
+    "/api/exercises/{id}": {
+      "get": {
+        "description": "Retorna el detalle de un ejercicio: sus datos vigentes (name, isActive, description, muscleGroup y versionNumber de la version de mayor versionNumber) mas el historial completo de versiones (versionNumber + createdAt de cada una — CA-006-2). No filtra por isActive: un ejercicio inhabilitado se lee igual, con su estado inactivo visible, para que un plan historico pueda mostrarlo indicando que ya no esta activo en la biblioteca (CA-007-3). Solo accesible para COACH y ADMIN.",
+        "operationId": "ExercisesController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle del ejercicio encontrado, incluyendo su historial de versiones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExerciseDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador o Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ejercicio no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener el detalle de un ejercicio con su historial de versiones",
+        "tags": [
+          "exercises"
+        ]
+      },
+      "patch": {
+        "description": "Actualiza un ejercicio existente. Si el ejercicio ya esta inhabilitado (isActive=false), rechaza con EXERCISE_INACTIVE (422) sin crear version nueva ni alterar la vigente (CA-006-6). name es identidad del catalogo (Exercise, no versionado): si se envia, se valida unicidad case-insensitive con trim contra otros ejercicios ACTIVOS excluyendo el propio, rechazando con DUPLICATE_ENTITY si colisiona. description y muscleGroup son contenido de entrenamiento (ExerciseVersion): si el ejercicio ya fue usado en un plan, se crea una ExerciseVersion nueva con versionNumber incrementado (CA-006-1); si no, se edita la version vigente in-place (CA-006-3). Solo accesible para COACH y ADMIN.",
+        "operationId": "ExercisesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExerciseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ejercicio actualizado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExerciseResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del ejercicio (campos exceden longitud o formato invalido)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador o Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ejercicio no encontrado (CA-006-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya existe otro ejercicio activo con ese nombre (CA-005-2) — comparacion case-insensitive con trim",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "El ejercicio ya esta inhabilitado — no admite modificaciones (CA-006-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Modificar un ejercicio existente",
+        "tags": [
+          "exercises"
+        ]
+      },
+      "delete": {
+        "description": "Inhabilita un ejercicio (isActive=false). Sigue el patron de soft-delete del proyecto (DELETE actualiza un flag, nunca borra fisicamente), con la convencion propia de ejercicios: el campo interno es isActive, no archivedAt. La operacion SIEMPRE procede, este o no el ejercicio en uso — NUNCA se verifica ni se bloquea por EXERCISE_IN_USE (CA-007-1). Las versiones y el ejercicio no se tocan; los planes existentes conservan intacta la version que ya referenciaban (RN-07). El name queda disponible de inmediato para que otro ejercicio nuevo o renombrado lo use (CA-005-6). Si el ejercicio ya estaba inhabilitado, rechaza con EXERCISE_INACTIVE (CA-007-4). Solo accesible para COACH y ADMIN.",
+        "operationId": "ExercisesController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejercicio inhabilitado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Ejercicio inhabilitado exitosamente"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador o Administrador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ejercicio no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "El ejercicio ya estaba inhabilitado (CA-007-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Inhabilitar un ejercicio de la biblioteca (soft-delete)",
+        "tags": [
+          "exercises"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "fitmess API",
+    "description": "API de la plataforma de fitness fitmess",
+    "version": "0.0.1",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Estado de la API y sus dependencias"
+    },
+    {
+      "name": "auth",
+      "description": "Registro de usuarios y autenticacion"
+    },
+    {
+      "name": "coach-requests",
+      "description": "Solicitudes de registro de entrenadores"
+    },
+    {
+      "name": "admin-invitations",
+      "description": "Invitaciones para crear administradores"
+    },
+    {
+      "name": "exercises",
+      "description": "Biblioteca global de ejercicios"
+    }
+  ],
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Desarrollo local"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "ProblemDetailDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "URI que identifica el tipo de error. Apunta a la documentación del error.",
+            "example": "https://api.fitmess.co/errors/INVALID_STATE_TRANSITION"
+          },
+          "title": {
+            "type": "string",
+            "description": "Resumen corto y estable del tipo de error. No cambia entre ocurrencias.",
+            "example": "Transición de estado no permitida"
+          },
+          "status": {
+            "type": "number",
+            "description": "HTTP status code. Debe coincidir con el status real de la respuesta.",
+            "example": 409
+          },
+          "detail": {
+            "type": "string",
+            "description": "Explicación específica de esta ocurrencia del error.",
+            "example": "No se puede transicionar Plan de 'ARCHIVED' a 'PUBLISHED'"
+          },
+          "instance": {
+            "type": "string",
+            "description": "URI del request que causó el error.",
+            "example": "/api/plans/550e8400/publish"
+          },
+          "errorCode": {
+            "type": "string",
+            "description": "Código máquina UPPER_SNAKE_CASE. Usado por el frontend para lógica condicional.",
+            "example": "INVALID_STATE_TRANSITION"
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "UUID único del request para traza end-to-end. Viene del header x-correlation-id.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Momento exacto del error en formato ISO 8601.",
+            "example": "2026-03-15T14:30:45.123Z"
+          },
+          "context": {
+            "type": "object",
+            "description": "Datos adicionales específicos de esta ocurrencia útiles para debugging.",
+            "example": {
+              "entity": "Plan",
+              "currentState": "ARCHIVED",
+              "targetState": "PUBLISHED"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "description": "Solo presente en errores de validación. Un objeto por cada campo inválido.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "example": "endDate"
+                },
+                "message": {
+                  "type": "string",
+                  "example": "La fecha fin debe ser posterior a la fecha inicio"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "errorCode",
+          "timestamp"
+        ]
+      },
+      "RegisterAthleteDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre completo del atleta",
+            "example": "Laura Valentina Torres Medina",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del atleta. Unico en la plataforma.",
+            "example": "laura.torres@ejemplo.com",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "description": "Contrasena del atleta. Minimo 8 caracteres, debe incluir al menos una letra y un numero.",
+            "example": "MiClaveSegura456",
+            "minLength": 8,
+            "maxLength": 72,
+            "format": "password"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Numero de telefono del atleta (sin codigo de pais)",
+            "example": "3209876543",
+            "maxLength": 15
+          },
+          "phoneCountryCode": {
+            "type": "string",
+            "description": "Codigo de pais del telefono en formato E.164 (sin el +)",
+            "example": "57",
+            "maxLength": 5
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion. Debe ser unico en la plataforma.",
+            "example": "1010203040",
+            "maxLength": 30
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del atleta en formato YYYY-MM-DD. Debe corresponder a una persona mayor de edad (18 anos cumplidos): un menor no tiene capacidad legal para aceptar los Terminos ni para autorizar por si mismo el tratamiento de sus datos.",
+            "example": "1998-11-22",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del atleta (subida previamente al storage externo)",
+            "example": "https://storage.fitmess.co/avatars/laura-torres.jpg",
+            "format": "uri"
+          },
+          "acceptsTermsOfService": {
+            "type": "boolean",
+            "description": "Aceptacion de los Terminos y Condiciones de uso de la plataforma. Checkbox obligatorio e independiente. (Ley 527/1999)",
+            "example": true
+          },
+          "termsDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de Terminos y Condiciones aceptado. Permite trazabilidad de que version acepto el usuario. (Ley 527/1999)",
+            "example": "v1.0",
+            "maxLength": 20
+          },
+          "acceptsHabeasData": {
+            "type": "boolean",
+            "description": "Autorizacion para el tratamiento de datos personales conforme a la politica de habeas data. Checkbox obligatorio e independiente del consentimiento de terminos. (Ley 1581/2012 art. 9, Decreto 1377/2013)",
+            "example": true
+          },
+          "personalDataDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de autorizacion de tratamiento de datos personales (habeas data) aceptado. Permite trazabilidad de que version acepto el usuario. (Ley 527/1999)",
+            "example": "v1.0",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "password",
+          "phone",
+          "phoneCountryCode",
+          "identificationType",
+          "identificationNumber",
+          "dateOfBirth",
+          "acceptsTermsOfService",
+          "termsDocumentVersion",
+          "acceptsHabeasData",
+          "personalDataDocumentVersion"
+        ]
+      },
+      "AthleteRegistrationResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del usuario atleta recien creado",
+            "example": "550e8400-e29b-41d4-a716-446655440001",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre completo del atleta",
+            "example": "Laura Valentina Torres Medina"
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del atleta registrado",
+            "example": "laura.torres@ejemplo.com",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "description": "Rol asignado al usuario",
+            "enum": [
+              "ADMIN",
+              "COACH",
+              "ATHLETE"
+            ],
+            "example": "ATHLETE"
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion",
+            "example": "1010203040"
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del atleta en formato ISO 8601",
+            "example": "1998-11-22",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del atleta",
+            "example": "https://storage.fitmess.co/avatars/laura-torres.jpg",
+            "format": "uri"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del registro en formato ISO 8601",
+            "example": "2026-03-01T10:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "identificationType",
+          "identificationNumber",
+          "createdAt"
+        ]
+      },
+      "RegisterCoachDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre completo del entrenador",
+            "example": "Carlos Andres Gomez Ruiz",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del entrenador. Unico en la plataforma.",
+            "example": "carlos.gomez@ejemplo.com",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "description": "Contrasena del entrenador. Minimo 8 caracteres, debe incluir al menos una letra y un numero.",
+            "example": "MiClaveSegura123",
+            "minLength": 8,
+            "maxLength": 72,
+            "format": "password"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Numero de telefono del entrenador (sin codigo de pais)",
+            "example": "3101234567",
+            "maxLength": 15
+          },
+          "phoneCountryCode": {
+            "type": "string",
+            "description": "Codigo de pais del telefono en formato E.164 (sin el +)",
+            "example": "57",
+            "maxLength": 5
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion. Debe ser unico en la plataforma.",
+            "example": "1020304050",
+            "maxLength": 30
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del entrenador en formato YYYY-MM-DD. Debe corresponder a una persona mayor de edad (18 anos cumplidos): un menor no tiene capacidad legal para aceptar los Terminos ni para autorizar por si mismo el tratamiento de sus datos.",
+            "example": "1990-06-15",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del entrenador (subida previamente al storage externo)",
+            "example": "https://storage.fitmess.co/avatars/carlos-gomez.jpg",
+            "format": "uri"
+          },
+          "planDescription": {
+            "type": "string",
+            "description": "Descripcion del plan de entrenamiento que el entrenador ofrece. Texto libre que el administrador revisara.",
+            "example": "Entrenador certificado NSCA con 5 anos de experiencia en fuerza y acondicionamiento. Especializado en atletas de alto rendimiento.",
+            "maxLength": 2000
+          },
+          "bannerUrl": {
+            "type": "string",
+            "description": "URL del banner o portafolio del entrenador (subida previamente al storage externo)",
+            "example": "https://storage.fitmess.co/banners/carlos-gomez-banner.jpg",
+            "format": "uri"
+          },
+          "acceptsTermsOfService": {
+            "type": "boolean",
+            "description": "Aceptacion de los Terminos y Condiciones de uso de la plataforma. Checkbox obligatorio e independiente. (Ley 527/1999)",
+            "example": true
+          },
+          "acceptsHabeasData": {
+            "type": "boolean",
+            "description": "Autorizacion para el tratamiento de datos personales conforme a la politica de habeas data. Checkbox obligatorio e independiente del consentimiento de terminos. (Ley 1581/2012 art. 9, Decreto 1377/2013)",
+            "example": true
+          },
+          "termsDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de Terminos y Condiciones aceptado. Permite trazabilidad de que version acepto el usuario. (Ley 527/1999)",
+            "example": "v1.0",
+            "maxLength": 20
+          },
+          "personalDataDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de autorizacion de tratamiento de datos personales (habeas data) aceptado. Permite trazabilidad de que version acepto el usuario. (Ley 527/1999)",
+            "example": "v1.0",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "password",
+          "phone",
+          "phoneCountryCode",
+          "identificationType",
+          "identificationNumber",
+          "dateOfBirth",
+          "planDescription",
+          "acceptsTermsOfService",
+          "acceptsHabeasData",
+          "termsDocumentVersion",
+          "personalDataDocumentVersion"
+        ]
+      },
+      "CoachRequestResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la solicitud de registro del entrenador",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado actual de la solicitud en la state machine",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ],
+            "example": "PENDING"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha y hora de creacion de la solicitud",
+            "example": "2026-03-01T10:00:00.000Z"
+          },
+          "message": {
+            "type": "string",
+            "description": "Mensaje informativo para el solicitante",
+            "example": "Solicitud recibida. El administrador revisara tu perfil."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "message"
+        ]
+      },
+      "RegisterAdminDto": {
+        "type": "object",
+        "properties": {
+          "invitationToken": {
+            "type": "string",
+            "description": "Token de invitacion recibido por correo electronico. Debe ser valido, no expirado y no utilizado previamente. El service hashea este token con sha256 para buscar en base de datos. NUNCA se loggea — Ley 1273/2009.",
+            "example": "a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre completo del administrador",
+            "example": "Carlos Andres Ramirez Ospina",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del administrador. Debe coincidir con el email de la invitacion. Unico en la plataforma.",
+            "example": "carlos.ramirez@fitmess.co",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "description": "Contrasena del administrador. Minimo 8 caracteres, debe incluir al menos una letra y un numero. NUNCA se loggea — Ley 1273/2009.",
+            "example": "MiClaveAdmin789",
+            "minLength": 8,
+            "maxLength": 72,
+            "format": "password"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Numero de telefono del administrador (sin codigo de pais)",
+            "example": "3001234567",
+            "maxLength": 15
+          },
+          "phoneCountryCode": {
+            "type": "string",
+            "description": "Codigo de pais del telefono en formato E.164 (sin el +)",
+            "example": "57",
+            "maxLength": 5
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion. Debe ser unico en la plataforma.",
+            "example": "80123456",
+            "maxLength": 30
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del administrador en formato YYYY-MM-DD. Debe corresponder a una persona mayor de edad (18 anos cumplidos): un menor no tiene capacidad legal para aceptar los Terminos ni para autorizar por si mismo el tratamiento de sus datos.",
+            "example": "1985-06-15",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del administrador (subida previamente al storage externo)",
+            "example": "https://storage.fitmess.co/avatars/carlos-ramirez.jpg",
+            "format": "uri"
+          },
+          "acceptsTermsOfService": {
+            "type": "boolean",
+            "description": "Aceptacion de los Terminos y Condiciones de uso de la plataforma. Checkbox OBLIGATORIO e independiente. Debe ser true para completar el registro. Ley 527/1999: registrado como documento digital inmutable en legal_acceptances.",
+            "example": true
+          },
+          "termsDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de Terminos y Condiciones aceptado. Permite trazabilidad de que version acepto el administrador. Ley 527/1999.",
+            "example": "v1.0",
+            "maxLength": 20
+          },
+          "acceptsHabeasData": {
+            "type": "boolean",
+            "description": "Autorizacion para el tratamiento de datos personales conforme a la politica de habeas data. Checkbox OBLIGATORIO e independiente del consentimiento de terminos. Ley 1581/2012 art. 9, Decreto 1377/2013. Debe ser true para completar el registro.",
+            "example": true
+          },
+          "personalDataDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de autorizacion de tratamiento de datos personales (habeas data) aceptado. Permite trazabilidad de que version acepto el administrador. Ley 527/1999.",
+            "example": "v1.0",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "invitationToken",
+          "name",
+          "email",
+          "password",
+          "phone",
+          "phoneCountryCode",
+          "identificationType",
+          "identificationNumber",
+          "dateOfBirth",
+          "acceptsTermsOfService",
+          "termsDocumentVersion",
+          "acceptsHabeasData",
+          "personalDataDocumentVersion"
+        ]
+      },
+      "AdminRegistrationResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del usuario administrador recien creado",
+            "example": "550e8400-e29b-41d4-a716-446655440020",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre completo del administrador",
+            "example": "Carlos Andres Ramirez Ospina"
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del administrador. Usado para iniciar sesion.",
+            "example": "carlos.ramirez@fitmess.co",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "description": "Rol asignado al usuario. Siempre ADMIN para este endpoint.",
+            "enum": [
+              "ADMIN",
+              "COACH",
+              "ATHLETE"
+            ],
+            "example": "ADMIN"
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del administrador en formato ISO 8601",
+            "example": "1985-06-15",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del administrador",
+            "example": "https://storage.fitmess.co/avatars/carlos-ramirez.jpg",
+            "format": "uri"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del registro en formato ISO 8601",
+            "example": "2026-03-08T14:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "createdAt"
+        ]
+      },
+      "AuthUserDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del usuario autenticado",
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del usuario autenticado",
+            "example": "carlos.gomez@ejemplo.com",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "description": "Rol del usuario autenticado",
+            "enum": [
+              "ADMIN",
+              "COACH",
+              "ATHLETE"
+            ],
+            "example": "COACH"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role"
+        ]
+      },
+      "AuthTokenResponseDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "Token JWT de acceso. Debe incluirse en el header Authorization: Bearer <token>",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "Token de refresco para obtener un nuevo accessToken cuando este expire. Almacenar de forma segura.",
+            "example": "rt_a1b2c3d4e5f6..."
+          },
+          "expiresIn": {
+            "type": "number",
+            "description": "Tiempo de expiracion del accessToken en segundos. Permite al cliente programar la renovacion sin decodificar el JWT.",
+            "example": 3600
+          },
+          "user": {
+            "description": "Datos basicos del usuario autenticado",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuthUserDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresIn",
+          "user"
+        ]
+      },
+      "SearchCoachRequestsDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "description": "Lista de UUIDs de solicitudes a buscar",
+            "example": [
+              "550e8400-e29b-41d4-a716-446655440000",
+              "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "array",
+            "description": "Filtrar por estado(s) de la solicitud. Multiples valores = OR entre estados.",
+            "example": [
+              "PENDING"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED"
+              ]
+            }
+          },
+          "email": {
+            "type": "string",
+            "description": "Filtrar por correo electronico exacto del coach solicitante",
+            "example": "carlos.gomez@ejemplo.com",
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "description": "Filtrar por nombre parcial del coach solicitante (busqueda ILIKE)",
+            "example": "Carlos",
+            "maxLength": 120
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Filtrar por numero de identificacion exacto del coach solicitante",
+            "example": "1020304050",
+            "maxLength": 30
+          },
+          "createdAtFrom": {
+            "type": "string",
+            "description": "Fecha inicial del rango de creacion (inclusive, desde las 00:00:00 de ese dia). Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). Si se omite, no hay limite inferior.",
+            "example": "2026-03-01",
+            "format": "date"
+          },
+          "createdAtTo": {
+            "type": "string",
+            "description": "Fecha final del rango de creacion (inclusive, hasta las 23:59:59.999 de ese dia). Formato YYYY-MM-DD, interpretada en hora local de Colombia (UTC-5). Si se omite, no hay limite superior. Para buscar un solo dia, enviar el mismo valor en createdAtFrom y createdAtTo.",
+            "example": "2026-03-31",
+            "format": "date"
+          },
+          "page": {
+            "type": "number",
+            "description": "Numero de pagina (base 1)",
+            "example": 1,
+            "minimum": 1,
+            "default": 1
+          },
+          "limit": {
+            "type": "number",
+            "description": "Cantidad de resultados por pagina",
+            "example": 20,
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      },
+      "CoachRequestSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la solicitud",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "description": "UUID del usuario coach",
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "format": "uuid"
+          },
+          "coachName": {
+            "type": "string",
+            "description": "Nombre completo del coach solicitante",
+            "example": "Carlos Andres Gomez Ruiz"
+          },
+          "coachEmail": {
+            "type": "string",
+            "description": "Correo electronico del coach solicitante",
+            "example": "carlos.gomez@ejemplo.com",
+            "format": "email"
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion",
+            "example": "1020304050"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado actual de la solicitud",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ],
+            "example": "PENDING"
+          },
+          "bannerUrl": {
+            "type": "string",
+            "description": "URL del banner del coach",
+            "example": "https://storage.fitmess.co/banners/carlos-gomez-banner.jpg",
+            "format": "uri"
+          },
+          "reviewedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha en que el administrador reviso la solicitud. Solo presente cuando status = APPROVED o REJECTED.",
+            "example": "2026-03-05T14:20:00.000Z"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la solicitud en formato ISO 8601",
+            "example": "2026-03-01T10:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "coachName",
+          "coachEmail",
+          "identificationType",
+          "identificationNumber",
+          "status",
+          "createdAt"
+        ]
+      },
+      "CoachRequestDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la solicitud",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "description": "UUID del usuario coach",
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "format": "uuid"
+          },
+          "coachName": {
+            "type": "string",
+            "description": "Nombre completo del coach solicitante",
+            "example": "Carlos Andres Gomez Ruiz"
+          },
+          "coachEmail": {
+            "type": "string",
+            "description": "Correo electronico del coach solicitante",
+            "example": "carlos.gomez@ejemplo.com",
+            "format": "email"
+          },
+          "identificationType": {
+            "type": "string",
+            "description": "Tipo de documento de identificacion",
+            "enum": [
+              "CC",
+              "CE",
+              "NIT",
+              "PASAPORTE",
+              "PPT",
+              "PEP"
+            ],
+            "example": "CC"
+          },
+          "identificationNumber": {
+            "type": "string",
+            "description": "Numero de documento de identificacion",
+            "example": "1020304050"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Numero de telefono del coach",
+            "example": "3101234567"
+          },
+          "phoneCountryCode": {
+            "type": "string",
+            "description": "Codigo de pais del telefono",
+            "example": "57"
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "description": "Fecha de nacimiento del coach en formato ISO 8601",
+            "example": "1990-06-15",
+            "format": "date"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del coach",
+            "example": "https://storage.fitmess.co/avatars/carlos-gomez.jpg",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado actual de la solicitud en la state machine",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ],
+            "example": "PENDING"
+          },
+          "planDescription": {
+            "type": "string",
+            "description": "Descripcion del plan de entrenamiento que ofrece el coach",
+            "example": "Entrenador certificado NSCA con 5 anos de experiencia en fuerza y acondicionamiento. Especializado en atletas de alto rendimiento."
+          },
+          "bannerUrl": {
+            "type": "string",
+            "description": "URL del banner o portafolio del coach",
+            "example": "https://storage.fitmess.co/banners/carlos-gomez-banner.jpg",
+            "format": "uri"
+          },
+          "rejectionReason": {
+            "type": "string",
+            "description": "Motivo de rechazo. Solo presente cuando status = REJECTED.",
+            "example": "La descripcion del plan no cumple con los estandares minimos requeridos."
+          },
+          "reviewedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha en que el administrador reviso la solicitud. Solo presente cuando status = APPROVED o REJECTED.",
+            "example": "2026-03-05T14:20:00.000Z"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la solicitud en formato ISO 8601",
+            "example": "2026-03-01T10:30:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion en formato ISO 8601",
+            "example": "2026-03-05T14:20:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "coachName",
+          "coachEmail",
+          "identificationType",
+          "identificationNumber",
+          "phone",
+          "phoneCountryCode",
+          "status",
+          "planDescription",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "RejectCoachRequestDto": {
+        "type": "object",
+        "properties": {
+          "rejectionReason": {
+            "type": "string",
+            "description": "Motivo del rechazo de la solicitud. Texto libre orientado al coach — no incluir informacion tecnica interna.",
+            "example": "La descripcion del plan no cumple con los estandares minimos requeridos por la plataforma. Por favor adjunte certificaciones y un plan de entrenamiento mas detallado.",
+            "minLength": 10,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "rejectionReason"
+        ]
+      },
+      "CreateAdminInvitationDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Correo electronico de la persona a invitar como administrador. No debe existir un User activo ni una invitacion activa (no expirada, no utilizada) para este correo en la plataforma.",
+            "example": "nuevo.admin@fitmess.co",
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "AdminInvitationResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la invitacion recien creada",
+            "example": "550e8400-e29b-41d4-a716-446655440010",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del invitado. Se uso para enviar el enlace de registro.",
+            "example": "nuevo.admin@fitmess.co",
+            "format": "email"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha y hora de expiracion del token de invitacion. Configurable via ADMIN_INVITE_EXPIRATION_HOURS (por defecto 48 horas desde la creacion).",
+            "example": "2026-03-10T14:30:00.000Z"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha y hora de creacion de la invitacion en formato ISO 8601",
+            "example": "2026-03-08T14:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "expiresAt",
+          "createdAt"
+        ]
+      },
+      "VerifyAdminInvitationDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Token de invitacion recibido por correo electronico. El service hashea este token con sha256 para buscar en base de datos. NUNCA se loggea — Ley 1273/2009.",
+            "example": "a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "AdminInvitationStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del invitado asociado a este token de invitacion.",
+            "example": "nuevo.admin@fitmess.co",
+            "format": "email"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado derivado de la invitacion. ACTIVE: vigente y disponible para registro. EXPIRED: expiresAt < now() — solicitar nueva invitacion. USED: tokenUsedAt != null — la cuenta ya fue creada.",
+            "example": "ACTIVE",
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "USED"
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha y hora de expiracion del token. Permite al frontend mostrar cuenta regresiva.",
+            "example": "2026-03-10T14:30:00.000Z"
+          }
+        },
+        "required": [
+          "email",
+          "status",
+          "expiresAt"
+        ]
+      },
+      "CreateExerciseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio. Identidad del catalogo — no se versiona. La unicidad es case-insensitive, con trim, y aplica solo entre ejercicios activos (CA-005-2/CA-005-6).",
+            "example": "Sentadilla con barra",
+            "minLength": 2,
+            "maxLength": 150
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion del ejercicio (instrucciones de ejecucion). Contenido de entrenamiento — vive en la primera ExerciseVersion (versionNumber = 1).",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso.",
+            "maxLength": 1000
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal trabajado por el ejercicio. Texto libre en esta epica — no existe catalogo/enum de grupos musculares (ninguna HU lo requiere).",
+            "example": "Cuadriceps",
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "muscleGroup"
+        ]
+      },
+      "ExerciseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del ejercicio",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio. Identidad del catalogo — no versionado.",
+            "example": "Sentadilla con barra"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la version vigente del ejercicio",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso."
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal de la version vigente del ejercicio",
+            "example": "Cuadriceps"
+          },
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version vigente (mayor versionNumber existente)",
+            "example": 1
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Indica si el ejercicio esta activo en el catalogo. false = inhabilitado (soft-delete propio de ejercicios, ver CA-007-1).",
+            "example": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del ejercicio",
+            "example": "2026-08-05T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion del ejercicio",
+            "example": "2026-08-05T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "muscleGroup",
+          "versionNumber",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ExerciseSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del ejercicio",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio. Identidad del catalogo — no versionado.",
+            "example": "Sentadilla con barra"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la version vigente del ejercicio",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso."
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal de la version vigente del ejercicio",
+            "example": "Cuadriceps"
+          },
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version vigente (mayor versionNumber existente)",
+            "example": 1
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Indica si el ejercicio esta activo en el catalogo. Por defecto el listado solo retorna ejercicios activos (CA-007-2) — este campo solo puede ser false cuando la peticion incluyo includeInactive=true.",
+            "example": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del ejercicio",
+            "example": "2026-08-05T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "muscleGroup",
+          "versionNumber",
+          "isActive",
+          "createdAt"
+        ]
+      },
+      "ExerciseVersionHistoryResponseDto": {
+        "type": "object",
+        "properties": {
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version dentro del historial del ejercicio",
+            "example": 2
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de esta version",
+            "example": "2026-08-10T09:15:00.000Z"
+          }
+        },
+        "required": [
+          "versionNumber",
+          "createdAt"
+        ]
+      },
+      "ExerciseDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del ejercicio",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio. Identidad del catalogo — no versionado.",
+            "example": "Sentadilla con barra"
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Indica si el ejercicio esta activo en el catalogo. Este endpoint retorna el ejercicio aunque isActive=false — a diferencia del listado, la consulta directa por id nunca filtra por estado (CA-007-3).",
+            "example": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la version vigente del ejercicio",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso."
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal de la version vigente del ejercicio",
+            "example": "Cuadriceps"
+          },
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version vigente (mayor versionNumber existente)",
+            "example": 1
+          },
+          "versions": {
+            "description": "Historial completo de versiones del ejercicio, ordenado por versionNumber ascendente (incluye la version vigente). CA-006-2.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExerciseVersionHistoryResponseDto"
+            }
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del ejercicio",
+            "example": "2026-08-05T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion del ejercicio",
+            "example": "2026-08-05T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isActive",
+          "description",
+          "muscleGroup",
+          "versionNumber",
+          "versions",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateExerciseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nuevo nombre del ejercicio. Si se envia, se valida unicidad case-insensitive con trim contra otros ejercicios ACTIVOS (excluyendo el propio).",
+            "example": "Sentadilla trasera con barra",
+            "minLength": 2,
+            "maxLength": 150
+          },
+          "description": {
+            "type": "string",
+            "description": "Nueva descripcion del ejercicio. Contenido de entrenamiento versionado (ExerciseVersion) — edicion in-place o nueva version segun uso en planes.",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo el torso mas vertical, con la barra apoyada sobre los trapecios.",
+            "maxLength": 1000
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Nuevo grupo muscular principal. Contenido de entrenamiento versionado (ExerciseVersion) — edicion in-place o nueva version segun uso en planes.",
+            "example": "Gluteos",
+            "maxLength": 50
+          }
+        }
+      }
+    }
+  }
+}
