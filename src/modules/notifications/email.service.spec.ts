@@ -163,4 +163,64 @@ describe('EmailService', () => {
       expect(callArg[0].from).toBe('noreply@fitmess.co');
     });
   });
+
+  // ── Sin RESEND_API_KEY ───────────────────────────────────────────────────────
+  //
+  // Es el estado real de los entornos de desarrollo y de CI: el .env no trae la
+  // clave. Esta rama estaba sin cubrir (hallazgo #2b) pese a ser la que corre en
+  // cada arranque local — se ve el warn en la salida de todos los tests e2e.
+
+  describe('sin RESEND_API_KEY configurada', () => {
+    const configSinClave = {
+      get: (key: string, defaultValue?: string): string => {
+        const config: Record<string, string> = {
+          EMAIL_FROM: 'noreply@fitmess.co',
+          APP_BASE_URL: 'http://localhost:3000',
+        };
+        return config[key] ?? defaultValue ?? '';
+      },
+    } as unknown as ConfigService;
+
+    it('advierte al construirse que el envío queda deshabilitado', () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      new EmailService(configSinClave, logger as never);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('RESEND_API_KEY'),
+      );
+    });
+
+    it('NO intenta enviar el correo y retorna sin lanzar', async () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const sinClave = new EmailService(configSinClave, logger as never);
+
+      // No debe reventar: la ausencia de la clave deshabilita el envío, no
+      // rompe el registro del administrador que dispara el evento.
+      await expect(
+        sinClave.sendAdminInvitation(
+          'invitado@fitmess.co',
+          'token-raw',
+          new Date('2026-12-31'),
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('al no enviar, loggea solo el dominio del destinatario — nunca el correo completo (Ley 1581/2012)', async () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const sinClave = new EmailService(configSinClave, logger as never);
+      logger.warn.mockClear();
+
+      await sinClave.sendAdminInvitation(
+        'invitado@fitmess.co',
+        'token-raw-secreto',
+        new Date('2026-12-31'),
+      );
+
+      const serializado = JSON.stringify(logger.warn.mock.calls);
+      expect(serializado).toContain('fitmess.co');
+      expect(serializado).not.toContain('invitado@fitmess.co');
+      expect(serializado).not.toContain('token-raw-secreto');
+    });
+  });
 });

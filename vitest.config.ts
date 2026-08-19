@@ -11,6 +11,18 @@ export default defineConfig({
       reporter: ['text', 'json', 'json-summary'],
       reportsDirectory: './coverage',
       thresholds: {
+        // perFile: cada archivo debe alcanzar el umbral por si solo, no el
+        // promedio del proyecto. `rulesArquitectura § Testing` siempre se
+        // redacto asi ("cobertura minima de dominio 80%, adaptadores 70%"),
+        // pero la herramienta medía el agregado — regla y gate decian cosas
+        // distintas (hallazgo abierto #2b).
+        //
+        // Con el agregado, un archivo nuevo sin un solo test pasaba el gate
+        // escondido detras del promedio. Asi fue como `response.interceptor.ts`
+        // sobrevivio dos epicas en 0% con un bug adentro: envolvia TODAS las
+        // respuestas de la API y nadie lo noto hasta que EPICA-02 estreno el
+        // patron `{ data: null, message }`.
+        perFile: true,
         lines: 80,
         functions: 80,
         branches: 75,

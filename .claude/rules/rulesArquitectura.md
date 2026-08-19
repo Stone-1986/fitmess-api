@@ -52,6 +52,9 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 
 - Cobertura mínima de dominio/lógica de negocio: **80%**
 - Cobertura mínima de adaptadores: **70%**
+- La cobertura se mide **POR ARCHIVO**, no sobre el promedio del proyecto: `vitest.config.ts` tiene `thresholds.perFile: true`. Un archivo nuevo sin tests hace fallar el gate por sí solo, y el mensaje de error lo nombra
+- Umbrales efectivos que aplica la herramienta a cada archivo: lines 80%, functions 80%, statements 80%, branches 75%
+- NUNCA volver a `perFile: false`. Con el agregado, un archivo en 0% pasa escondido tras el promedio: así sobrevivió `response.interceptor.ts` durante dos épicas, envolviendo TODAS las respuestas de la API con un bug adentro que solo apareció cuando EPICA-02 estrenó el patrón `{ data: null, message }`
 - Si la cobertura no se alcanza, el flujo de implementación se bloquea y regresa al QA
 - Los tests unitarios van en `*.spec.ts` dentro de `src/`
 - Los tests e2e van en `*.e2e-spec.ts` dentro de `test/`

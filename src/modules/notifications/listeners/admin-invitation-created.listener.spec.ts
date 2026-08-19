@@ -91,6 +91,20 @@ describe('AdminInvitationCreatedListener', () => {
       ).resolves.toBeUndefined();
     });
 
+    it('tolera un rechazo que no es una instancia de Error', async () => {
+      // Una promesa puede rechazarse con cualquier valor, no solo con un Error.
+      // El listener hace `err instanceof Error ? err.message : 'Error desconocido'`
+      // y esa segunda rama estaba sin cubrir (hallazgo #2b): si fallara, el
+      // catch reventaría dentro del propio manejo de errores.
+      emailServiceMock.sendAdminInvitation.mockRejectedValue(
+        'fallo sin objeto Error',
+      );
+
+      await expect(
+        listener.handleAdminInvitationCreated(mockEvent),
+      ).resolves.toBeUndefined();
+    });
+
     it('loggea el error cuando EmailService falla — sin exponer el token RAW (Ley 1273/2009)', async () => {
       // Arrange
       emailServiceMock.sendAdminInvitation.mockRejectedValue(
