@@ -1,0 +1,1132 @@
+{
+  "info": {
+    "name": "fitmess-api — EPICA-02: Catálogo Global de Ejercicios",
+    "_postman_id": "e2c0a002-0002-4002-8002-fitmess0epica02",
+    "description": "Colección Postman para la EPICA-02 (Catálogo Global de Ejercicios) de fitmess-api.\n\nCubre HU-005 (crear), HU-006 (modificar), HU-007 (inhabilitar) y los listados/detalle del catálogo.\n\n## Cómo usarla\n\n1. Importa también `fitmess-local.postman_environment.json` y selecciónalo.\n2. Levanta la API: `pnpm run start:dev` (por defecto en `http://localhost:3000`, prefijo global `/api`).\n3. Ejecuta la carpeta `00 — Setup / Auth`:\n   - `Registrar entrenador` crea un COACH nuevo (email dinámico) — solo si aún no tienes uno.\n   - `Login` guarda `accessToken` en el entorno; todas las demás peticiones lo usan vía Bearer heredado.\n4. Ejecuta las carpetas en orden con el Collection Runner: cada request encadena las variables (`exerciseId`, `exerciseName`, `inactiveExerciseId`) que necesitan las siguientes.\n\n## Notas de contrato\n\n- Todos los endpoints de `/exercises` exigen JWT y rol COACH o ADMIN (RN-22). Un ATHLETE recibe 403.\n- Las respuestas exitosas vienen envueltas por `ResponseInterceptor`: `{ success, statusCode, data, meta?, message?, timestamp }`.\n- Los errores usan RFC 9457 con `Content-Type: application/problem+json` y campo extra `errorCode`.\n- `DELETE /exercises/:id` es soft-delete (`isActive=false`) y responde `{ data: null, message }` — nunca bloquea por uso en planes (CA-007-1).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Sufijo único por corrida para que los nombres de ejercicio no colisionen",
+          "// entre ejecuciones (la unicidad de name es case-insensitive entre activos).",
+          "if (!pm.collectionVariables.get('runSuffix')) {",
+          "  pm.collectionVariables.set('runSuffix', String(Date.now()).slice(-6));",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api", "type": "string" },
+    { "key": "runSuffix", "value": "", "type": "string" },
+    { "key": "exerciseId", "value": "", "type": "string" },
+    { "key": "exerciseName", "value": "", "type": "string" },
+    { "key": "inactiveExerciseId", "value": "", "type": "string" },
+    { "key": "usedExerciseId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "00 — Setup / Auth",
+      "description": "Obtención del token. Los endpoints de ejercicios requieren rol COACH o ADMIN.",
+      "item": [
+        {
+          "name": "Registrar entrenador (COACH)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Email e identificación dinámicos: ambos son únicos en la plataforma.",
+                  "const s = pm.collectionVariables.get('runSuffix');",
+                  "pm.collectionVariables.set('coachEmail', `coach.epica02.${s}@ejemplo.com`);",
+                  "pm.collectionVariables.set('coachIdNumber', `10${s}000`.slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Guarda credenciales para el login', () => {",
+                  "  pm.environment.set('coachEmail', pm.collectionVariables.get('coachEmail'));",
+                  "  pm.environment.set('coachPassword', 'MiClaveSegura123');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Carlos Andres Gomez Ruiz\",\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"MiClaveSegura123\",\n  \"phone\": \"3101234567\",\n  \"phoneCountryCode\": \"57\",\n  \"identificationType\": \"CC\",\n  \"identificationNumber\": \"{{coachIdNumber}}\",\n  \"dateOfBirth\": \"1992-05-14\",\n  \"acceptedTerms\": true,\n  \"acceptedDataProcessing\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/coaches/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "coaches", "register"]
+            },
+            "description": "Crea un entrenador para poder operar el catálogo. Si ya tienes un COACH o ADMIN registrado, salta este request y usa directamente `Login` con tus credenciales.\n\nEl cuerpo puede requerir ajustes según los campos exactos de `RegisterCoachDto` (consentimientos legales — Ley 1581/2012)."
+          }
+        },
+        {
+          "name": "Login (guarda accessToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const data = body.data ?? body;",
+                  "",
+                  "pm.test('Devuelve accessToken', () => {",
+                  "  pm.expect(data).to.have.property('accessToken');",
+                  "});",
+                  "",
+                  "pm.environment.set('accessToken', data.accessToken);",
+                  "if (data.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"{{coachPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Autentica y guarda `accessToken` en el entorno. El resto de la colección lo hereda como Bearer token.\n\nEste endpoint está bajo rate limiting (`@nestjs/throttler`): un exceso de intentos responde 429."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HU-005 — Crear ejercicio",
+      "description": "POST /exercises. Crea `Exercise` + primera `ExerciseVersion` (versionNumber = 1) en una sola `$transaction` (CA-005-1). `isActive` queda en true. Visible de inmediato, sin aprobación (CA-005-3).",
+      "item": [
+        {
+          "name": "Crear ejercicio — 201 (happy path)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const s = pm.collectionVariables.get('runSuffix');",
+                  "pm.collectionVariables.set('exerciseName', `Sentadilla con barra ${s}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Envelope estandar del ResponseInterceptor', () => {",
+                  "  pm.expect(body).to.have.property('success', true);",
+                  "  pm.expect(body).to.have.property('statusCode', 201);",
+                  "  pm.expect(body).to.have.property('timestamp');",
+                  "});",
+                  "",
+                  "const ex = body.data;",
+                  "",
+                  "pm.test('Primera version: versionNumber = 1 (CA-005-1)', () => {",
+                  "  pm.expect(ex.versionNumber).to.eql(1);",
+                  "});",
+                  "",
+                  "pm.test('Nace activo, sin paso de aprobacion (CA-005-3)', () => {",
+                  "  pm.expect(ex.isActive).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test('No expone campos internos', () => {",
+                  "  pm.expect(ex).to.not.have.property('archivedAt');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('exerciseId', ex.id);",
+                  "pm.environment.set('exerciseId', ex.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{exerciseName}}\",\n  \"description\": \"Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso.\",\n  \"muscleGroup\": \"Cuadriceps\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "Crea el ejercicio y guarda su `id` en `exerciseId` para el resto de la colección.\n\n**Campos** (decisión del 2026-08-05 — sin equipo, dificultad ni multimedia):\n- `name` (2–150): identidad del catálogo, vive en `Exercise`, **no se versiona**.\n- `description` (1–1000): contenido de entrenamiento, vive en `ExerciseVersion`.\n- `muscleGroup` (1–50): texto libre, sin enum en esta épica."
+          }
+        },
+        {
+          "name": "Crear duplicado — 409 DUPLICATE_ENTITY (CA-005-2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "",
+                  "pm.test('Content-Type problem+json (RFC 9457)', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});",
+                  "",
+                  "pm.test('errorCode DUPLICATE_ENTITY', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('DUPLICATE_ENTITY');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"  {{exerciseName}}  \",\n  \"description\": \"Variante enviada con el mismo nombre en mayusculas y con espacios sobrantes.\",\n  \"muscleGroup\": \"Cuadriceps\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "Reenvía el mismo `name` del request anterior, con espacios sobrantes, para demostrar que la unicidad es **case-insensitive y con trim** entre ejercicios **activos** (CA-005-2).\n\nRequiere haber ejecutado antes `Crear ejercicio — 201`."
+          }
+        },
+        {
+          "name": "Crear sin campos obligatorios — 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Content-Type problem+json', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});",
+                  "",
+                  "pm.test('Detalla los errores de validacion', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property('errorCode');",
+                  "  pm.expect(JSON.stringify(body)).to.include('nombre');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"A\",\n  \"description\": \"\",\n  \"muscleGroup\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "`name` de 1 carácter (mínimo 2), `description` y `muscleGroup` vacíos. El `ValidationPipe` global rechaza con 400 y mensajes en español."
+          }
+        },
+        {
+          "name": "Crear sin token — 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ejercicio sin autenticar\",\n  \"description\": \"Este request no lleva Authorization header.\",\n  \"muscleGroup\": \"Pectoral\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "Sin `Authorization`. El `JwtAuthGuard` rechaza antes de llegar al controller."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HU-005 / HU-007 — Listar catálogo",
+      "description": "GET /exercises. Lista paginada con la versión vigente embebida. Por defecto solo activos (CA-007-2).",
+      "item": [
+        {
+          "name": "Listar catálogo — 200 (defaults)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Trae meta de paginacion', () => {",
+                  "  pm.expect(body.meta).to.have.all.keys(",
+                  "    'page', 'limit', 'totalItems', 'totalPages', 'hasNext', 'hasPrevious'",
+                  "  );",
+                  "});",
+                  "",
+                  "pm.test('Defaults page=1 limit=20', () => {",
+                  "  pm.expect(body.meta.page).to.eql(1);",
+                  "  pm.expect(body.meta.limit).to.eql(20);",
+                  "});",
+                  "",
+                  "pm.test('Solo ejercicios activos por defecto (CA-007-2)', () => {",
+                  "  body.data.forEach((e) => pm.expect(e.isActive).to.eql(true));",
+                  "});",
+                  "",
+                  "pm.test('Cada fila embebe su version vigente', () => {",
+                  "  if (body.data.length) {",
+                  "    pm.expect(body.data[0]).to.have.property('versionNumber');",
+                  "    pm.expect(body.data[0]).to.have.property('muscleGroup');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "Sin query params: `page=1`, `limit=20`, `includeInactive=false`."
+          }
+        },
+        {
+          "name": "Listar paginado — 200 (page & limit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const meta = pm.response.json().meta;",
+                  "",
+                  "pm.test('Respeta los query params', () => {",
+                  "  pm.expect(meta.page).to.eql(1);",
+                  "  pm.expect(meta.limit).to.eql(5);",
+                  "});",
+                  "",
+                  "pm.test('No devuelve mas items que el limit', () => {",
+                  "  pm.expect(pm.response.json().data.length).to.be.at.most(5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises?page=1&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"],
+              "query": [
+                { "key": "page", "value": "1", "description": "Número de página (base 1)" },
+                { "key": "limit", "value": "5", "description": "Resultados por página (máx. 100)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Listar incluyendo inhabilitados — 200 (includeInactive)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Puede incluir filas con isActive=false', () => {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.expect(data).to.be.an('array');",
+                  "  data.forEach((e) => pm.expect(e).to.have.property('isActive'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises?includeInactive=true&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"],
+              "query": [
+                { "key": "includeInactive", "value": "true", "description": "Incluye los inhabilitados (default false)" },
+                { "key": "limit", "value": "50", "description": "Resultados por página (máx. 100)" }
+              ]
+            },
+            "description": "Única vía para auditar el catálogo completo — esta épica no define reactivación.\n\nCon `includeInactive=true` el listado **puede mostrar dos filas con el mismo `name`** (una activa y una inhabilitada): consecuencia aceptada de CA-005-6. El campo `isActive` de cada fila permite distinguirlas.\n\nEl parser del query param usa `@Transform` explícito porque `Boolean('false') === true` en JavaScript."
+          }
+        },
+        {
+          "name": "Listar con limit fuera de rango — 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Mensaje sobre el limite maximo', () => {",
+                  "  pm.expect(JSON.stringify(pm.response.json())).to.include('limite');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises?page=0&limit=500",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"],
+              "query": [
+                { "key": "page", "value": "0", "description": "Inválido: la página mínima es 1" },
+                { "key": "limit", "value": "500", "description": "Inválido: el límite máximo es 100" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Listar sin token — 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "El catálogo no es público: ni el listado ni el detalle son accesibles para un ATHLETE (RN-22). Su acceso vía planes es contenido de EPICA-03."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HU-006 / HU-007 — Detalle con historial",
+      "description": "GET /exercises/:id. Datos vigentes + historial completo de versiones (CA-006-2). No filtra por `isActive` (CA-007-3).",
+      "item": [
+        {
+          "name": "Detalle de ejercicio — 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const ex = pm.response.json().data;",
+                  "",
+                  "pm.test('Incluye el historial de versiones (CA-006-2)', () => {",
+                  "  pm.expect(ex.versions).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(ex.versions[0]).to.have.property('versionNumber');",
+                  "  pm.expect(ex.versions[0]).to.have.property('createdAt');",
+                  "});",
+                  "",
+                  "pm.test('El id coincide con el solicitado', () => {",
+                  "  pm.expect(ex.id).to.eql(pm.collectionVariables.get('exerciseId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "Devuelve los datos vigentes (los de la versión con mayor `versionNumber`) más el historial completo: `versionNumber` + `createdAt` de cada versión.\n\nNo filtra por `isActive` — un ejercicio inhabilitado se lee igual, con su estado visible, para que un plan histórico pueda mostrarlo indicando que ya no está activo (CA-007-3)."
+          }
+        },
+        {
+          "name": "Detalle con UUID inexistente — 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "",
+                  "pm.test('errorCode ENTITY_NOT_FOUND', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('ENTITY_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/00000000-0000-4000-8000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "00000000-0000-4000-8000-000000000000"]
+            }
+          }
+        },
+        {
+          "name": "Detalle con id no-UUID — 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Content-Type problem+json', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/no-es-un-uuid",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "no-es-un-uuid"]
+            },
+            "description": "`ParseUUIDPipe` rechaza el parámetro antes de llegar al service."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HU-006 — Modificar ejercicio",
+      "description": "PATCH /exercises/:id. `name` se actualiza in-place sobre `Exercise` (identidad). `description`/`muscleGroup` crean versión nueva (CA-006-1) o editan la vigente in-place (CA-006-3) según si el ejercicio ya se usó en un plan.",
+      "item": [
+        {
+          "name": "Renombrar ejercicio — 200",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const s = pm.collectionVariables.get('runSuffix');",
+                  "pm.collectionVariables.set('exerciseName', `Sentadilla trasera con barra ${s}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const ex = pm.response.json().data;",
+                  "",
+                  "pm.test('El nombre quedo actualizado', () => {",
+                  "  pm.expect(ex.name).to.eql(pm.collectionVariables.get('exerciseName'));",
+                  "});",
+                  "",
+                  "pm.test('Renombrar no versiona: name vive en Exercise', () => {",
+                  "  pm.expect(ex.versionNumber).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{exerciseName}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "`name` es identidad del catálogo y **no se versiona**: cambiarlo no incrementa `versionNumber`. Se valida unicidad case-insensitive con trim contra otros ejercicios activos, excluyendo el propio id."
+          }
+        },
+        {
+          "name": "Modificar contenido — 200 (in-place o nueva versión)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const ex = pm.response.json().data;",
+                  "",
+                  "pm.test('El contenido quedo actualizado', () => {",
+                  "  pm.expect(ex.muscleGroup).to.eql('Gluteos');",
+                  "});",
+                  "",
+                  "// Sin uso en planes -> edicion in-place, versionNumber sigue en 1 (CA-006-3).",
+                  "// Ya usado en un plan -> version nueva, versionNumber = 2 (CA-006-1).",
+                  "pm.test('versionNumber refleja la estrategia aplicada', () => {",
+                  "  pm.expect(ex.versionNumber).to.be.oneOf([1, 2]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo el torso mas vertical, con la barra apoyada sobre los trapecios.\",\n  \"muscleGroup\": \"Gluteos\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "`description` y `muscleGroup` son contenido de entrenamiento y viven en `ExerciseVersion`:\n\n- **Ejercicio ya usado en un plan** → se crea una `ExerciseVersion` nueva con `versionNumber` incrementado (CA-006-1). Los planes existentes conservan intacta la versión que referenciaban (RN-07).\n- **Ejercicio no usado** → se edita la versión vigente in-place (CA-006-3).\n\nEn una base recién sembrada por esta colección no hay planes (EPICA-03), así que el camino esperado es el in-place. Para ver el versionado, ejecuta este request contra un ejercicio ya referenciado en un plan y usa `Detalle de ejercicio` para confirmar dos entradas en `versions`."
+          }
+        },
+        {
+          "name": "Modificar con nombre duplicado — 409",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Crea un segundo ejercicio activo cuyo nombre sirva de colision.",
+                  "const s = pm.collectionVariables.get('runSuffix');",
+                  "const otherName = `Peso muerto convencional ${s}`;",
+                  "pm.collectionVariables.set('otherExerciseName', otherName);",
+                  "",
+                  "pm.sendRequest({",
+                  "  url: pm.collectionVariables.get('baseUrl') + '/exercises',",
+                  "  method: 'POST',",
+                  "  header: {",
+                  "    'Content-Type': 'application/json',",
+                  "    Authorization: 'Bearer ' + pm.environment.get('accessToken'),",
+                  "  },",
+                  "  body: {",
+                  "    mode: 'raw',",
+                  "    raw: JSON.stringify({",
+                  "      name: otherName,",
+                  "      description: 'Ejercicio auxiliar creado para provocar la colision de nombre.',",
+                  "      muscleGroup: 'Espalda baja',",
+                  "    }),",
+                  "  },",
+                  "}, (err, res) => {",
+                  "  if (!err && res.code === 201) {",
+                  "    pm.collectionVariables.set('otherExerciseId', res.json().data.id);",
+                  "  }",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "",
+                  "pm.test('errorCode DUPLICATE_ENTITY', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('DUPLICATE_ENTITY');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{otherExerciseName}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "El pre-request script crea un segundo ejercicio activo y luego se intenta renombrar el primero con ese nombre. Colisión → `DUPLICATE_ENTITY`."
+          }
+        },
+        {
+          "name": "Modificar con campo vacío — 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"muscleGroup\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "Los campos son opcionales (semántica PATCH), pero si se envían no pueden ser cadena vacía: `@IsOptional()` + `@IsNotEmpty()`."
+          }
+        },
+        {
+          "name": "Modificar ejercicio inexistente — 404 (CA-006-4)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "",
+                  "pm.test('errorCode ENTITY_NOT_FOUND', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('ENTITY_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"muscleGroup\": \"Isquiotibiales\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/00000000-0000-4000-8000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "00000000-0000-4000-8000-000000000000"]
+            },
+            "description": "La existencia se valida primero, antes que cualquier otra regla del service."
+          }
+        }
+      ]
+    },
+    {
+      "name": "HU-007 — Inhabilitar ejercicio",
+      "description": "DELETE /exercises/:id. Soft-delete vía `isActive` (no `archivedAt`). SIEMPRE procede, esté o no en uso — nunca se bloquea con EXERCISE_IN_USE (CA-007-1).",
+      "item": [
+        {
+          "name": "Inhabilitar ejercicio — 200 (CA-007-1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Patron { data: null, message }', () => {",
+                  "  pm.expect(body).to.have.property('data', null);",
+                  "  pm.expect(body.message).to.be.a('string').and.not.empty;",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('inactiveExerciseId', pm.collectionVariables.get('exerciseId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{exerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{exerciseId}}"]
+            },
+            "description": "La operación **siempre** procede, esté o no el ejercicio en uso (CA-007-1). Las versiones y el ejercicio no se tocan: los planes existentes conservan intacta la versión que referenciaban (RN-07).\n\nEl `name` queda disponible de inmediato para otro ejercicio (CA-005-6).\n\nLa respuesta usa el patrón `{ data: null, message }` — el `ResponseInterceptor` preserva el `null` intencional gracias a la verificación explícita `'data' in data`."
+          }
+        },
+        {
+          "name": "Verificar que desapareció del listado (CA-007-2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const id = pm.collectionVariables.get('inactiveExerciseId');",
+                  "",
+                  "pm.test('El inhabilitado NO aparece en el listado por defecto', () => {",
+                  "  const ids = pm.response.json().data.map((e) => e.id);",
+                  "  pm.expect(ids).to.not.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises?limit=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"],
+              "query": [{ "key": "limit", "value": "100" }]
+            }
+          }
+        },
+        {
+          "name": "Verificar que el detalle sigue legible (CA-007-3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK — el detalle no filtra por isActive', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('isActive = false visible en el detalle', () => {",
+                  "  pm.expect(pm.response.json().data.isActive).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{inactiveExerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{inactiveExerciseId}}"]
+            },
+            "description": "Un ejercicio inhabilitado se lee igual, con su estado inactivo visible, para que un plan histórico pueda mostrarlo indicando que ya no está activo en la biblioteca (CA-007-3)."
+          }
+        },
+        {
+          "name": "Modificar ejercicio inhabilitado — 422 EXERCISE_INACTIVE (CA-006-6)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 Unprocessable Entity', () => pm.response.to.have.status(422));",
+                  "",
+                  "pm.test('errorCode EXERCISE_INACTIVE', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('EXERCISE_INACTIVE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"muscleGroup\": \"Isquiotibiales\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{inactiveExerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{inactiveExerciseId}}"]
+            },
+            "description": "Se rechaza sin crear versión nueva ni alterar la vigente (CA-006-6). Esta validación corre antes de la de unicidad de `name`."
+          }
+        },
+        {
+          "name": "Inhabilitar dos veces — 422 EXERCISE_INACTIVE (CA-007-4)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 Unprocessable Entity', () => pm.response.to.have.status(422));",
+                  "",
+                  "pm.test('errorCode EXERCISE_INACTIVE', () => {",
+                  "  pm.expect(pm.response.json().errorCode).to.eql('EXERCISE_INACTIVE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises/{{inactiveExerciseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises", "{{inactiveExerciseId}}"]
+            },
+            "description": "Esta épica no define reactivación: una vez inhabilitado, el ejercicio no vuelve al catálogo activo."
+          }
+        },
+        {
+          "name": "Reutilizar el nombre liberado — 201 (CA-005-6)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "",
+                  "pm.test('El nombre de un inhabilitado no bloquea la creacion (CA-005-6)', () => {",
+                  "  const ex = pm.response.json().data;",
+                  "  pm.expect(ex.name).to.eql(pm.collectionVariables.get('exerciseName'));",
+                  "  pm.expect(ex.isActive).to.eql(true);",
+                  "  pm.expect(ex.versionNumber).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{exerciseName}}\",\n  \"description\": \"Nuevo ejercicio que reutiliza el nombre liberado por el ejercicio inhabilitado.\",\n  \"muscleGroup\": \"Cuadriceps\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "Crea un ejercicio nuevo con el mismo `name` del que acaba de inhabilitarse. La unicidad solo aplica entre ejercicios **activos**, así que el nombre queda libre de inmediato (CA-005-6).\n\nA partir de aquí, un `GET /exercises?includeInactive=true` muestra dos filas con el mismo `name`, distinguibles por `isActive`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "RN-22 — Control de acceso por rol",
+      "description": "El catálogo es exclusivo de COACH y ADMIN. Un ATHLETE recibe 403 incluso en el listado y el detalle.",
+      "item": [
+        {
+          "name": "Registrar atleta (ATHLETE)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const s = pm.collectionVariables.get('runSuffix');",
+                  "pm.collectionVariables.set('athleteEmail', `atleta.epica02.${s}@ejemplo.com`);",
+                  "pm.collectionVariables.set('athleteIdNumber', `20${s}000`.slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Laura Sofia Martinez Diaz\",\n  \"email\": \"{{athleteEmail}}\",\n  \"password\": \"MiClaveSegura123\",\n  \"phone\": \"3119876543\",\n  \"phoneCountryCode\": \"57\",\n  \"identificationType\": \"CC\",\n  \"identificationNumber\": \"{{athleteIdNumber}}\",\n  \"dateOfBirth\": \"1998-03-22\",\n  \"acceptedTerms\": true,\n  \"acceptedDataProcessing\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Registro de atleta (EPICA-01). Ajusta el cuerpo si `RegisterDto` pide campos distintos."
+          }
+        },
+        {
+          "name": "Login como atleta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const data = pm.response.json().data;",
+                  "pm.collectionVariables.set('athleteAccessToken', data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{athleteEmail}}\",\n  \"password\": \"MiClaveSegura123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Atleta lista el catálogo — 403 (RN-22)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));",
+                  "",
+                  "pm.test('Content-Type problem+json', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{athleteAccessToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            },
+            "description": "El atleta no accede a la gestión del catálogo, ni siquiera al listado o al detalle (RN-22). Su acceso al catálogo vía planes es contenido de EPICA-03."
+          }
+        },
+        {
+          "name": "Atleta crea ejercicio — 403 (RN-22)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{athleteAccessToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ejercicio creado por un atleta\",\n  \"description\": \"El RolesGuard debe rechazar este request antes de llegar al service.\",\n  \"muscleGroup\": \"Biceps\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/exercises",
+              "host": ["{{baseUrl}}"],
+              "path": ["exercises"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
