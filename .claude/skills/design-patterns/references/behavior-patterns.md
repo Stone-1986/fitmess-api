@@ -34,17 +34,12 @@ async publish(planId: string, coachId: string): Promise<Plan> {
 
   this.validatePlanCompleteness(plan);
 
-  const updated = await this.prisma.$transaction(async (tx) => {
-    const result = await tx.plan.update({
-      where: { id: planId },
-      data: { status: PlanStatus.PUBLISHED, publishedAt: new Date() },
-    });
-
-    await tx.planHistory.create({
-      data: { planId, action: 'PUBLISHED', timestamp: new Date() },
-    });
-
-    return result;
+  // Una sola escritura: no hay tabla de historial de plan. El estado vive en la
+  // columna `status` y el rastro de quien hizo que queda en `audit_logs`
+  // (AuditMiddleware). Sin una segunda operacion, `$transaction` no aporta nada.
+  const updated = await this.prisma.plan.update({
+    where: { id: planId },
+    data: { status: PlanStatus.PUBLISHED },
   });
 
   // Evento DESPUES del commit
@@ -105,8 +100,11 @@ async finalize(planId: string, coachId: string): Promise<Plan> {
 
 // Helper reutilizable — valida existencia + ownership
 private async findOwnedOrFail(planId: string, coachId: string): Promise<Plan> {
+  // Plan NO tiene `archivedAt`: "archivado" es uno de los cuatro valores de
+  // PlanStatus (RN-27), no una columna de soft-delete. Un plan archivado se
+  // sigue leyendo por id; lo que cambia es que no aparece en el catalogo.
   const plan = await this.prisma.plan.findUnique({
-    where: { id: planId, archivedAt: null },
+    where: { id: planId },
   });
 
   if (!plan) {
@@ -143,17 +141,27 @@ enum PlanStatus {
 **Metodo de validacion de completitud:**
 
 ```typescript
-private validatePlanCompleteness(plan: PlanWithSessions): void {
+// La jerarquia es Plan -> Phase -> Week -> Session -> SessionExercise
+// (decision del humano del 2026-08-20). La semana es una entidad propia, no un
+// campo calculado: EPICA-05 le cuelga estado (cierre automatico RN-30,
+// inmutabilidad tras iniciarse RN-33, congelamiento para la IA RN-09).
+// RN-01 exige que la validez atraviese los cuatro niveles.
+private validatePlanCompleteness(plan: PlanWithTree): void {
   const issues: string[] = [];
 
   if (!plan.name) issues.push('nombre');
   if (!plan.startDate) issues.push('fecha de inicio');
-  if (!plan.sessions || plan.sessions.length === 0) issues.push('al menos una sesion');
+  if (!plan.endDate) issues.push('fecha de fin');
 
-  const hasExercises = plan.sessions?.some(
-    (s) => s.blocks && s.blocks.length > 0,
-  );
-  if (!hasExercises) issues.push('al menos un ejercicio en una sesion');
+  const weeks = plan.phases?.flatMap((p) => p.weeks ?? []) ?? [];
+  const sessions = weeks.flatMap((w) => w.sessions ?? []);
+
+  if (!plan.phases?.length) issues.push('al menos una fase');
+  else if (!weeks.length) issues.push('al menos una semana en una fase');
+  else if (!sessions.length) issues.push('al menos una sesion en una semana');
+
+  const hasExercises = sessions.some((s) => s.exercises && s.exercises.length > 0);
+  if (sessions.length && !hasExercises) issues.push('al menos un ejercicio en una sesion');
 
   if (issues.length > 0) {
     throw new BusinessException(
@@ -502,7 +510,13 @@ export class InstanceFactoryService {
         },
       });
 
-      for (const session of plan.sessions) {
+      // La jerarquia del plan es Plan -> Phase -> Week -> Session, asi que las
+      // sesiones se alcanzan aplanando dos niveles. Los campos de
+      // InstanceSession son ILUSTRATIVOS: el modelo de instancias es EPICA-05 y
+      // todavia no tiene schema — no tomarlos como definitivos.
+      const sessions = plan.phases.flatMap((p) => p.weeks).flatMap((w) => w.sessions);
+
+      for (const session of sessions) {
         const instanceSession = await tx.instanceSession.create({
           data: {
             instanceId: instance.id,

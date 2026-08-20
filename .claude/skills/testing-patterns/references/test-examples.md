@@ -142,8 +142,8 @@ describe('PlansService', () => {
 ```typescript
 // Mock que ejecuta el callback pasandole el mismo mockPrisma
 const mockPrisma = {
-  plan: { update: vi.fn(), /* ... */ },
-  planHistory: { create: vi.fn() },
+  exercise: { create: vi.fn(), /* ... */ },
+  exerciseVersion: { create: vi.fn() },
   $transaction: vi.fn((fn) => fn(mockPrisma)),
 };
 ```

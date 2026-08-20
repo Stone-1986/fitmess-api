@@ -293,8 +293,11 @@ export class PlanService {
     // --- Queries ---
 
     async findOne(id: string): Promise<PlanResponseDto> {
+        // Plan NO tiene `archivedAt`: "archivado" es un valor de PlanStatus
+        // (RN-27), no una columna de soft-delete. El detalle por id no filtra
+        // por estado — un plan archivado se sigue leyendo.
         const plan = await this.prisma.plan.findUnique({
-            where: { id, archivedAt: null },
+            where: { id },
         });
 
         if (!plan) {
@@ -311,7 +314,8 @@ export class PlanService {
     async findAll(query: PaginationDto): Promise<{ data: Plan[]; meta: PaginationMeta }> {
         const { page, limit } = query;
         const skip = (page - 1) * limit;
-        const where = { archivedAt: null };
+        // El listado SI filtra por estado — pero con el enum, no con archivedAt.
+        const where = { status: PlanStatus.PUBLISHED };
 
         const [data, totalItems] = await Promise.all([
             this.prisma.plan.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
@@ -379,23 +383,34 @@ export class PlanService {
 ### Transacciones
 
 ```typescript
-async publish(id: string): Promise<PlanResponseDto> {
-    const plan = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.plan.update({
-            where: { id },
-            data: { status: PlanStatus.PUBLISHED, publishedAt: new Date() },
+// Ejemplo real (EPICA-02, exercises.service.ts): Exercise y su primera
+// ExerciseVersion se crean juntos porque un Exercise sin ninguna version es un
+// estado invalido del dominio. Dos escrituras que deben cuadrar o no ocurrir.
+//
+// NOTA: publicar un plan NO es un buen ejemplo de $transaction — es una sola
+// escritura (`plan.update` con el nuevo status). Envolver una unica operacion
+// en `$transaction` no aporta nada.
+async create(dto: CreateExerciseDto): Promise<ExerciseResponseDto> {
+    const exercise = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.exercise.create({
+            data: { name: dto.name.trim() },
         });
 
-        await tx.planHistory.create({
-            data: { planId: id, action: 'PUBLISHED', timestamp: new Date() },
+        await tx.exerciseVersion.create({
+            data: {
+                exerciseId: created.id,
+                versionNumber: 1,
+                description: dto.description.trim(),
+                muscleGroup: dto.muscleGroup.trim(),
+            },
         });
 
-        return updated;
+        return created;
     });
 
     // Emitir evento DESPUÉS del commit — si la transacción falla, el evento no se emite
-    this.eventEmitter.emit('plan.published', new PlanPublishedEvent(id, plan.coachId));
+    this.eventEmitter.emit('exercise.created', new ExerciseCreatedEvent(exercise.id));
 
-    return plan;
+    return exercise;
 }
 ```

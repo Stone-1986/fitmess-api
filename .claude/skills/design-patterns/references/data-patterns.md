@@ -114,11 +114,20 @@ model ExerciseVersion {
 
 ## 2. Soft-Delete
 
-Columna `archivedAt DateTime?` en entidades que soportan soft-delete: Plan, Subscription, SessionResult.
+Columna `archivedAt DateTime?` en entidades que soportan soft-delete.
 
 **Convencion de naming:**
-- `archivedAt` para entidades que se "archivan" (plans, subscriptions, results)
-- `isActive` para entidades que se "inhabilitan" (exercises)
+- `archivedAt` para entidades que se "archivan"
+- `isActive` para entidades que se "inhabilitan" (exercises — implementado en EPICA-02)
+
+> **Plan NO usa este patron.** Su ciclo de vida se modela con el enum `PlanStatus`
+> (DRAFT/PUBLISHED/FINALIZED/ARCHIVED): "archivado" es un estado mas, no una columna
+> de soft-delete (RN-27, schema aprobado en el CHECKPOINT 1 de EPICA-03 el 2026-08-20).
+> Un plan archivado se sigue leyendo por id; lo que cambia es que sale del catalogo.
+>
+> `Subscription` (EPICA-04) y `SessionResult` (EPICA-05) todavia no tienen schema, asi
+> que **no esta verificado** que vayan a usar `archivedAt`. Decidirlo cuando esas epicas
+> se disenen — no asumirlo desde aqui.
 
 **Prisma middleware en PrismaService:**
 
