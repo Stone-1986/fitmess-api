@@ -10,6 +10,10 @@ import { TechnicalException } from '../common/exceptions/technical.exception.js'
  *
  * $transaction soporta ambas firmas usadas por el service: callback
  * (create(), interactive transaction) y array de promesas (findAll(), batch).
+ *
+ * sessionExercise.count es el mock que ejercita el cuerpo REAL de
+ * isUsedInPlan() (EPICA-03, D-2 del plan de implementacion de EPICA-03):
+ * `this.prisma.sessionExercise.count({ where: { exerciseVersion: { exerciseId } } }) > 0`.
  */
 const mockPrisma = {
   exercise: {
@@ -23,6 +27,9 @@ const mockPrisma = {
   exerciseVersion: {
     create: vi.fn(),
     update: vi.fn(),
+  },
+  sessionExercise: {
+    count: vi.fn(),
   },
   $transaction: vi.fn((arg: unknown) => {
     if (typeof arg === 'function') {
@@ -404,11 +411,20 @@ describe('ExercisesService', () => {
       ).rejects.toThrow(TechnicalException);
     });
 
-    it('isUsedInPlan() real (sin mockear) retorna false hoy — EPICA-03 reemplaza su cuerpo', async () => {
+    // ── isUsedInPlan() REAL (sin spy) — EPICA-03, D-2 ──────────────────────
+    //
+    // Los dos tests de abajo NO mockean isUsedInPlan(): dejan correr su cuerpo
+    // real, que desde EPICA-03 consulta `sessionExercise.count({ where: {
+    // exerciseVersion: { exerciseId } } })`. Cierran el gap declarado por
+    // CA-006-1 de EPICA-02 (criterio tecnico del plan de implementacion de
+    // EPICA-03) — antes solo se verificaba el stub fijo en false.
+
+    it('isUsedInPlan() real consulta sessionExercise.count(exerciseId) y retorna false si count=0 (edicion in-place, CA-006-3)', async () => {
       mockPrisma.exercise.findUnique.mockResolvedValue({
         ...buildExercise(),
         versions: [buildVersion()],
       });
+      mockPrisma.sessionExercise.count.mockResolvedValue(0);
       mockPrisma.exerciseVersion.update.mockResolvedValue(
         buildVersion({ description: 'Actualizada' }),
       );
@@ -417,10 +433,43 @@ describe('ExercisesService', () => {
         description: 'Actualizada',
       } as never);
 
-      // false => edicion in-place (CA-006-3), no crea version nueva
+      expect(mockPrisma.sessionExercise.count).toHaveBeenCalledWith({
+        where: { exerciseVersion: { exerciseId: EXERCISE_ID } },
+      });
+      // count=0 => false => edicion in-place, no crea version nueva
       expect(mockPrisma.exerciseVersion.update).toHaveBeenCalled();
       expect(mockPrisma.exerciseVersion.create).not.toHaveBeenCalled();
       expect(result.versionNumber).toBe(1);
+    });
+
+    it('isUsedInPlan() real consulta sessionExercise.count(exerciseId) y retorna true si count>0 (version nueva, CA-006-1)', async () => {
+      mockPrisma.exercise.findUnique.mockResolvedValue({
+        ...buildExercise(),
+        versions: [buildVersion({ versionNumber: 2 })],
+      });
+      mockPrisma.sessionExercise.count.mockResolvedValue(3);
+      mockPrisma.exerciseVersion.create.mockResolvedValue(
+        buildVersion({ id: 'version-3', versionNumber: 3 }),
+      );
+
+      const result = await service.update(EXERCISE_ID, {
+        description: 'Descripcion actualizada',
+      } as never);
+
+      expect(mockPrisma.sessionExercise.count).toHaveBeenCalledWith({
+        where: { exerciseVersion: { exerciseId: EXERCISE_ID } },
+      });
+      // count>0 => true => crea version nueva, jamas toca la existente
+      expect(mockPrisma.exerciseVersion.create).toHaveBeenCalledWith({
+        data: {
+          exerciseId: EXERCISE_ID,
+          versionNumber: 3,
+          description: 'Descripcion actualizada',
+          muscleGroup: 'Cuadriceps',
+        },
+      });
+      expect(mockPrisma.exerciseVersion.update).not.toHaveBeenCalled();
+      expect(result.versionNumber).toBe(3);
     });
 
     it('crea una ExerciseVersion nueva cuando isUsedInPlan() retorna true (CA-006-1)', async () => {

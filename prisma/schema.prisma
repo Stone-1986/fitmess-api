@@ -15,6 +15,10 @@ enum UserRole {
   ATHLETE
 }
 
+// RN-27: exactamente estos cuatro estados, sin sub-estados adicionales.
+// ARCHIVED es uno de ellos -- Plan (EPICA-03) NO lleva un campo `archivedAt`
+// separado, seria una segunda fuente de verdad para "esta archivado"
+// (decision D-7b del plan de implementacion de EPICA-03).
 enum PlanStatus {
   DRAFT
   PUBLISHED
@@ -74,9 +78,10 @@ model User {
 
   coachRequest                CoachRequest?      @relation("CoachRequestUser")
   reviewedCoachRequests       CoachRequest[]     @relation("CoachRequestReviewer")
-  legalAcceptances            LegalAcceptance[]
-  refreshTokens               RefreshToken[]
+  legalAcceptances             LegalAcceptance[]
+  refreshTokens                RefreshToken[]
   adminInvitationsCreated     AdminInvitation[]  @relation("AdminInvitationInvitedBy")
+  plans                        Plan[]
 
   @@map("users")
 }
@@ -282,7 +287,16 @@ model ExerciseVersion {
   // administrativo de Exercise (no expuesto en esta epica), sus versiones
   // deben desaparecer con el, igual que el patron ya usado en
   // CoachRequest/LegalAcceptance/RefreshToken -> User de este mismo schema.
+  // NOTA (EPICA-03): esta cascada queda en tension deliberada con
+  // SessionExercise.exerciseVersion (onDelete: Restrict) — ver el
+  // comentario de ese modelo. Postgres bloquea el borrado de un Exercise
+  // en cuanto alguna de sus versiones siga referenciada por un plan.
   exercise      Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  // Uso desde EPICA-03: una version puede ser referenciada por multiples
+  // SessionExercise (el mismo ejercicio agregado a distintas sesiones o
+  // planes mientras esa version siga vigente).
+  sessionExercises SessionExercise[]
 
   // Cubre la consulta "version vigente" (orderBy versionNumber desc, take 1
   // filtrando por exerciseId) sin indice adicional: exerciseId es la columna
@@ -291,4 +305,179 @@ model ExerciseVersion {
   // plan de implementacion de EPICA-02).
   @@unique([exerciseId, versionNumber])
   @@map("exercise_versions")
+}
+
+// --- Modelos EPICA-03 ---
+
+// Plan de entrenamiento (plantilla base del entrenador). Jerarquia completa
+// confirmada por el humano el 2026-08-20: Plan -> Phase -> Week -> Session ->
+// SessionExercise (RN-08). PlanStatus (enum arriba) ya trae exactamente los
+// cuatro estados de RN-27 — NO se agrega `archivedAt`: ARCHIVED es uno de
+// esos cuatro valores, no un flag de soft-delete adicional (decision D-7b
+// del plan de implementacion). Tampoco existe una tabla `planHistory`: el
+// rastro de mutaciones HTTP ya lo cubre AuditLog via AuditMiddleware
+// (decision D-7c) — ninguna CA de esta epica pide un historial de
+// transiciones distinto de eso.
+model Plan {
+  id          String     @id @default(uuid())
+  name        String     @map("name")
+  description String?    @map("description")
+  startDate   DateTime?  @map("start_date")
+  endDate     DateTime?  @map("end_date")
+  status      PlanStatus @default(DRAFT) @map("status")
+  coachId     String     @map("coach_id")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  // onDelete: Restrict (no Cascade) — a diferencia de CoachRequest/
+  // RefreshToken/LegalAcceptance (artefactos de identidad 1:1 con el
+  // usuario), un Plan es contenido de negocio sustantivo que EPICA-04/05
+  // referenciaran desde Subscription/SessionResult. Hoy no existe ningun
+  // endpoint que borre un User, pero si alguna vez se agrega uno
+  // administrativo, no debe poder arrastrar en cascada silenciosa los
+  // planes (potencialmente publicados y visibles a atletas) de un
+  // entrenador — mismo criterio ya usado en AdminInvitation.inviter.
+  coach  User    @relation(fields: [coachId], references: [id], onDelete: Restrict)
+  phases Phase[]
+
+  // Cubre GET /plans (listado propio del entrenador, todos los estados).
+  @@index([coachId])
+  // Cubre el query mas caliente de la epica (HU-011, decision D-1): el
+  // catalogo filtra SIEMPRE por `status = PUBLISHED AND endDate >= now()`
+  // a nivel de query (evaluacion perezosa de Finalizado, sin job
+  // programado). Columna de igualdad (status) primero, columna de rango
+  // (endDate) despues — orden estandar para que un solo indice compuesto
+  // sirva al filtro completo.
+  @@index([status, endDate])
+  @@map("plans")
+}
+
+// Fase de un plan (mesociclo: 3-8 semanas con un enfasis de entrenamiento,
+// segun periodizacion NSCA — ver reporte de validacion de negocio).
+// Estructura pura: hard-delete real en cascada mientras el plan sigue en
+// Borrador (decision D-7); tras publicar, RN-31 la vuelve inmutable y ya no
+// existe ninguna ruta de escritura que la toque. Por eso Phase/Week/Session/
+// SessionExercise NO llevan `updatedAt`: ninguna tiene un endpoint de
+// edicion — agregar la columna solo esconderia que nunca cambia despues del
+// INSERT.
+model Phase {
+  id        String   @id @default(uuid())
+  planId    String   @map("plan_id")
+  name      String   @map("name")
+  order     Int      @map("order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  plan  Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  weeks Week[]
+
+  // Ancla para la FK compuesta de Week -> Phase (ver Week.phase abajo). No
+  // sirve para busquedas por planId (id es la columna lider de este
+  // indice) — esa consulta ya queda cubierta por @@unique([planId, order]).
+  @@unique([id, planId])
+  // order es calculado server-side (maximo existente en el plan + 1,
+  // decision D-5). Esta unicidad por padre no es solo un indice de
+  // rendimiento: es una salvaguarda de integridad contra dos altas
+  // concurrentes de fase calculando el mismo "siguiente" order antes de que
+  // la primera se persista. La columna lider (planId) ademas cubre "listar
+  // fases de un plan" sin necesitar un indice adicional.
+  @@unique([planId, order])
+  @@map("phases")
+}
+
+// Semana (microciclo, segun periodizacion NSCA). weekNumber es secuencial a
+// lo largo de TODO el plan, no reinicia por fase (decision D-4) — EPICA-05
+// (WeekClosure, sensaciones semanales) lo necesita para comparar semanas
+// entre fases.
+//
+// planId esta DENORMALIZADO desde phase.planId — recomendacion del
+// Arquitecto, evaluada aqui y ACEPTADA, pero no a ciegas: la unicidad de
+// weekNumber por plan (`@@unique([planId, weekNumber])`) es inexpresable en
+// Prisma sin un campo planId propio en este modelo, porque el schema
+// declarativo no puede construir una constraint de unicidad atravesando una
+// relacion (Week -> Phase -> Plan). Rechazar la denormalizacion habria
+// dejado esa unicidad como responsabilidad exclusiva del service (un
+// SELECT+INSERT dentro de una transaccion, sin ninguna garantia a nivel de
+// base de datos) — un nivel de proteccion inferior al que ya existe para el
+// nombre de Exercise en EPICA-02.
+//
+// La inconsistencia que la denormalizacion podria introducir (una Week cuyo
+// planId no coincida con el planId real de su Phase) queda cerrada A NIVEL
+// DE BASE DE DATOS, no solo por disciplina del service: la relacion de abajo
+// es una FK COMPUESTA `(phaseId, planId) -> Phase(id, planId)`, apoyada en
+// `Phase.@@unique([id, planId])`. Postgres exige que el par exacto
+// (phaseId, planId) exista como una fila real de Phase — es imposible
+// insertar o actualizar una Week con un planId que no sea el de su propia
+// Phase; el motor la rechaza con una violacion de FK ante cualquier intento,
+// no solo cuando el service se equivoca.
+model Week {
+  id         String   @id @default(uuid())
+  phaseId    String   @map("phase_id")
+  planId     String   @map("plan_id")
+  weekNumber Int      @map("week_number")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  phase    Phase     @relation(fields: [phaseId, planId], references: [id, planId], onDelete: Cascade)
+  sessions Session[]
+
+  @@unique([planId, weekNumber])
+  @@index([phaseId])
+  @@map("weeks")
+}
+
+// Sesion de entrenamiento dentro de una semana.
+model Session {
+  id        String   @id @default(uuid())
+  weekId    String   @map("week_id")
+  name      String   @map("name")
+  order     Int      @map("order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  week      Week              @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  exercises SessionExercise[]
+
+  // Mismo criterio que Phase.@@unique([planId, order]): order es
+  // server-side y su unicidad por padre (aqui, por semana) es salvaguarda
+  // de integridad, no solo indice de rendimiento; la columna lider (weekId)
+  // cubre ademas "listar sesiones de una semana".
+  @@unique([weekId, order])
+  @@map("sessions")
+}
+
+// Ejercicio dentro de una sesion del plan. Referencia SIEMPRE
+// exerciseVersionId, NUNCA un exerciseId directo — es como se cumple RN-07:
+// un plan conserva la version del ejercicio vigente al momento de agregarlo,
+// aunque la biblioteca global lo modifique o inhabilite despues. Ningun otro
+// campo de ejecucion (series, repeticiones, descanso) esta definido: ninguna
+// HU/CA de esta epica los pide — se deja para una HU/epica futura si el
+// negocio los requiere (ver riesgos del plan de implementacion).
+model SessionExercise {
+  id                String   @id @default(uuid())
+  sessionId         String   @map("session_id")
+  exerciseVersionId String   @map("exercise_version_id")
+  order             Int      @map("order")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // onDelete: Restrict — un plan historico NUNCA debe perder esta
+  // referencia. Hoy no existe ningun endpoint que borre una ExerciseVersion
+  // ni un hard-delete de Exercise, pero Exercise -> ExerciseVersion SI es
+  // Cascade (EPICA-02): si algun dia se agrega un hard-delete administrativo
+  // de Exercise, este Restrict actua como salvaguarda de base de datos —
+  // Postgres bloquea esa cascada en cuanto encuentra una ExerciseVersion
+  // todavia referenciada por un SessionExercise, obligando a que la
+  // decision de borrar pase primero por isUsedInPlan() en el service, igual
+  // que ya exige EPICA-02 para inhabilitar un ejercicio en uso.
+  exerciseVersion ExerciseVersion @relation(fields: [exerciseVersionId], references: [id], onDelete: Restrict)
+
+  // order es server-side; unicidad por sesion, mismo criterio que Phase/Session.
+  @@unique([sessionId, order])
+  // Indice critico: isUsedInPlan(exerciseId) (decision D-2 del plan) hace
+  // `sessionExercise.count({ where: { exerciseVersion: { exerciseId } } })`,
+  // que hace JOIN contra exercise_versions y filtra session_exercises por
+  // exercise_version_id. Este query corre en CADA PATCH de ejercicio (nota
+  // explicita del plan de implementacion) — sin este indice seria un seq
+  // scan de session_exercises en cada edicion del catalogo.
+  @@index([exerciseVersionId])
+  @@map("session_exercises")
 }

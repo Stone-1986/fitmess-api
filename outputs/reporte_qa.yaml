@@ -1,182 +1,173 @@
 reporte_qa:
-  fecha: "2026-08-05"
+  fecha: "2026-08-20"
   ciclo: 2
   razonamiento: >
-    QUE: valide el fix de ResponseInterceptor.intercept() (unico cambio de este
-    ciclo, acotado a src/modules/common/interceptors/response.interceptor.ts +
-    su spec, sin tocar src/modules/exercises/) y actualice estado de RECHAZADO
-    a APROBADO. POR QUE: el Desarrollador reemplazo `data?.data ?? data` por
-    `data && typeof data === 'object' && 'data' in data ? data.data : data`,
-    que distingue "la clave data existe con valor null" de "la clave no
-    existe" — exactamente la distincion que `??` no podia hacer. Corri los 6
-    gates completos DESPUES de leer el fix (sin escrituras propias posteriores
-    a esa corrida, salvo este mismo reporte): los 6 casos del interceptor que
-    pedia el Lider Tecnico (plano, {data,meta}, {data,message} no-nulo,
-    {data:null,message} — el bug original, null directo, undefined) estan en
-    verde; el e2e de DELETE /exercises/:id sigue asertando
-    `response.body.data === null` explicitamente (nunca lo toque, el
-    Desarrollador tampoco). Revise ademas el riesgo de regresion sobre
-    EPICA-01/09 que el interceptor envuelve globalmente (ver seccion
-    `regresion_response_interceptor`) y no encontre ningun DTO de respuesta
-    del proyecto con un campo propio llamado `data` que pudiera desenvolverse
-    de forma distinta con la nueva expresion. REFERENCIA: mis numeros
-    (test:cov 296/296, common/interceptors 100/100/100/100, test:e2e 71/71)
-    coinciden exactamente con los que el Lider Tecnico ya habia verificado por
-    su cuenta.
+    QUÉ: re-ejecuté los 6 gates completos (no solo openapi:validate) porque el
+    cambio toca DTOs de respuesta que atraviesa el pipeline HTTP completo
+    (ValidationPipe, ResponseInterceptor, Swagger). Confirmé que los 15 campos
+    afectados tienen `type: String` agregado en los 6 DTOs de src/ y que sus 6
+    equivalentes en outputs/contrato_openapi/ son idénticos byte a byte (diff
+    vacío). Inspeccioné outputs/openapi.json regenerado por el propio gate y
+    verifiqué campo por campo que el shape no cambió: mismos 15 campos,
+    `type: string`, `nullable: true`, mismo `example`, misma `description`,
+    mismo `format` donde aplica — solo se agregó la metadata de tipo que
+    faltaba. POR QUÉ: rulesArquitectura §Validación OpenAPI exige el gate y el
+    LT pidió confirmar explícitamente que no hubo cambio de superficie de API.
+    REFERENCIA: spectral --format json devolvió `[]` (0 errores, 0 warnings —
+    los 17 de operation-tag-defined desaparecieron); 443/443 unitarios y
+    159/159 e2e en verde, cobertura idéntica al ciclo 1 (99.59%/100%); `find
+    -newer` confirma que solo se tocaron los 6 DTOs de src/, sus 6 copias en
+    outputs/contrato_openapi/ y scripts/export-openapi.mjs — ningún test ni
+    código de producción adicional.
 
   linting:
     eslint: "PASS"
     prettier: "PASS"
     errores: []
-    observaciones: >
-      `pnpm run lint` → 0 errores, 109 warnings (identico al ciclo 1: mismo
-      patron preexistente `@typescript-eslint/no-unsafe-argument` sobre
-      `app.getHttpServer()` en los e2e-spec, ninguno nuevo). `pnpm run
-      format:check` (cubre src/ y test/) → "All matched files use Prettier
-      code style!". Corrida posterior a la lectura del fix del Desarrollador,
-      sin escrituras mias entre la corrida y este reporte.
-
-  compilacion:
-    build: "PASS"
-    tsc_noemit: "PASS"
-    observaciones: >
-      `pnpm run build` y `npx tsc --noEmit` terminan sin errores. Sin cambios
-      respecto al ciclo 1 en este punto.
 
   cobertura:
     dominio:
-      porcentaje: 97.61
+      porcentaje: 99.59
       target: 80
       cumple: true
-      detalle: >
-        ExercisesService: Stmts 100% / Branch 97.61% / Funcs 100% / Lines 100%
-        (linea 239 sin cubrir, irrelevante para los criterios tecnicos —
-        identico al ciclo 1, este modulo no se toco en este ciclo).
     adaptadores:
       porcentaje: 100
       target: 70
       cumple: true
-      detalle: >
-        ExercisesController: Stmts 100% / Branch 100% / Funcs 100% / Lines 100%
-        (sin cambios respecto al ciclo 1).
-    interceptor_corregido:
-      modulo: "common/interceptors/response.interceptor.ts"
-      porcentaje: 100
-      detalle: >
-        100% en las 4 metricas (Stmts/Branch/Funcs/Lines) — subio desde 0%
-        antes de esta epica. No es un target del plan de EPICA-02 (el archivo
-        es de common/, no de exercises/), se reporta porque es el objeto de la
-        validacion de este ciclo.
 
   tests:
     unitarios:
-      pasaron: 296
+      pasaron: 443
       fallaron: 0
-      observaciones: >
-        296/296 (24 archivos), incluye los 6 casos de
-        response.interceptor.spec.ts (plano; {data,meta} paginado;
-        {data,message} con data no nulo; {data:null,message} — el bug
-        original, ahora en verde; null directo; undefined — los ultimos dos
-        agregados por el Desarrollador en este ciclo) y los 29 unitarios de
-        exercises.service.spec.ts (sin cambios respecto al ciclo 1).
     e2e:
       estado: "PASS"
-      pasaron: 71
+      pasaron: 159
       fallaron: 0
       fallos: []
-      observaciones: >
-        71/71 (auth.e2e-spec.ts 34/34 + exercises.e2e-spec.ts 37/37). El test
-        "DELETE /api/exercises/:id > 200 — inhabilita el ejercicio y retorna
-        { data: null, message } (soft-delete via isActive)" (que yo escribi en
-        el ciclo 1 y no modifique en este ciclo) sigue asertando
-        explicitamente `expect(response.body.data).toBeNull()` — no solo el
-        status 200 — y ahora pasa.
-
-  regresion_response_interceptor:
-    pregunta_lider_tecnico: >
-      El interceptor envuelve TODAS las respuestas del proyecto (EPICA-01,
-      EPICA-09, EPICA-02) aunque solo se haya tocado su codigo y el de
-      exercises/. ¿Hay algun endpoint existente cuya forma de respuesta
-      pudiera cambiar con la nueva expresion, en particular un DTO de
-      respuesta con un campo propio llamado `data`?
-    analisis: >
-      Busque en todo src/ (`grep -rn "  data:" --include=*.dto.ts` y una
-      revision manual de los 5 controllers del proyecto: auth.controller.ts,
-      coach-requests.controller.ts, admin-invitations.controller.ts,
-      exercises.controller.ts, health.controller.ts) y NINGUN DTO de respuesta
-      ni objeto retornado por un controller tiene un campo propio llamado
-      `data` fuera del patron de envelope intencional ya soportado
-      ({ data, meta } en paginacion — coach-requests/search y
-      GET /exercises comparten el mismo shape; { data, message } en
-      operaciones que retornan un mensaje). Tampoco hay ningun controller que
-      retorne un array de forma directa (sin envolver) ni ninguno que retorne
-      `null`/`undefined` fuera de exercises/deactivate(). Comparacion
-      explicita vieja vs nueva expresion, caso por caso:
-        - Objeto plano SIN clave `data` (ej. AthleteRegistrationResponseDto,
-          AuthTokenResponseDto, CoachRequestResponseDto, ExerciseResponseDto):
-          `'data' in data` es false en ambas versiones → mismo resultado
-          (retorna el objeto completo). SIN CAMBIO.
-        - { data: [...], meta } (paginacion, coach-requests/search y
-          GET /exercises): `data.data` es un array truthy en ambas versiones
-          → mismo resultado. SIN CAMBIO.
-        - { data: X, message } con X no nulo (ninguna respuesta actual del
-          proyecto usa este shape con X no nulo — el unico caso real es
-          deactivate() con X=null): tampoco cambia, `data.data` truthy en
-          ambas versiones.
-        - { data: null, message } — SOLO exercises/deactivate() en todo el
-          proyecto usa este shape hoy: este es el caso que cambio
-          deliberadamente (el fix). CAMBIO INTENCIONAL, ya cubierto arriba.
-        - `null`/`undefined` retornado directo por un controller: ningun
-          controller del proyecto lo hace hoy (todos retornan un DTO, un
-          array via { data, meta }, o el shape { data: null, message } de
-          deactivate()). Sin caso real afectado; cubierto igual por los 2
-          tests nuevos del Desarrollador por completitud.
-      CONCLUSION: no encontre ningun endpoint existente de EPICA-01/EPICA-09
-      cuya forma de respuesta cambie con el fix. El unico caso cuyo
-      comportamiento cambia es exactamente el que se queria corregir
-      (DELETE /exercises/:id). Los 71/71 e2e y 296/296 unitarios en verde son
-      consistentes con este analisis estatico.
 
   criterios_de_aceptacion:
-    - id: "a) Cobertura e2e de los 5 endpoints nuevos"
+    - id: "CA-008-1/CA-008-2"
+      descripcion: "Plan se guarda en Borrador completo o incompleto; RN-01 solo bloquea al publicar"
       cumple: true
-      evidencia: "Sin cambios respecto al ciclo 1 — ver historial de este archivo."
-    - id: "b) Orden de validaciones de update() — isUsedInPlan() NO se invoca si esta inhabilitado (CA-006-6)"
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (create, publish/validatePlanCompleteness); plans.e2e-spec.ts POST /api/plans y PLAN_INCOMPLETE"
+    - id: "CA-008-3"
+      descripcion: "SessionExercise persiste exerciseVersionId vigente al momento de agregarse (RN-07)"
       cumple: true
-      evidencia: "Sin cambios respecto al ciclo 1."
-    - id: "c) Unicidad case-insensitive filtrando solo activos — create() y rename de update() (CA-005-2/CA-005-6)"
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'CA-006-1 (EPICA-02) — PATCH de un ejercicio EN USO...' y 'POST .../exercises — 201'"
+    - id: "CA-008-4/CA-008-5"
+      descripcion: "ATHLETE y usuario sin autenticar rechazados en mutaciones de plan"
       cumple: true
-      evidencia: "Sin cambios respecto al ciclo 1."
-    - id: "d) EXERCISE_IN_USE no se usa en ninguna parte del modulo"
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts — 401/403 en los 15 endpoints de PlansController"
+    - id: "CA-008-6"
+      descripcion: "Ownership — solo el coach propietario modifica su plan"
       cumple: true
-      evidencia: "Sin cambios respecto al ciclo 1."
-    - id: "e) Gap CA-006-1/CA-006-3 — declarado explicitamente (no defecto)"
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (findOne/update RESOURCE_OWNERSHIP_DENIED); plans.e2e-spec.ts GET/PATCH 403 con otherCoachToken"
+    - id: "CA-009-1/CA-009-2"
+      descripcion: "publish() transiciona a Publicado o lista requisitos faltantes (PLAN_INCOMPLETE)"
       cumple: true
-      evidencia: "Sin cambios respecto al ciclo 1 — gap sigue declarado, pendiente hasta EPICA-03."
-    - id: "f) DELETE /exercises/:id retorna { data: null, message } tal como documenta el plan"
-      descripcion: >
-        Error critico del ciclo 1 (ver historial): ResponseInterceptor
-        desenvolvia mal un `data: null` explicito.
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (publish, 4 variantes de PLAN_INCOMPLETE); plans.e2e-spec.ts 200/422 con context.missingRequirements"
+    - id: "CA-009-3"
+      descripcion: "unpublish() sin suscriptores regresa el plan a Borrador"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts 'procede cuando hasSubscribers() retorna false'; plans.e2e-spec.ts 200"
+    - id: "CA-009-4"
+      descripcion: "Estructura y fechas inmutables tras publicar (RN-31) — PLAN_IMMUTABLE"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plan-published.guard.spec.ts; plans.service.spec.ts (update); plans.e2e-spec.ts PATCH 409 y POST phases 409 post-publish"
+    - id: "CA-009-5"
+      descripcion: "Ownership en publish/unpublish"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts; plans.e2e-spec.ts 403 con otherCoachToken en publish y unpublish"
+    - id: "CA-009-6"
+      descripcion: "ATHLETE no puede publicar/despublicar"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 403 ATHLETE en publish/unpublish"
+    - id: "CA-009-7"
+      descripcion: "unpublish() rechaza con PLAN_HAS_SUBSCRIBERS si hasSubscribers()=true"
       cumple: true
       evidencia: >
-        Corregido en src/modules/common/interceptors/response.interceptor.ts.
-        Verificado en 3 capas: unitario (response.interceptor.spec.ts, 6 casos
-        en verde), e2e (test/exercises.e2e-spec.ts, assert explicito
-        `data === null`, no solo status 200) y analisis estatico de regresion
-        sobre el resto de la API (ver `regresion_response_interceptor`).
+        SIN CAMBIOS DEL CICLO 1 — GAP DECLARADO, sigue vigente y documentado
+        explícitamente en este ciclo (no se omite): solo verificable con test
+        unitario mockeando hasSubscribers() (plans.service.spec.ts).
+        hasSubscribers() es un stub fijo en false; la rama "con suscritos" NO
+        es verificable end-to-end en esta épica (aceptado por el humano,
+        mismo patrón que CA-006-1 de EPICA-02). Cobertura e2e real llega con
+        EPICA-04.
+    - id: "CA-010-1"
+      descripcion: "Evaluacion perezosa de Finalizado — cualquier consulta muestra el plan vencido como Finalizado"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts computeEffectiveStatus (via findOne/findAll/archive); plans.e2e-spec.ts GET /api/plans/:id status=FINALIZED tras endDate pasada"
+    - id: "CA-010-2"
+      descripcion: "archive() transiciona Borrador/Publicado/Finalizado -> Archivado"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (3 variantes de estado origen); plans.e2e-spec.ts 200 desde Borrador y desde Publicado"
+    - id: "CA-010-3"
+      descripcion: "archive() rechaza si ya esta Archivado"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts INVALID_STATE_TRANSITION; plans.e2e-spec.ts 409"
+    - id: "CA-010-4/CA-010-5"
+      descripcion: "Ownership y rol en archive()"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts; plans.e2e-spec.ts 403 otherCoach y 403 ATHLETE"
+    - id: "CA-011-1"
+      descripcion: "Catalogo lista planes Publicados con perfil publico reducido del entrenador"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts findPublished(); plans.e2e-spec.ts GET /api/catalog/plans — solo id/name/avatarUrl expuestos"
+    - id: "CA-011-2"
+      descripcion: "Detalle del catalogo con estructura (solo conteo de ejercicios) y perfil publico completo del entrenador"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts findPublishedOne(); plans.e2e-spec.ts GET /api/catalog/plans/:id — exerciseCount presente, exercises ausente, description/bannerUrl con y sin CoachRequest APPROVED"
+    - id: "CA-011-3"
+      descripcion: "Planes Borrador/Finalizado/Archivado no aparecen en el catalogo"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'CA-011-3 — un plan Publicado con endDate en el pasado NO aparece en el catalogo'"
+    - id: "CA-011-4"
+      descripcion: "Catalogo rechaza sin autenticacion"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 401 en GET /api/catalog/plans y GET /api/catalog/plans/:id"
+    - id: "CA-006-1 (EPICA-02)"
+      descripcion: "isUsedInPlan(exerciseId) deja de ser stub y consulta SessionExercise real; PATCH de un ejercicio en uso crea version nueva, RN-07 conservada"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — GAP CERRADO END-TO-END. exercises.service.spec.ts (2 tests nuevos con sessionExercise.count mockeado, sin spy sobre isUsedInPlan); plans.e2e-spec.ts test dedicado crea ejercicio -> lo usa en plan -> PATCH -> verifica ExerciseVersion nueva"
+    - id: "FK compuesta Week(phaseId,planId)->Phase(id,planId)"
+      descripcion: "Garantia de base de datos, no solo disciplina del service"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'Postgres RECHAZA insertar una Week cuyo planId no coincide...' — INSERT directo con Prisma saltandose el service, rejects con P2003"
+    - id: "criterio_tecnico_plan — publish() lista requisitos faltantes explicitamente"
+      descripcion: "No usa mensaje generico"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts 4 tests de PLAN_INCOMPLETE con context.missingRequirements especifico por combinacion de estructura faltante"
+    - id: "criterio_tecnico_plan — AddSessionExerciseDto 404/422 sin crear SessionExercise"
+      descripcion: "Ningun caso de error crea el SessionExercise"
+      cumple: true
+      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (create no invocado en los expects); plans.e2e-spec.ts 422 verifica explicitamente que la sesion sigue con 1 solo ejercicio"
+    - id: "gate_openapi_ciclo2 — contrato pasa Spectral sin errores ni warnings"
+      descripcion: "Correccion del ciclo 1 (type: String en 15 propiedades de 6 DTOs, tags plans/plans-catalog en export-openapi.mjs) resuelve el bloqueante sin cambiar el shape del contrato"
+      cumple: true
+      evidencia: >
+        RE-VERIFICADO EN ESTE CICLO. `spectral lint --format json` retorna `[]`
+        (0 resultados: 0 errores, 0 warnings — los 15 oas3-valid-schema-example
+        y los 17 operation-tag-defined del ciclo 1 desaparecieron). Inspección
+        campo por campo de outputs/openapi.json regenerado confirma que los 15
+        campos afectados conservan exactamente {"type":"string","nullable":true,
+        "example":..., "description":..., "format":... (donde aplica)} — mismo
+        shape, solo se agregó la metadata de tipo faltante. Los 6 DTOs de
+        outputs/contrato_openapi/ son idénticos byte a byte a sus contrapartes
+        en src/ (diff vacío en los 6 archivos).
 
   vulnerabilidades: []
-
-  errores_criticos: []
 
   escaneo_automatico:
     ejecutado: false
     motivo_no_ejecucion: >
-      Sin cambios respecto al ciclo 1: el toolset de este agente de QA no
-      incluye una herramienta para invocar `/security-review` ni existe un
-      script equivalente invocable por Bash. El Lider Tecnico ya registro esto
-      como limitacion del modelo (no de este ciclo de QA) y lo asume en el
-      Paso 2.5.
+      SIN CAMBIOS DEL CICLO 1 — el toolset de este agente QA en esta sesion es
+      unicamente Read/Write/Bash/SendMessage, no incluye la capacidad de
+      invocar skills o slash-commands (/security-review). El cambio de este
+      ciclo es exclusivamente metadata de Swagger en DTOs de respuesta (agregar
+      `type: String`) y tags de documentación — no introduce superficie nueva
+      de ataque, así que no amerita una revisión manual de seguridad adicional
+      a la ya realizada en el ciclo 1 (revision_manual_de_seguridad, sin
+      cambios, sigue vigente).
     hallazgos: []
     resumen:
       total: 0
@@ -185,19 +176,32 @@ reporte_qa:
       low: 0
       descartados: 0
 
+  revision_manual_de_seguridad:
+    - item: "Alcance del ciclo 2 respetado (solo DTOs + export-openapi.mjs)"
+      resultado: >
+        OK — `find src test scripts -newer outputs/revision_codigo.yaml`
+        confirma que los únicos archivos fuente modificados son los 6 DTOs de
+        src/modules/plans/dto/, sus 6 copias en
+        outputs/contrato_openapi/src/modules/plans/dto/ y
+        scripts/export-openapi.mjs. plans.service.ts, los controllers,
+        exercises.service.ts y todos los archivos de test quedaron intactos.
+    - item: "Sin cambio de superficie de API (shape del contrato)"
+      resultado: >
+        OK — los 15 campos afectados en outputs/openapi.json regenerado
+        conservan type:string, nullable:true, mismo example y mismo format;
+        solo se corrigió metadata de generación de schema, no la forma de
+        datos expuesta al cliente.
+    - item: "Resto del checklist de seguridad (guards, logs, ownership, PII, comunicacion entre modulos, Supabase)"
+      resultado: "SIN CAMBIOS DEL CICLO 1 — no aplica re-verificación porque plans.service.ts/controllers no fueron tocados en este ciclo. Ver reporte_qa ciclo 1 (git) para el detalle completo del checklist de 11 items, todos OK."
+
   validacion_openapi:
-    ejecutado: false
-    motivo_no_ejecucion: >
-      `pnpm run openapi:validate` sigue fallando en el paso de export por el
-      mismo defecto pre-existente (JwtStrategy recibe ConfigService undefined
-      al bootstrapear con NestFactory.create() en scripts/export-openapi.ts).
-      Registrado formalmente por el Lider Tecnico como hallazgo abierto #8
-      (verificado con `git worktree` sobre el commit anterior a la epica: el
-      gate de Spectral no ha corrido nunca en este proyecto). No corresponde a
-      este ciclo de QA resolverlo.
+    ejecutado: true
+    motivo_no_ejecucion: ""
     errores: 0
     warnings: 0
     detalle: []
+
+  errores_criticos: []
 
   estado: "APROBADO"
   motivo_rechazo: ""

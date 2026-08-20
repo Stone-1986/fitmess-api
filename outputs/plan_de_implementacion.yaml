@@ -1,511 +1,598 @@
 plan_de_implementacion:
   version: "1.0"
-  epica_id: "EPICA-02"
+  epica_id: "EPICA-03"
   ciclo: 1
 
   modulos_afectados:
-    - exercises (modulo nuevo — no existe hoy en src/modules/)
+    - "plans (modulo nuevo — src/modules/plans/)"
+    - "exercises (isUsedInPlan(exerciseId) en exercises.service.ts:345 pasa a consultar SessionExercise real — unico cambio, sin tocar el resto del archivo)"
+    - "common (nuevo guard PlanPublishedGuard en common/guards/, siguiendo el inventario de Temporal Guards de design-patterns skill; el catalogo de BusinessError ya trae PLAN_INCOMPLETE, PLAN_HAS_SUBSCRIBERS, PLAN_IMMUTABLE, INVALID_STATE_TRANSITION, RESOURCE_OWNERSHIP_DENIED, EXERCISE_IN_USE, EXERCISE_INACTIVE, ENTITY_NOT_FOUND, DUPLICATE_ENTITY — todos reutilizables, 0 entries nuevas requeridas)"
+    - "notifications (receptor futuro de plan.published/plan.archived/plan.finalized — NO se implementa listener en esta epica, ver decision D-11)"
+
+  # ── RESUMEN (17 endpoints en 2 controllers) ──────────────────────────────
+  #
+  # PlansController (/plans) — rol COACH exclusivamente (RN-18, sin ADMIN):
+  #   1.  POST   /plans                                          — crear plan (shell)
+  #   2.  GET    /plans                                          — listar planes propios
+  #   3.  GET    /plans/:id                                      — detalle con arbol completo
+  #   4.  PATCH  /plans/:id                                      — editar datos generales
+  #   5.  POST   /plans/:id/phases                                — agregar fase
+  #   6.  DELETE /plans/:id/phases/:phaseId                       — quitar fase
+  #   7.  POST   /plans/:id/phases/:phaseId/weeks                 — agregar semana
+  #   8.  DELETE /plans/:id/weeks/:weekId                         — quitar semana
+  #   9.  POST   /plans/:id/weeks/:weekId/sessions                — agregar sesion
+  #   10. DELETE /plans/:id/sessions/:sessionId                   — quitar sesion
+  #   11. POST   /plans/:id/sessions/:sessionId/exercises         — agregar ejercicio a sesion
+  #   12. DELETE /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId — quitar ejercicio
+  #   13. POST   /plans/:id/publish                               — Borrador → Publicado
+  #   14. POST   /plans/:id/unpublish                             — Publicado → Borrador
+  #   15. POST   /plans/:id/archive                                — cualquiera (no Archivado) → Archivado
+  #
+  # PlansCatalogController (/catalog/plans) — cualquier usuario autenticado:
+  #   16. GET    /catalog/plans                                   — listado de planes Publicados
+  #   17. GET    /catalog/plans/:id                                — detalle + perfil publico del entrenador
+  #
+  # Nota de ruteo: se separa /catalog/plans de /plans/:id a proposito — evita
+  # que NestJS confunda un segmento literal "catalog" con el parametro :id de
+  # PlansController si ambos convivieran bajo /plans (ver decision D-9).
 
   endpoints:
+    # ══════════════════════════════════════════════════════════════════════
+    # HU-008 — Creacion de la plantilla base
+    # ══════════════════════════════════════════════════════════════════════
 
-    # ── HU-005: Crear ejercicio en la biblioteca global ────────────────────────
-    - hu_id: "HU-005"
+    - hu_id: "HU-008"
       metodo: POST
-      ruta: /exercises
+      ruta: /plans
       proposito: >
-        Crea un Exercise y su primera ExerciseVersion (versionNumber = 1) en una
-        sola $transaction atomica — un Exercise sin ninguna version es un estado
-        invalido del dominio. Verifica previamente que no exista otro ejercicio
-        ACTIVO con el mismo name (comparacion case-insensitive, con trim() antes
-        de comparar y de persistir) y rechaza con DUPLICATE_ENTITY si lo hay
-        (CA-005-2). Un name que solo existe en ejercicios inhabilitados NO
-        bloquea la creacion — CA-005-6 confirma explicitamente que crear con el
-        name de uno inhabilitado procede con exito. isActive queda en true por
-        defecto (default del schema). Accesible para COACH y ADMIN (RN-22);
-        ATHLETE no accede a la gestion del catalogo.
-      request_body: CreateExerciseDto
-      response: ExerciseResponseDto (201)
-      errores:
-        - 400  # Validacion: name/description/muscleGroup vacios o exceden longitud
-        - 401  # No autenticado
-        - 403  # Rol insuficiente — no es COACH ni ADMIN
-        - 409  # DUPLICATE_ENTITY — ya existe un ejercicio ACTIVO con ese name (CA-005-2)
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(COACH, ADMIN)
+        Crear el shell del plan (name obligatorio; description, startDate,
+        endDate opcionales) en estado Borrador, sin ninguna fase todavia
+        (CA-008-1 arranca aqui, CA-008-2 permite que el plan quede asi
+        indefinidamente). RN-01 y RN-02 solo se verifican al publicar
+        (HU-009), nunca al crear — ver decision D-3.
+      request_body: CreatePlanDto
+      response: PlanResponseDto (201)
+      errores: [400, 401, 403]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
       eventos: []
       dependencias: []
 
-    # ── HU-005 (CA-005-3) + HU-007 (CA-007-2): Listado del catalogo ────────────
-    - hu_id: "HU-005"
+    - hu_id: "HU-008"
       metodo: GET
-      ruta: /exercises
+      ruta: /plans
       proposito: >
-        Lista el catalogo global de ejercicios con su version vigente embebida
-        (name, description, muscleGroup, versionNumber de la ExerciseVersion de
-        mayor versionNumber). Por defecto filtra isActive = true — los
-        inhabilitados no aparecen (CA-007-2). Acepta includeInactive=true como
-        query param para que un COACH/ADMIN audite el catalogo completo desde el
-        listado ("por defecto" en CA-007-2 implica una via no-default; no hay
-        endpoint de reactivacion, asi que esta es la unica forma de ver
-        inhabilitados en bloque). Paginado con page/limit — la biblioteca es
-        global y crece sin techo. Con includeInactive=true el listado puede
-        mostrar dos filas con el mismo name (una activa, una inhabilitada) —
-        ver riesgo LOW documentado sobre unicidad solo-entre-activos.
-      request_body: null
-      response: "{ data: ExerciseSummaryResponseDto[], meta: PaginationMeta } (200)"
-      errores:
-        - 400  # Validacion de query params (page/limit fuera de rango, tipo invalido)
-        - 401  # No autenticado
-        - 403  # Rol insuficiente — no es COACH ni ADMIN
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(COACH, ADMIN)
+        Listar los planes propios del entrenador autenticado (todos los
+        estados), paginado. Endpoint de soporte no atado a una CA especifica
+        pero necesario para que el entrenador ubique el borrador que esta
+        construyendo — ver decision D-8.
+      response: PlanResponseDto[] + PaginationMeta (200)
+      errores: [401, 403]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
       eventos: []
-      dependencias:
-        - POST /exercises
+      dependencias: [POST /plans]
 
-    # ── HU-006 (CA-006-2) + HU-007 (CA-007-3): Detalle con historial ───────────
-    - hu_id: "HU-006"
+    - hu_id: "HU-008"
       metodo: GET
-      ruta: /exercises/:id
+      ruta: /plans/:id
       proposito: >
-        Retorna el detalle de un ejercicio: sus datos vigentes (name, isActive,
-        description/muscleGroup/versionNumber de la version de mayor
-        versionNumber) mas el historial completo de versiones (versionNumber +
-        createdAt de cada una — CA-006-2). No filtra por isActive: un ejercicio
-        inhabilitado se lee igual, junto con su estado inactivo, para que un plan
-        historico pueda mostrarlo indicando que ya no esta activo en la
-        biblioteca (CA-007-3). El historial va embebido en este endpoint, no en
-        uno propio: es un arreglo acotado (una entrada nueva solo se agrega
-        cuando se edita un ejercicio ya usado en un plan) que no justifica
-        paginacion ni ruta separada.
-      request_body: null
-      response: ExerciseDetailResponseDto (200)
-      errores:
-        - 401  # No autenticado
-        - 403  # Rol insuficiente — no es COACH ni ADMIN
-        - 404  # ENTITY_NOT_FOUND — el ejercicio no existe
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(COACH, ADMIN)
+        Detalle del plan propio con el arbol completo embebido: fases →
+        semanas → sesiones → ejercicios de sesion (con name/description/
+        muscleGroup/versionNumber resueltos desde la ExerciseVersion
+        referenciada). Un solo GET agregado en vez de un GET por nivel —
+        ver decision D-8. CA-008-6 (ownership) via findOwnedOrFail en el
+        service.
+      response: PlanDetailResponseDto (200)
+      errores: [401, 403, 404]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
       eventos: []
-      dependencias:
-        - POST /exercises
+      dependencias: [POST /plans]
 
-    # ── HU-006: Modificar ejercicio (versiona segun uso) ───────────────────────
-    - hu_id: "HU-006"
+    - hu_id: "HU-008"
       metodo: PATCH
-      ruta: /exercises/:id
+      ruta: /plans/:id
       proposito: >
-        Actualiza un ejercicio existente. Orden de validaciones en update(): (1)
-        findOrFail — 404 si no existe (CA-006-4); (2) si isActive = false,
-        rechaza inmediatamente con EXERCISE_INACTIVE sin crear version nueva ni
-        alterar la vigente (CA-006-6) — esta verificacion va ANTES de
-        isUsedInPlan() para no gastar esa consulta en un camino que de todos
-        modos va a rechazar; (3) solo si el ejercicio esta activo, procede con
-        la logica de actualizacion. name es identidad del catalogo y vive en
-        Exercise (no versionado): si se envia, se actualiza directamente sobre
-        Exercise, con el mismo chequeo de unicidad que la creacion — case-
-        insensitive, con trim(), y comparando SOLO contra otros ejercicios
-        ACTIVOS excluyendo el propio (como en create(), un name que solo existe
-        en un ejercicio inhabilitado no bloquea el rename) — rechazando con
-        DUPLICATE_ENTITY si colisiona. Como el paso (2) ya garantiza que solo
-        ejercicios activos llegan aqui, el propio ejercicio editado siempre
-        cuenta como activo en esa comparacion. description/muscleGroup son el
-        contenido de entrenamiento (RN-05) y viven en ExerciseVersion: la
-        decision entre editar en el lugar o crear una version nueva depende de
-        isUsedInPlan(exerciseId) — metodo privado del service que HOY siempre
-        retorna false (ver decision de aislamiento). Si el metodo retorna true:
-        crea ExerciseVersion nueva con versionNumber = version_actual + 1
-        (CA-006-1). Si retorna false: hace update() in-place sobre la
-        ExerciseVersion vigente (CA-006-3).
-      request_body: UpdateExerciseDto
-      response: ExerciseResponseDto (200)
-      errores:
-        - 400  # Validacion: campos exceden longitud o formato invalido
-        - 401  # No autenticado
-        - 403  # Rol insuficiente — no es COACH ni ADMIN
-        - 404  # ENTITY_NOT_FOUND (CA-006-4)
-        - 409  # DUPLICATE_ENTITY — el nuevo name colisiona con otro ejercicio ACTIVO
-        - 422  # EXERCISE_INACTIVE — el ejercicio ya esta inhabilitado (CA-006-6)
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(COACH, ADMIN)
+        Editar name/description en cualquier estado; startDate/endDate solo
+        si el plan sigue en Borrador (RN-31 solo inmoviliza fechas y
+        estructura al publicar — ver decision D-6). CA-008-6 (ownership)
+        via findOwnedOrFail.
+      request_body: UpdatePlanDto
+      response: PlanResponseDto (200)
+      errores: [400, 401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
       eventos: []
-      dependencias:
-        - POST /exercises
+      dependencias: [POST /plans]
 
-    # ── HU-007: Inhabilitar ejercicio ───────────────────────────────────────────
-    - hu_id: "HU-007"
-      metodo: DELETE
-      ruta: /exercises/:id
+    - hu_id: "HU-008"
+      metodo: POST
+      ruta: /plans/:id/phases
       proposito: >
-        Inhabilita un ejercicio (isActive = false). Sigue el patron de soft-delete
-        del proyecto (DELETE → actualizacion de un flag, nunca borrado fisico),
-        aunque el campo interno sea isActive y no archivedAt (convencion propia
-        de ejercicios, ver skill design-patterns §5). La operacion SIEMPRE
-        procede, este o no el ejercicio en uso — NUNCA se verifica ni se bloquea
-        por EXERCISE_IN_USE (CA-007-1, decision del humano 2026-08-05). Las
-        versiones y el ejercicio no se tocan; solo isActive cambia, por lo que
-        los planes existentes conservan intacta la version que ya referenciaban
-        (RN-07). Al pasar a isActive=false, el name del ejercicio queda
-        disponible para que otro ejercicio nuevo o renombrado lo use (CA-005-6),
-        porque la unicidad de name aplica solo entre activos. Si el ejercicio ya
-        estaba inhabilitado, rechaza con EXERCISE_INACTIVE (CA-007-4).
-      request_body: null
-      response: "{ data: null, message: string } (200)"
-      errores:
-        - 401  # No autenticado
-        - 403  # Rol insuficiente — no es COACH ni ADMIN
-        - 404  # ENTITY_NOT_FOUND — el ejercicio no existe
-        - 422  # EXERCISE_INACTIVE — el ejercicio ya estaba inhabilitado (CA-007-4)
-      guards:
-        - JwtAuthGuard
-        - RolesGuard(COACH, ADMIN)
+        Agregar una fase al plan. order se calcula en el service (maximo
+        order existente + 1) — el DTO no lo recibe (decision D-5). Guard
+        PlanPublishedGuard rechaza si el plan no esta en Borrador (una fase
+        nueva es estructura, inmutable tras publicar por RN-31).
+      request_body: AddPhaseDto
+      response: PhaseResponseDto (201)
+      errores: [400, 401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
       eventos: []
-      dependencias:
-        - POST /exercises
+      dependencias: [POST /plans]
+
+    - hu_id: "HU-008"
+      metodo: DELETE
+      ruta: /plans/:id/phases/:phaseId
+      proposito: >
+        Quitar una fase (y en cascada sus semanas/sesiones/ejercicios de
+        sesion — hard-delete real, no soft-delete: solo procede en Borrador,
+        donde nada ha sido usado todavia por un atleta — ver decision D-7).
+      response: "{ data: null, message } (200)"
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/phases]
+
+    - hu_id: "HU-008"
+      metodo: POST
+      ruta: /plans/:id/phases/:phaseId/weeks
+      proposito: >
+        Agregar una semana a una fase. Sin request body — weekNumber se
+        calcula en el service como secuencial a lo largo de TODO el plan
+        (no reinicia por fase), porque EPICA-05 necesita un numero de
+        semana unico y comparable entre fases (WeekClosure, sensaciones
+        semanales — ver decision D-4 y nota para el DBA en riesgos).
+      request_body: "(ninguno)"
+      response: WeekResponseDto (201)
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/phases]
+
+    - hu_id: "HU-008"
+      metodo: DELETE
+      ruta: /plans/:id/weeks/:weekId
+      proposito: >
+        Quitar una semana (cascada a sus sesiones y ejercicios de sesion).
+        Ruta plana — weekId ya identifica univocamente sin arrastrar
+        phaseId (decision D-9).
+      response: "{ data: null, message } (200)"
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/phases/:phaseId/weeks]
+
+    - hu_id: "HU-008"
+      metodo: POST
+      ruta: /plans/:id/weeks/:weekId/sessions
+      proposito: >
+        Agregar una sesion a una semana. order calculado en el service
+        (maximo order existente en la semana + 1).
+      request_body: AddSessionDto
+      response: SessionResponseDto (201)
+      errores: [400, 401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/phases/:phaseId/weeks]
+
+    - hu_id: "HU-008"
+      metodo: DELETE
+      ruta: /plans/:id/sessions/:sessionId
+      proposito: Quitar una sesion (cascada a sus ejercicios de sesion). Ruta plana (decision D-9).
+      response: "{ data: null, message } (200)"
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/weeks/:weekId/sessions]
+
+    - hu_id: "HU-008"
+      metodo: POST
+      ruta: /plans/:id/sessions/:sessionId/exercises
+      proposito: >
+        Agregar un ejercicio de la biblioteca global a una sesion
+        (CA-008-3). El service resuelve exerciseId → ExerciseVersion
+        vigente (mayor versionNumber) en el momento de la llamada y
+        persiste SessionExercise.exerciseVersionId — nunca un puntero al
+        ejercicio (RN-07). Rechaza con ENTITY_NOT_FOUND si el ejercicio no
+        existe (RN-04) y con EXERCISE_INACTIVE (422) si esta inhabilitado
+        (restriccion heredada de CA-007-2 de EPICA-02). Lectura directa de
+        Exercise/ExerciseVersion via PrismaService (compartido, @Global) —
+        NO se importa ExercisesModule ni ExercisesService (decision D-2).
+        Esta es la escritura que hace real isUsedInPlan() de EPICA-02.
+      request_body: AddSessionExerciseDto
+      response: SessionExerciseResponseDto (201)
+      errores: [400, 401, 403, 404, 409, 422]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/weeks/:weekId/sessions]
+
+    - hu_id: "HU-008"
+      metodo: DELETE
+      ruta: /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId
+      proposito: Quitar un ejercicio de una sesion.
+      response: "{ data: null, message } (200)"
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/sessions/:sessionId/exercises]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HU-009 — Publicacion
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-009"
+      metodo: POST
+      ruta: /plans/:id/publish
+      proposito: >
+        Borrador → Publicado. Rechaza con INVALID_STATE_TRANSITION (409) si
+        el estado actual no es Borrador; con PLAN_INCOMPLETE (422) si no
+        cumple RN-01 (name + startDate + endDate + al menos una fase con
+        una semana con una sesion con un ejercicio — CA-009-2). El check de
+        estado NO usa PlanPublishedGuard (ese guard existe para las rutas
+        de estructura; aqui la transicion misma es el objeto de la
+        verificacion — verificarla dos veces por el mismo mecanismo seria
+        circular). findOwnedOrFail cubre CA-009-5.
+      response: PlanResponseDto (200)
+      errores: [401, 403, 404, 409, 422]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
+      eventos: [plan.published]
+      dependencias: [POST /plans/:id/sessions/:sessionId/exercises]
+
+    - hu_id: "HU-009"
+      metodo: POST
+      ruta: /plans/:id/unpublish
+      proposito: >
+        Publicado → Borrador. Rechaza con INVALID_STATE_TRANSITION (409) si
+        el estado actual no es Publicado; con PLAN_HAS_SUBSCRIBERS (409) si
+        hasSubscribers(planId) retorna true (CA-009-7). hasSubscribers es
+        un stub que hoy siempre retorna false — mismo patron que
+        isUsedInPlan de EPICA-02 (decision confirmada del humano). Gap
+        declarado: la rama "con suscritos" NO es verificable e2e en esta
+        epica, solo con test unitario mockeando el stub — debe constar
+        asi en el reporte de QA, no omitirse.
+      response: PlanResponseDto (200)
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
+      eventos: []
+      dependencias: [POST /plans/:id/publish]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HU-010 — Finalizacion (automatica, sin endpoint) y archivo
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-010"
+      metodo: POST
+      ruta: /plans/:id/archive
+      proposito: >
+        Borrador, Publicado o Finalizado → Archivado (CA-010-2). Rechaza
+        con INVALID_STATE_TRANSITION (409) si ya esta Archivado (CA-010-3).
+        No verifica hasSubscribers — RN-27/CA-010-2 no lo exigen para
+        archivar, a diferencia de unpublish. Si el plan estaba Publicado y
+        ya vencio (endDate pasada) pero la columna persistida aun dice
+        PUBLISHED, igual se archiva sin problema: el chequeo es "!= ARCHIVED",
+        no depende de distinguir Publicado de Finalizado (ver decision D-1).
+        Emite plan.finalized ANTES de archivar solo si corresponde
+        (ver logica de resolveEffectiveStatus en decision D-1).
+      response: PlanResponseDto (200)
+      errores: [401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
+      eventos: [plan.archived]
+      dependencias: [POST /plans]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HU-011 — Catalogo (atleta)
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-011"
+      metodo: GET
+      ruta: /catalog/plans
+      proposito: >
+        Listar planes en estado Publicado y NO vencidos (CA-011-1,
+        CA-011-3). Filtro a nivel de query: status=PUBLISHED AND
+        endDate >= now() — un plan Publicado ya vencido queda
+        automaticamente excluido sin depender de que la columna persistida
+        se haya actualizado a FINALIZED (ver decision D-1). Cada item
+        incluye name, startDate, endDate y el perfil publico reducido del
+        entrenador (id, name, avatarUrl).
+      response: PlanCatalogSummaryResponseDto[] + PaginationMeta (200)
+      errores: [401]
+      guards: [JwtAuthGuard]
+      eventos: []
+      dependencias: [POST /plans/:id/publish]
+
+    - hu_id: "HU-011"
+      metodo: GET
+      ruta: /catalog/plans/:id
+      proposito: >
+        Detalle de un plan Publicado y no vencido (CA-011-2): name,
+        description, startDate, endDate, estructura de fases/semanas/
+        sesiones con SOLO la cantidad de ejercicios por sesion (no el
+        detalle de cada ejercicio — no hay CA que lo pida), mas el perfil
+        publico completo del entrenador (CoachProfileResponseDto: id, name,
+        avatarUrl, description, bannerUrl — los dos ultimos con fallback
+        null si el entrenador no tiene CoachRequest aprobada, ver decision
+        D-2b). Un plan que no esta Publicado-y-vigente responde
+        ENTITY_NOT_FOUND (404), igual que si no existiera — el atleta no
+        debe poder distinguir "no existe" de "no esta publicado".
+      response: PlanCatalogDetailResponseDto (200)
+      errores: [401, 404]
+      guards: [JwtAuthGuard]
+      eventos: []
+      dependencias: [GET /catalog/plans]
 
   orden_de_implementacion:
-    - "1. [SCHEMA] Agregar modelos Exercise y ExerciseVersion a prisma/schema.prisma (ver decision de schema) — el DBA finaliza tipos, nullability e indices en su fase"
-    - "2. POST /exercises (HU-005, incluye unicidad solo-entre-activos CA-005-2/CA-005-6)"
-    - "3. GET /exercises (HU-005 CA-005-3, HU-007 CA-007-2)"
-    - "4. GET /exercises/:id (HU-006 CA-006-2, HU-007 CA-007-3)"
-    - "5. PATCH /exercises/:id (HU-006, incluye bloqueo CA-006-6 y unicidad solo-entre-activos en el rename)"
-    - "6. DELETE /exercises/:id (HU-007)"
-    - "7. [E2E] test/exercises.e2e-spec.ts: los dos tests de comportamiento del indice parcial (unicidad y parcialidad) descritos en criterios_de_aceptacion_tecnicos"
+    - POST /plans
+    - GET /plans
+    - GET /plans/:id
+    - PATCH /plans/:id
+    - POST /plans/:id/phases
+    - DELETE /plans/:id/phases/:phaseId
+    - POST /plans/:id/phases/:phaseId/weeks
+    - DELETE /plans/:id/weeks/:weekId
+    - POST /plans/:id/weeks/:weekId/sessions
+    - DELETE /plans/:id/sessions/:sessionId
+    - POST /plans/:id/sessions/:sessionId/exercises  # activa isUsedInPlan real en exercises
+    - DELETE /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId
+    - POST /plans/:id/publish
+    - POST /plans/:id/unpublish
+    - POST /plans/:id/archive
+    - GET /catalog/plans
+    - GET /catalog/plans/:id
 
   decisiones_arquitectonicas:
+    - decision: >
+        D-1. Transicion a Finalizado: evaluacion perezosa en cada lectura,
+        NO job programado. Un helper puro `computeEffectiveStatus(plan)`
+        (mismo patron que `toResponseDto` de ExercisesService) se aplica en
+        TODA respuesta que expone el status de un plan (findOne, findAll,
+        catalogo): si status persistido es PUBLISHED y endDate < now(),
+        retorna FINALIZED sin tocar la base. Ademas, en los puntos de
+        lectura donde el propio coach consulta su plan (GET /plans/:id,
+        GET /plans), se hace un write-through oportunista y no bloqueante
+        (fire-and-forget, mismo patron que AuditMiddleware): si se detecta
+        la transicion, se persiste PUBLISHED→FINALIZED en background Y se
+        emite plan.finalized en ese momento — es el unico punto discreto
+        donde ese evento existe para emitirse. El catalogo (HU-011) NUNCA
+        depende de esa persistencia: filtra siempre por
+        `status=PUBLISHED AND endDate>=now()` a nivel de query, asi que
+        CA-010-1 ("cualquier consulta... debe mostrarlo Finalizado") se
+        cumple por construccion en el momento cero, sin esperar ningun
+        proceso en segundo plano.
+      justificacion: >
+        El proyecto no tiene @nestjs/schedule ni ningun cron hoy — agregarlo
+        solo para este caso es la complejidad que las rules piden evitar
+        (ver "Patrones descartados" del skill design-patterns, mismo
+        argumento de escala MVP). Un cron con granularidad suficiente para
+        cumplir el "a partir de la fecha de fin, CUALQUIER consulta" del
+        CA de forma literal tendria que correr con una frecuencia molesta
+        (minutos) para una garantia que la evaluacion perezosa da gratis e
+        instantanea. El write-through es solo una optimizacion de
+        auto-sanacion para que la columna persistida no quede indefinidamente
+        desactualizada y para tener un punto de emision del evento — no es
+        la fuente de verdad, que siempre es el valor computado.
 
     - decision: >
-        Schema de referencia para el DBA: Exercise (id, name String @unique
-        consideracion-abajo, isActive Boolean @default(true), createdAt,
-        updatedAt) y ExerciseVersion (id, exerciseId, versionNumber Int,
-        description String, muscleGroup String, createdAt, @@unique([exerciseId,
-        versionNumber])). Exactamente el modelo prescrito en design-patterns
-        §1/data-patterns.md seccion 1, sin campos adicionales — name vive en
-        Exercise (no versionado), description y muscleGroup viven en
-        ExerciseVersion (versionado). Señalado para el DBA: description figura
-        como String? (nullable) en el patron de referencia, pero CA-005-1 exige
-        el campo en toda creacion — el DBA debe decidir si lo deja NOT NULL dado
-        que el flujo de creacion siempre lo completa. La anotacion "name String
-        @unique" del patron de referencia YA NO aplica literal: ver decision
-        sobre unicidad solo-entre-activos, que requiere un indice parcial, no
-        un @unique simple de Prisma.
+        D-2. isUsedInPlan(exerciseId) en exercises.service.ts se reemplaza
+        UNICAMENTE en su cuerpo por una consulta real contra SessionExercise
+        via PrismaService: `this.prisma.sessionExercise.count({ where: {
+        exerciseVersion: { exerciseId } } }) > 0`. exercises no importa
+        PlansModule ni ningun service de plans.
       justificacion: >
-        La epica es explicita: "El skill design-patterns prescribe... el modelo
-        Exercise + ExerciseVersion... es el punto de partida esperado, no una
-        sugerencia." No hay ninguna decision del humano que lo reabra en cuanto
-        a los campos; si en cuanto a como se expresa la unicidad de name.
+        rulesCodigo prohibe que un modulo importe SERVICES de otro modulo;
+        no prohibe que dos services lean tablas persistidas a traves del
+        mismo PrismaService (@Global, ya compartido por diseño). Es
+        exactamente el patron que EPICA-02 dejo preparado en el comentario
+        del propio metodo stub.
 
     - decision: >
-        La unicidad de name aplica UNICAMENTE entre ejercicios ACTIVOS
-        (isActive = true), no contra la biblioteca completa. La verificacion en
-        create() y en el rename de update() filtra where: { name: { equals:
-        nombreNormalizado, mode: 'insensitive' }, isActive: true } (mas
-        exclusion del propio id en update()). Un name que solo existe en
-        ejercicios inhabilitados NO bloquea la creacion ni el rename
-        (CA-005-6). El valor de name se normaliza con trim() antes de comparar
-        y antes de persistir, para que "Sentadilla " y "Sentadilla" no se
-        traten como distintos.
+        D-2b. plans lee User y CoachRequest directamente via PrismaService
+        para construir el perfil publico del entrenador (id/name/avatarUrl
+        de User; description/bannerUrl desde CoachRequest.planDescription/
+        bannerUrl filtrando status=APPROVED). NO se importa AuthModule ni
+        AuthService — mismo razonamiento que D-2. Si el coach no tiene una
+        CoachRequest en APPROVED, description y bannerUrl quedan null en
+        CoachProfileResponseDto (campos opcionales) — el plan sigue
+        visible en el catalogo, el perfil solo aparece incompleto.
       justificacion: >
-        Hallazgo del Analista sobre la version anterior de este plan: con
-        CA-006-6 bloqueando la edicion de un ejercicio inhabilitado, y sin
-        reactivacion definida en esta epica, un name de un ejercicio
-        inhabilitado quedaba reservado para siempre — un entrenador que
-        inhabilitara "Sentadilla" por error perdia ese nombre de forma
-        permanente y no podia recrearlo. Decision del humano: CA-005-2 se
-        reescribio para exigir la comparacion solo contra activos, y CA-005-6
-        (nuevo) confirma explicitamente que la creacion con el name de un
-        inhabilitado procede con exito.
+        Resuelve el efecto de borde senalado por el humano sin bloquear la
+        visibilidad del plan por un dato de otro modulo que puede no
+        existir. Alternativa descartada: exigir CoachRequest aprobada como
+        precondicion para publicar — ninguna RN/CA de esta epica lo pide, y
+        lo habria inventado el Arquitecto sin mandato de negocio.
 
     - decision: >
-        La verificacion "¿este ejercicio ya fue usado en un plan?" se aisla en
-        un metodo privado ExercisesService.isUsedInPlan(exerciseId: string):
-        Promise<boolean>, invocado unicamente desde update(). Hoy retorna
-        siempre false — comentario en el codigo debe explicar que EPICA-03 debe
-        reemplazar el cuerpo del metodo por una query real (ej.
-        this.prisma.planExercise.count({ where: { exerciseVersion: { exerciseId }
-        } }) > 0, o el nombre de tabla que defina el DBA de EPICA-03) sin tocar
-        ninguna otra linea de update(). Las dos ramas (true/false) se cubren
-        mockeando este metodo en tests unitarios de update(), no con fixtures
-        de planes reales.
+        D-3. CreatePlanDto solo exige `name`. description, startDate y
+        endDate son opcionales al crear; RN-01 y RN-02 (incluida la fecha
+        de fin obligatoria) se validan integramente en publish(), nunca en
+        create() ni en las rutas de estructura.
       justificacion: >
-        Decision del humano del 2026-08-05: la epica se implementa completa
-        aislando el punto de integracion futuro detras de un unico metodo. Evita
-        que EPICA-03 tenga que tocar la logica de ramificacion de update(), solo
-        el cuerpo de un metodo.
+        CA-008-2 tolera un plan guardado sin estructura; RN-02 dice
+        literalmente "obligatoria para PUBLICAR", no para crear. Tratar
+        ambos requisitos (fechas y estructura) con la misma regla —
+        obligatorios solo al publicar— es mas consistente que exigir
+        fechas de entrada pero tolerar estructura vacia.
 
     - decision: >
-        PATCH /exercises/:id rechaza con EXERCISE_INACTIVE (422) si el
-        ejercicio tiene isActive = false, sin crear version nueva ni alterar la
-        vigente (CA-006-6). Esta verificacion es el primer paso de update()
-        despues de findOrFail() — se ejecuta ANTES de invocar isUsedInPlan(),
-        para no pagar el costo de esa consulta (hoy trivial, pero sera una
-        query real desde EPICA-03) en un camino que de todos modos termina en
-        rechazo. Usa el mismo guard/patron ya establecido en deactivate() para
-        CA-007-4, reutilizando la misma entrada del catalogo de errores.
+        D-4. weekNumber es secuencial a lo largo de TODO el plan (no
+        reinicia por fase), calculado en el service como
+        (count de semanas del plan) + 1 dentro de una transaccion.
       justificacion: >
-        Decision del humano del 2026-08-05 (CA-006-6 agregado a la epica): un
-        ejercicio retirado del catalogo no debe seguir mutandose. Como esta
-        epica no define reactivacion, en la practica el ejercicio queda
-        congelado tras inhabilitarse — coherente con RN-06. Cierra el riesgo
-        MEDIUM que este plan tenia abierto en su version anterior. La perdida
-        permanente del name que esto hubiera causado se resuelve por separado
-        con la decision de unicidad solo-entre-activos.
+        EPICA-05 (WeekClosure, sensaciones semanales de HU-016, RN-09,
+        RN-30, RN-33) necesita un numero de semana comparable y unico en
+        todo el plan, no relativo a la fase. Nota para el DBA: para que
+        una constraint de unicidad (`@@unique([planId, weekNumber])`) sea
+        expresable sin recorrer la relacion Phase, se recomienda
+        denormalizar `planId` directamente en el modelo Week ademas de
+        `phaseId` — decision que corresponde al DBA, no se fuerza aqui.
 
     - decision: >
-        La version vigente de un ejercicio se obtiene por versionNumber
-        descendente (Prisma include: { versions: { orderBy: { versionNumber:
-        'desc' }, take: 1 } }), tanto en el listado (GET /exercises) como en el
-        detalle y en las respuestas de create/update/deactivate. NO se agrega un
-        puntero denormalizado (ej. currentVersionId) en Exercise.
+        D-5. order (en Phase y Session) se calcula server-side como el
+        maximo order existente en el scope padre + 1. Los DTOs de creacion
+        (AddPhaseDto, AddSessionDto) no reciben order del cliente.
       justificacion: >
-        El patron de referencia (ya corregido) elimina explicitamente la
-        referencia a un campo currentVersionId inexistente. Mantener un puntero
-        denormalizado exige una escritura adicional sincronizada en cada
-        append() y un vector de inconsistencia si algun flujo futuro crea una
-        version sin actualizar el puntero. El costo de la alternativa (JOIN con
-        ORDER BY + LIMIT 1 por ejercicio) es trivial con el indice unico
-        @@unique([exerciseId, versionNumber]) ya definido, e incluso en el
-        listado paginado Prisma resuelve el include con take:1 en una sola
-        consulta por relacion, no N+1. A la escala esperada (biblioteca global
-        de una plataforma, no millones de filas) esto no es un cuello de
-        botella; si el DBA mide lo contrario en produccion, es una decision de
-        el, no de este plan.
+        Ninguna CA pide reordenar fases o sesiones; forzar al cliente a
+        calcular y enviar un order correcto es superficie de error sin
+        beneficio funcional en el alcance de esta epica.
 
     - decision: >
-        GET /exercises no usa POST /search como coach-requests (que tiene
-        filtros avanzados combinables). Usa GET con query params: page, limit
-        (mismos defaults que el resto del proyecto: page=1, limit=20 min1
-        max100) e includeInactive (boolean, default false). No se agrega
-        filtro por texto libre (name) ni por muscleGroup: ninguna CA de esta
-        epica lo pide, y agregarlo seria alcance no solicitado.
+        D-6. PATCH /plans/:id permite modificar name/description en
+        cualquier estado. startDate/endDate solo se aceptan si el plan
+        esta en Borrador — si se envian y el plan no esta en Borrador,
+        rechaza con PLAN_IMMUTABLE (409).
       justificacion: >
-        La tabla de convenciones de naming del skill api-first define GET
-        /[recursos] para "Listar" sin filtros complejos — el listado del
-        catalogo es una consulta simple con paginacion, no una busqueda
-        multi-criterio que amerite un body. includeInactive resuelve
-        literalmente la palabra "por defecto" de CA-007-2: sin un modo
-        no-default, esa frase de la HU no tendria contraparte, y como no existe
-        reactivacion, esta es la unica via para que un COACH/ADMIN vea
-        inhabilitados en bloque (no solo por id directo, que ya cubre
-        CA-007-3).
+        RN-31/CA-009-4 inmovilizan explicitamente "la duracion total
+        (fechas)" y "la estructura de fases y semanas" al publicar. Las
+        notas de HU-009 dejan expresamente fuera de alcance si otros campos
+        (como name/description) siguen editables — la lectura mas estrecha
+        y menos inventada es no restringirlos, ya que ninguna RN los
+        menciona como inmutables.
 
     - decision: >
-        El historial de versiones de CA-006-2 se expone embebido en
-        ExerciseDetailResponseDto (GET /exercises/:id), no en un endpoint propio
-        (ej. GET /exercises/:id/versions).
+        D-7. Phase/Week/Session/SessionExercise se eliminan con hard-delete
+        real (no soft-delete, no archivedAt) — la eliminacion solo procede
+        mientras el plan esta en Borrador (PlanPublishedGuard), momento en
+        el que ningun atleta ha tenido contacto con esa estructura todavia.
       justificacion: >
-        El volumen de versiones por ejercicio es acotado por diseno: una entrada
-        nueva solo se crea cuando se edita un ejercicio ya usado en un plan
-        (evento infrecuente, no un log de auditoria de crecimiento continuo). No
-        justifica paginacion propia ni una ruta de sub-recurso. El "supuesto" de
-        la epica ya define el contenido exacto (versionNumber + fecha de
-        creacion), consistente con un array embebido.
+        El patron Soft-Delete del skill design-patterns nombra Plan,
+        Subscription y SessionResult, no las entidades estructurales
+        intermedias del plan. Una vez publicado el plan, esta estructura
+        es inmutable (RN-31) y por tanto nunca vuelve a eliminarse — no hay
+        ningun escenario donde una fase/semana/sesion "usada" deba
+        conservarse borrada logicamente.
 
     - decision: >
-        DELETE /exercises/:id inhabilita el ejercicio y retorna { data: null,
-        message: string }, igual que el patron establecido para archive() de
-        Plan en data-patterns.md seccion 2, aunque el campo interno sea
-        isActive (Boolean) en vez de archivedAt (DateTime).
+        D-7b. Plan NO usa el campo generico `archivedAt` que el skill
+        design-patterns sugiere para el patron Soft-Delete. El estado
+        ARCHIVED ya es uno de los cuatro valores de PlanStatus (RN-27:
+        "Los estados del plan son exactamente cuatro... No existen
+        sub-estados adicionales"). Agregar archivedAt duplicaria esa
+        semantica con dos fuentes de verdad para "esta archivado".
       justificacion: >
-        El skill design-patterns es explicito en que isActive es la convencion
-        de naming propia de ejercicios dentro del mismo patron de "no
-        eliminar, solo marcar" (seccion 5: "Convencion: usar archivedAt...
-        Para ejercicios, usar isActive"). La forma de respuesta se mantiene
-        igual para no introducir un contrato distinto para el mismo tipo de
-        operacion (retirar un recurso del catalogo activo sin borrarlo).
+        Cierre de una inconsistencia entre el ejemplo generico del skill
+        (escrito antes de que se confirmara la jerarquia Fase/Semana) y la
+        restriccion explicita y posterior de RN-27. Se documenta aqui para
+        que el Documentador y el Desarrollador no hereden el ejemplo del
+        skill literalmente para Plan. Recomendado como ajuste futuro del
+        skill fuera de esta epica.
 
     - decision: >
-        Los 5 endpoints usan uniformemente JwtAuthGuard + RolesGuard(COACH,
-        ADMIN). Ningun endpoint de esta epica admite ATHLETE.
-      justificacion: >
-        La restriccion de la epica dice "El atleta no accede a la gestion del
-        catalogo" para create/update/deactivate. Ninguna CA de HU-005/006/007
-        ejercita el acceso de ATHLETE al listado o detalle tampoco (CA-005-3
-        habla de "cualquier entrenador"). El acceso de ATHLETE al catalogo de
-        ejercicios (vía planes) es contenido de EPICA-03, no de esta epica —
-        abrir GET /exercises a ATHLETE aqui seria construir contra un
-        requisito no especificado.
+        D-7c. No se crea ninguna tabla de historial tipo `PlanHistory`
+        (el ejemplo generico de nestjs-conventions/module-patterns.md la
+        menciona de paso). El rastro de mutaciones HTTP ya lo cubre
+        AuditLog via AuditMiddleware (EPICA-02); ninguna CA de esta epica
+        pide un historial de transiciones de plan distinto de eso.
+      justificacion: Evitar sobre-ingenieria — no crear una tabla sin un requisito que la respalde.
 
     - decision: >
-        No se emite ningun evento (@nestjs/event-emitter) en esta epica.
+        D-8. GET /plans/:id devuelve el arbol completo embebido (fases →
+        semanas → sesiones → ejercicios de sesion) en una sola respuesta,
+        en vez de un GET por nivel (GET .../phases, GET .../weeks, etc).
+        Las mutaciones (POST/DELETE), en cambio, son granulares por nivel.
       justificacion: >
-        El catalogo de eventos (design-patterns §7) no tiene listeners
-        definidos para acciones sobre ejercicios, y ninguna HU de esta epica
-        pide notificar a otro modulo. Emitir un evento sin consumidor conocido
-        seria especular sobre un contrato futuro. Si una iteracion posterior lo
-        requiere (ej. notifications avisando a coaches de un nuevo ejercicio),
-        se agrega sin romper los endpoints ya definidos.
+        Separar lectura (agregada) de escritura (incremental) da lo mejor
+        de ambos: una UI de constructor de planes puede pedir el arbol
+        completo una vez para renderizar el editor, y enviar cada cambio
+        como una operacion incremental y auditable — sin necesitar 4 GETs
+        adicionales que ninguna CA pide.
 
     - decision: >
-        No se agregan entradas nuevas al catalogo de BusinessError. Se
-        reutilizan ENTITY_NOT_FOUND (404), DUPLICATE_ENTITY (409),
-        EXERCISE_INACTIVE (422), todas ya existentes.
+        D-9. Convencion de rutas: el `:id` del plan siempre esta presente
+        (es la clave para ownership y para PlanPublishedGuard). Para crear
+        un sub-recurso se usa la ruta con el padre inmediato
+        (`/plans/:id/phases/:phaseId/weeks`); para leer/eliminar un
+        sub-recurso ya creado se usa la ruta plana con su propio id
+        (`/plans/:id/weeks/:weekId`), sin arrastrar toda la cadena de
+        ancestros.
       justificacion: >
-        La epica confirma que EXERCISE_INACTIVE y EXERCISE_IN_USE ya fueron
-        agregadas de forma anticipada al catalogo. EXERCISE_IN_USE
-        explicitamente NO se usa en esta epica (CA-007-1 y decision del humano
-        2026-08-05 lo prohiben). No hay ningun error de esta epica que no
-        encaje en una entrada existente.
+        phaseId/weekId/sessionId son UUID globales y univocos — repetir
+        toda la cadena de ancestros en cada DELETE no agrega seguridad
+        (la ownership se resuelve siempre contra planId) y si agrega rutas
+        de 6 segmentos dificiles de mantener.
 
     - decision: >
-        La verificacion de name duplicado usa comparacion case-insensitive con
-        trim() (Prisma where: { name: { equals: nombreNormalizado, mode:
-        'insensitive' }, isActive: true }) tanto en create() como en el rename
-        de update(). Ademas, el catch de la escritura debe capturar el codigo
-        de error P2002 (violacion de constraint unico) de Prisma y traducirlo a
-        BusinessException(BusinessError.DUPLICATE_ENTITY) como red de
-        seguridad ante condiciones de carrera.
+        D-10. /catalog/plans y /catalog/plans/:id viven en un controller
+        separado (PlansCatalogController) del mismo modulo `plans`, en vez
+        de bajo /plans junto con las rutas del entrenador.
       justificacion: >
-        El check-then-insert sin transaccion serializable tiene una ventana de
-        carrera entre dos requests concurrentes con el mismo name. Capturar
-        P2002 como fallback evita que una condicion de carrera se traduzca en
-        un TechnicalException/500 en vez de un 409 de negocio claro. El
-        indice que cierra la ventana de carrera a nivel de base de datos ya NO
-        es un UNIQUE(lower(name)) simple: debe ser un indice UNICO PARCIAL —
-        CREATE UNIQUE INDEX ... ON exercises (lower(name)) WHERE is_active =
-        true — para que el constraint de base de datos refleje la misma regla
-        de negocio de unicidad solo-entre-activos (CA-005-2/CA-005-6). Un
-        UNIQUE simple rechazaria creaciones legitimas que la regla de negocio
-        permite. Queda asignado al DBA (ver riesgos_identificados).
+        Evita la ambiguedad de ruteo de NestJS entre un segmento literal
+        ("catalog") y un parametro (":id") si convivieran en el mismo
+        prefijo, y separa limpiamente las dos audiencias (COACH que
+        construye, cualquier usuario autenticado que explora) con guards
+        distintos por controller en vez de por endpoint.
 
     - decision: >
-        Dos tests e2e en test/exercises.e2e-spec.ts (DB real, test:e2e es gate
-        duro) blindan el comportamiento del indice parcial en lugar de su
-        implementacion: (1) UNICIDAD — insertar dos ejercicios ACTIVOS cuyos
-        names difieren solo en mayusculas ('Sentadilla' y 'sentadilla')
-        escribiendo directo a la base (raw SQL o Prisma sin pasar por el
-        service, saltando el pre-check), esperando que el segundo INSERT sea
-        rechazado por la base de datos; (2) PARCIALIDAD — insertar un
-        ejercicio INHABILITADO y luego uno ACTIVO con el mismo name, por la
-        misma via directa, esperando que el segundo INSERT proceda sin error
-        (protege CA-005-6). Ambos limpian sus filas al terminar, como el resto
-        de la suite e2e.
+        D-11. plans emite plan.published y plan.archived (y plan.finalized
+        desde el path de auto-sanacion de D-1) al EventEmitter2, cumpliendo
+        el catalogo de eventos del skill design-patterns. NO se implementa
+        ningun listener en notifications en esta epica.
       justificacion: >
-        Verificar el indice contra pg_indexes solo confirma que existe una fila
-        con ese nombre de indice — pasaria igual si alguien lo reemplazara por
-        un UNIQUE (name) normal con el mismo nombre, que es exactamente el
-        error que rompe CA-005-6 en silencio. Los tests de comportamiento
-        (insertar y observar si la base de datos rechaza o acepta) detectan esa
-        regresion aunque cambie la implementacion del indice. Van en e2e con DB
-        real porque un unitario con Prisma mockeado no puede ver un indice de
-        Postgres; test:e2e es gate duro desde hoy. Escriben directo a la tabla
-        (no via create()) porque el objetivo es probar la garantia de la base
-        de datos, no la del service — esa ya esta cubierta por los tests de
-        create(). Decision del humano en respuesta al hallazgo abierto #7 de
-        outputs/execution-log.md: el DBA sostiene que el indice sobrevive a
-        futuros `prisma migrate dev`, pero no esta comprobado en este proyecto,
-        y si desapareciera en silencio nada se rompe hasta que existan dos
-        ejercicios activos con el mismo nombre.
+        Ninguna CA de HU-008 a HU-011 pide el envio de una notificacion.
+        Emitir el evento sin consumidor es el mismo patron ya aceptado en
+        el proyecto para dejar un punto de integracion preparado (como
+        hasSubscribers/isUsedInPlan) — construir el listener ahora seria
+        anticipar alcance de una funcionalidad no pedida.
+
+    - decision: >
+        D-12. Las rutas de PlansController (mutacion) exigen exactamente
+        `@Roles(UserRole.COACH)`, sin ADMIN — a diferencia de
+        ExercisesController, que si incluye ADMIN.
+      justificacion: >
+        Restriccion explicita del epica_input: "el documento fuente no le
+        da al rol ADMIN ninguna funcion sobre planes". Replicar el patron
+        de exercises (COACH + ADMIN) por habito habria sido un error de
+        alcance no pedido.
 
   criterios_de_aceptacion_tecnicos:
-    - "Cobertura de dominio (ExercisesService) >= 80%"
-    - "Cobertura de adaptadores (ExercisesController) >= 70%"
-    - "isUsedInPlan() cubierto con ambas ramas (true/false) mockeadas en tests unitarios de update() — cubre CA-006-1 y CA-006-3 a nivel unitario"
-    - "Todos los endpoints documentan sus errores con @ApiProblemResponse segun la tabla de este plan"
-    - "La creacion de un ejercicio (Exercise + ExerciseVersion versionNumber=1) ocurre dentro de una sola $transaction — nunca queda un Exercise sin ninguna ExerciseVersion"
-    - "El chequeo de name duplicado (create y rename) filtra isActive=true y normaliza con trim() antes de comparar — un name que solo existe en un ejercicio inhabilitado NO bloquea la creacion ni el rename (CA-005-6)"
-    - "El rechazo por name duplicado usa BusinessError.DUPLICATE_ENTITY (409) tanto en create() como en el rename de update(), solo cuando el name colisiona con un ejercicio ACTIVO"
-    - "El rechazo por doble inhabilitacion usa BusinessError.EXERCISE_INACTIVE (422), nunca EXERCISE_IN_USE"
-    - "update() verifica isActive === false ANTES de invocar isUsedInPlan() y rechaza con EXERCISE_INACTIVE (422) sin crear version nueva ni alterar la vigente (CA-006-6) — test unitario debe verificar que isUsedInPlan() NO se invoca en este camino"
-    - "GET /exercises filtra isActive=true por defecto y solo incluye inhabilitados si includeInactive=true"
-    - "GET /exercises/:id retorna un ejercicio inhabilitado sin filtrarlo, con isActive=false visible en la respuesta (CA-007-3)"
-    - "test/exercises.e2e-spec.ts — test de UNICIDAD del indice parcial: insertar dos ejercicios ACTIVOS con names que difieren solo en mayusculas ('Sentadilla'/'sentadilla') escribiendo directo a la base (no via service, saltando el pre-check); el segundo INSERT debe ser rechazado por la base de datos. Limpia sus filas al terminar."
-    - "test/exercises.e2e-spec.ts — test de PARCIALIDAD del indice: insertar un ejercicio INHABILITADO y luego uno ACTIVO con el mismo name, escribiendo directo a la base; el segundo INSERT debe proceder sin error (protege CA-005-6). Limpia sus filas al terminar."
-    - "pnpm run build pasa sin errores — gate duro"
-    - "npx tsc --noEmit pasa sin errores — gate duro"
+    - "Cobertura de dominio (PlansService) >= 80% lineas/funciones/statements, >= 75% branches — medido por archivo (perFile: true)"
+    - "Cobertura de adaptadores (PlansController, PlansCatalogController) >= 70%"
+    - "exercises.service.spec.ts agrega un test que verifica que isUsedInPlan() consulta SessionExercise (mock de Prisma) y retorna true/false segun corresponda — cierra el gap declarado de CA-006-1 de EPICA-02"
+    - "Todos los endpoints documentan sus respuestas de error con @ApiProblemResponse"
+    - "publish() lanza PLAN_INCOMPLETE listando explicitamente los requisitos faltantes (name, fechas, fase/semana/sesion/ejercicio) — no un mensaje generico"
+    - "Test unitario que verifica que archivar un plan Publicado-y-vencido (endDate pasada, status persistido aun PUBLISHED) procede sin error — valida que D-1 no acopla archive() a una coercion previa a FINALIZED"
+    - "Test unitario de unpublish() mockeando hasSubscribers() en true y en false — ambas ramas cubiertas (gap e2e declarado y aceptado hasta EPICA-04)"
+    - "Test e2e del catalogo que crea un plan Publicado con endDate en el pasado y verifica que NO aparece en GET /catalog/plans (valida el filtro por query, no solo el campo computado)"
+    - "AddSessionExerciseDto rechaza con EXERCISE_INACTIVE (422) un ejercicio inhabilitado, y con ENTITY_NOT_FOUND (404) uno inexistente, sin crear el SessionExercise en ningun caso"
 
   riesgos_identificados:
-
-    - riesgo: >
-        CA-006-1 y CA-006-3 (la rama de version-nueva vs edicion-en-el-lugar de
-        update()) no son verificables end-to-end en esta epica: no existe tabla
-        de planes contra la cual isUsedInPlan() pueda resolverse todavia. Solo
-        quedan cubiertas por tests unitarios que mockean el metodo.
-      mitigacion: >
-        Ya documentado explicitamente en la epica (notas de HU-006) como gap
-        aceptado. El reporte de QA debe registrarlo como gap explicito, no
-        omitirlo. La cobertura e2e real llega con EPICA-03 cuando conecte
-        isUsedInPlan() a una query real.
-      nivel: LOW
-
-    - riesgo: >
-        La unicidad case-insensitive de name (ahora acotada a activos, con
-        trim()) se verifica en el service (check-then-insert + catch de P2002
-        como red de seguridad), pero el indice a nivel de base de datos debe
-        ser un UNIQUE PARCIAL, no un @unique simple de Prisma. Dos requests
-        concurrentes con variantes de mayusculas/espacios del mismo name,
-        ambos sobre ejercicios que quedarian activos, podrian pasar el check
-        de aplicacion antes de que el indice de base de datos exista o si el
-        indice no queda bien formado, generando un duplicado real entre dos
-        ejercicios activos. Ademas, si el indice parcial se pierde en un
-        futuro `prisma migrate dev` (el DBA sostiene que sobrevive, pero no
-        esta comprobado en este proyecto) o se reemplaza por error por un
-        UNIQUE simple, la garantia desaparece EN SILENCIO — nada se rompe hasta
-        que aparezcan dos ejercicios activos con el mismo name. Hallazgo
-        abierto #7 en outputs/execution-log.md.
-      mitigacion: >
-        Asignado al DBA: crear un indice unico PARCIAL por SQL crudo en la
-        migracion de EPICA-02 — CREATE UNIQUE INDEX ... ON exercises
-        (lower(name)) WHERE is_active = true. Un indice simple
-        UNIQUE(lower(name)) ya NO aplica: la regla de negocio es unicidad solo
-        entre activos (CA-005-2/CA-005-6), asi que el constraint de base de
-        datos debe reflejar la misma condicion parcial que el check de
-        aplicacion, o el constraint rechazaria creaciones legitimas que la
-        regla de negocio permite (name repetido con un inhabilitado). Ademas,
-        ya no descansa solo en esa instruccion de migracion: dos tests e2e en
-        test/exercises.e2e-spec.ts (ver criterios_de_aceptacion_tecnicos y la
-        decision arquitectonica correspondiente) prueban el COMPORTAMIENTO del
-        indice contra la base de datos real — uno confirma que rechaza el
-        duplicado case-insensitive entre activos, otro confirma que permite el
-        duplicado cuando uno de los dos esta inhabilitado. Si el indice
-        desaparece o se reemplaza por un UNIQUE simple, alguno de los dos falla
-        en CI (test:e2e es gate duro) antes de llegar a produccion.
-      nivel: LOW
-
-    - riesgo: >
-        design-patterns/data-patterns.md seccion 1 declara description como
-        String? (nullable) en ExerciseVersion, pero CA-005-1 exige el campo en
-        toda creacion (DTO lo marca @IsNotEmpty). Si el DBA copia el schema de
-        referencia literal, el schema permitiria description NULL aunque
-        ningun flujo de la API lo produzca, dejando una inconsistencia entre
-        el contrato HTTP y el schema de base de datos.
-      mitigacion: >
-        Ya senalado en la decision de schema de este plan. El DBA decide si
-        description pasa a String (NOT NULL) al disenar el schema final de
-        EPICA-02 — no requiere cambios en el plan de endpoints ni en los DTOs,
-        que ya tratan el campo como requerido.
-      nivel: LOW
-
-    - riesgo: >
-        name no se versiona (vive en Exercise, no en ExerciseVersion). Un
-        rename afecta retroactivamente como se ve el ejercicio en todos los
-        planes historicos que lo referencian — no hay forma de recuperar el
-        nombre exacto que un plan vio al construirse.
-      mitigacion: >
-        Revisado y aceptado por el humano el 2026-08-05: se mantiene name en
-        Exercise (no versionado) tal como prescribe design-patterns §1. El
-        caso comun es corregir una errata de tipeo, y ahi propagar el nombre
-        corregido a planes historicos es el comportamiento deseado. Riesgo
-        cerrado — no reabrir en revision de Lider Tecnico salvo que aparezca
-        un requisito nuevo en EPICA-03 que exija el nombre historico exacto.
-      nivel: LOW
-
-    - riesgo: >
-        Dos ejercicios pueden compartir el mismo name si uno esta inhabilitado
-        — consecuencia directa de CA-005-2/CA-005-6 (unicidad solo entre
-        activos). Los planes historicos que ya referencian al inhabilitado
-        conservan su exerciseVersionId intacto, asi que no hay ambiguedad en
-        los datos — pero un listado con includeInactive=true puede mostrar dos
-        filas con el mismo name (una activa, una inhabilitada), lo cual puede
-        sorprender a un cliente que asuma unicidad global del catalogo.
-      mitigacion: >
-        Documentado explicitamente en este plan para que EPICA-03 y el
-        frontend no asuman unicidad global de name — solo es unico entre
-        activos. El campo isActive ya viaja en ExerciseSummaryResponseDto y
-        permite al cliente diferenciar ambas filas sin cambios de contrato
-        adicionales si se necesita distinguirlas visualmente.
-      nivel: LOW
+    - >
+        El skill design-patterns (SKILL.md §2 y behavior-patterns.md §1) y
+        nestjs-conventions/module-patterns.md §6 fueron escritos ANTES de
+        la decision confirmada de jerarquia Fase/Semana (2026-08-20): sus
+        ejemplos muestran Plan.sessions directo (sin Phase/Week como
+        entidades), un campo `archivedAt` en Plan y una tabla `planHistory`
+        que este plan descarta explicitamente (D-1, D-7b, D-7c). El
+        Desarrollador debe seguir ESTE plan, no los fragmentos de codigo
+        de esos skills al pie de la letra. Se recomienda que, tras el
+        CHECKPOINT 1, alguien actualice esos ejemplos para que EPICA-04/05
+        no hereden el mismo desfase — fuera del alcance de este plan.
+    - >
+        La consulta de GET /plans/:id (arbol completo) hace un JOIN
+        profundo de 4 niveles (Phase→Week→Session→SessionExercise, mas
+        ExerciseVersion). Con `include` anidado de Prisma es una sola
+        consulta, pero conviene que el Desarrollador mida el plan de
+        ejecucion si el numero de fases/semanas/sesiones crece — no
+        esperado como problema a la escala MVP (~23 usuarios) del
+        proyecto, se documenta para no sorprender en EPICA-05.
+    - >
+        Ninguna HU/CA de esta epica define parametros de ejecucion del
+        ejercicio dentro de una sesion del plan (series, repeticiones,
+        descanso). SessionExercise queda deliberadamente minimo: id,
+        sessionId, exerciseVersionId, order, createdAt. Si el negocio los
+        requiere, es una decision de producto pendiente para una HU o
+        epica futura — no se asume ni se inventa aqui.
+    - >
+        El write-through oportunista de D-1 (persistir FINALIZED al
+        detectarlo en una lectura del propio coach) puede ejecutar una
+        escritura de mas si dos requests concurrentes leen el mismo plan
+        vencido antes de que la primera escritura complete. Es idempotente
+        (la segunda escritura pone el mismo valor) y no bloqueante — no
+        requiere lock ni transaccion adicional, pero se documenta para que
+        QA no lo reporte como bug.
+    - >
+        La denormalizacion de planId en el modelo Week (recomendada en D-4
+        para permitir `@@unique([planId, weekNumber])`) es una decision
+        que corresponde al DBA en el siguiente paso del flujo, no a este
+        plan — se deja registrada aqui para que no se pierda.
+    - >
+        CA-009-7 (rechazo de unpublish por suscriptores) no es verificable
+        end-to-end en esta epica porque hasSubscribers() es un stub fijo
+        en false — mismo gap ya aceptado por el humano para EPICA-04.
+        Recordatorio explicito para que el QA lo declare en su reporte, no
+        lo omita (mismo tratamiento que CA-006-1 de EPICA-02).

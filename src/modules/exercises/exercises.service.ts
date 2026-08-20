@@ -330,21 +330,19 @@ export class ExercisesService {
   }
 
   /**
-   * Punto de integracion con EPICA-03 (planes). HOY siempre retorna false
-   * porque no existe tabla de planes contra la cual resolver la consulta.
-   *
-   * EPICA-03 debe reemplazar UNICAMENTE el cuerpo de este metodo por una
-   * query real, por ejemplo:
-   *   const count = await this.prisma.planExercise.count({
-   *     where: { exerciseVersion: { exerciseId } },
-   *   });
-   *   return count > 0;
-   * (o el nombre de tabla que defina el DBA de EPICA-03), sin tocar ninguna
-   * otra linea de update().
+   * Punto de integracion con EPICA-03 (planes), conectado: consulta real
+   * contra SessionExercise, la tabla que EPICA-03 usa para vincular un
+   * ejercicio de la biblioteca a una sesion de un plan (CA-008-3). Un
+   * ejercicio esta "en uso" si alguna SessionExercise referencia, a traves
+   * de su exerciseVersionId, una ExerciseVersion de este exerciseId — sin
+   * importar cual version especifica, porque RN-07 exige que la sesion
+   * conserve la version que tenia al momento de agregarse, no la vigente.
    */
-  private isUsedInPlan(exerciseId: string): Promise<boolean> {
-    void exerciseId;
-    return Promise.resolve(false);
+  private async isUsedInPlan(exerciseId: string): Promise<boolean> {
+    const count = await this.prisma.sessionExercise.count({
+      where: { exerciseVersion: { exerciseId } },
+    });
+    return count > 0;
   }
 
   /**

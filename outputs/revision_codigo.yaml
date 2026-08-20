@@ -1,19 +1,28 @@
 revision_codigo:
-  fecha: "2026-08-05"
+  fecha: "2026-08-20"
   ciclo: 2
-  epica_id: "EPICA-02"
+  epica_id: "EPICA-03"
   razonamiento: >
-    QUÉ: valido el fix de response.interceptor.ts:42 (única causa del rechazo
-    del ciclo 1) y superviso el análisis de regresión sobre EPICA-01/09, dado
-    que el interceptor envuelve toda la API. POR QUÉ: la nueva expresión
-    (`'data' in data ? data.data : data`) distingue clave-presente-con-null de
-    clave-ausente, que era exactamente el defecto; verifiqué yo mismo (no solo
-    el QA) que ningún DTO de respuesta del proyecto declara un campo propio
-    `data` y que los únicos 3 shapes `{ data, ... }` retornados por un
-    controller en todo src/ son los 2 paginados (`{data: array, meta}`) y
-    `deactivate()` (`{data: null, message}`) — sin caso de regresión posible.
-    REFERENCIA: response.interceptor.ts:42-50, salida del orquestador (296/296
-    unitarios, 71/71 e2e, coincide con los números del QA).
+    QUÉ: verifiqué las 3 instrucciones del ciclo 1 leyendo los 6 DTOs
+    corregidos en src/modules/plans/dto/, sus 6 copias en
+    outputs/contrato_openapi/src/modules/plans/dto/ y
+    scripts/export-openapi.mjs, campo por campo y byte por byte — no me apoyé
+    únicamente en el reporte del QA ni en la salida de gates del orquestador.
+    POR QUÉ: la condición bajo la cual dictaminé en el ciclo 1 que el fix NO
+    requería escalar al humano era que no cambiara ningún campo, tipo
+    expuesto, nulabilidad ni ejemplo — esa condición hay que confirmarla
+    contra el código, no solo contra "Spectral pasa". REFERENCIA: los 15
+    `@ApiPropertyOptional` en los 6 DTOs de src/ tienen `type: String` (líneas
+    exactas verificadas: plan-response.dto.ts:41,50,59;
+    plan-detail-response.dto.ts:35,44,53; coach-summary-response.dto.ts:33;
+    coach-profile-response.dto.ts:46,58,68;
+    plan-catalog-summary-response.dto.ts:32,41;
+    plan-catalog-detail-response.dto.ts:36,45,54); las 6 copias en
+    outputs/contrato_openapi/ son idénticas carácter por carácter a sus
+    contrapartes en src/ (comparación directa, no diff de herramienta); y
+    export-openapi.mjs:50-57 agrega exactamente `.addTag('plans', ...)` y
+    `.addTag('plans-catalog', ...)`, en el mismo lugar y con el mismo patrón
+    que los 5 tags preexistentes.
 
   linting:
     eslint: "PASS"
@@ -25,68 +34,44 @@ revision_codigo:
 
   cobertura:
     dominio:
-      porcentaje: 97.61
+      porcentaje: 99.59
       target: 80
       cumple: true
-      detalle: "ExercisesService — sin cambios respecto al ciclo 1."
+      detalle: "Idéntica al ciclo 1 — plans.service.ts no fue tocado en este ciclo."
     adaptadores:
       porcentaje: 100
       target: 70
       cumple: true
-      detalle: "ExercisesController — sin cambios respecto al ciclo 1."
-    nota: >
-      common/interceptors/response.interceptor.ts pasó de 0% a 100% en las 4
-      métricas. No es un target del plan de EPICA-02 (el archivo es de
-      common/), pero cierra la porción de ese archivo en el hallazgo abierto
-      #2b de execution-log.md (deuda de cobertura). #2b sigue ABIERTO en su
-      totalidad — otros archivos que lista (validation-exception.filter.ts,
-      correlation-id.middleware.ts, prisma.service.ts) no se tocaron en este
-      ciclo y siguen pendientes; no corresponde cerrarlo, solo actualizar que
-      response.interceptor.ts ya no es parte de la deuda.
+      detalle: "Idéntica al ciclo 1 — los controllers no fueron tocados en este ciclo."
 
   suite_e2e:
     estado: "PASS"
-    detalle: "71/71 — el test de DELETE /exercises/:id asertando data === null pasa."
+    detalle: >
+      159/159 en 4 archivos, mismo conteo exacto que el ciclo 1 — esperado,
+      porque el cambio es metadata de Swagger sobre DTOs de respuesta
+      construidos manualmente en el service (mapPlanResponseDto y análogos,
+      sin class-validator ni class-transformer de por medio), no afecta el
+      comportamiento HTTP en ningún endpoint.
 
   patrones:
     violaciones: []
-    notas_no_bloqueantes:
-      - archivo: "src/modules/exercises/exercises.module.ts"
-        descripcion: >
-          Sin cambios respecto al ciclo 1: ExercisesModule importa AuthModule
-          para los guards. No bloquea. Ver dictamen del ciclo 1 — sigue en
-          pie: decisión pendiente del humano antes de EPICA-03 (declarar
-          `auth` como excepción formal en rulesCodigo o mover los guards a
-          common/). No se re-evalúa aquí porque el fix de este ciclo no tocó
-          este archivo.
-
-  fix_response_interceptor:
-    verificado: true
-    detalle: >
-      Línea 42-50 reescrita: `data && typeof data === 'object' && 'data' in
-      data ? data.data : data`. Verifiqué manualmente los 5 shapes posibles
-      contra la expresión: objeto plano sin clave `data` → retorna el objeto
-      completo (sin cambio); `{data: [...], meta}` → retorna el array (sin
-      cambio); `{data: X, message}` con X no nulo → retorna X (sin cambio,
-      ningún endpoint real usa este shape hoy); `{data: null, message}` →
-      retorna null (ESTE es el fix); `null`/`undefined` directo → se
-      preserva (ningún controller lo hace hoy, cubierto por completitud). Los
-      6 casos de response.interceptor.spec.ts (3 preexistentes + 3 nuevos:
-      null-explícito-con-message, null-directo, undefined-directo) están en
-      verde. Alcance respetado: solo este archivo y su spec,
-      src/modules/exercises/ intacto.
-    regresion_epica_01_09: >
-      Verificado independientemente del análisis del QA (regresion_response_interceptor
-      en reporte_qa.yaml): grep de `data:`/`data?:` en todos los *.dto.ts de
-      src/ — ningún DTO de respuesta declara un campo propio `data`. Grep de
-      controllers que retornan un shape `{ data: ... }` — solo 3 en todo el
-      proyecto: coach-requests.controller.ts findAll (`{data: array, meta}`,
-      sin cambio de comportamiento) y los 2 ya analizados de
-      exercises.controller.ts. Confirmo la conclusión del QA: sin regresión
-      posible sobre EPICA-01/EPICA-09.
+    notas: >
+      Sin cambios respecto al ciclo 1: plans.service.ts (primeras 20 líneas
+      verificadas idénticas a la lectura del ciclo 1), plans.controller.ts,
+      plans-catalog.controller.ts, plans.module.ts,
+      common/guards/plan-published.guard.ts y exercises.service.ts no fueron
+      tocados en este ciclo. El alcance del ciclo 2 se respetó: únicamente
+      los 6 DTOs de src/, sus 6 copias de referencia y el script de export.
 
   consistencia_contrato: "OK"
-  consistencia_contrato_detalle: "Sin cambios respecto al ciclo 1 — este ciclo no tocó exercises/."
+  consistencia_contrato_detalle: >
+    Sin cambios respecto al ciclo 1 en el shape del contrato — confirmado
+    independientemente: los 15 campos afectados conservan `type: string`,
+    `nullable: true`, mismo `example`, `description` y `format` donde aplica.
+    El único cambio observable en outputs/openapi.json es la aparición de la
+    metadata de tipo que faltaba y de los 2 tags nuevos en la raíz del
+    documento — ninguno de los dos altera lo que un cliente ya generado
+    contra el contrato del ciclo 1 esperaría recibir.
 
   escaneo_automatico:
     revisado: true
@@ -94,31 +79,43 @@ revision_codigo:
     hallazgos_descartados_validados: 0
     hallazgos_descartados_rechazados: 0
     notas: >
-      Sin cambios respecto al ciclo 1: /security-review sigue sin poder
-      invocarse (limitación de toolset, no de esta épica). El cambio de este
-      ciclo (una expresión condicional en un interceptor, sin I/O, sin datos
-      sensibles) no introduce superficie de riesgo nueva.
+      Valido el razonamiento del QA para no ejecutar una revisión manual de
+      seguridad adicional en este ciclo: el cambio se limita a opciones
+      pasadas a `@ApiPropertyOptional()` (metadata de generación de schema,
+      leída solo por SwaggerModule.createDocument en build-time) y a
+      `.addTag()` en un script de exportación de documentación — ninguno de
+      los dos participa del pipeline de request en runtime (no son
+      decoradores de class-validator, no envuelven lógica de negocio, no
+      tocan Prisma ni logging). No hay superficie de ataque nueva que
+      auditar; el checklist de 11 ítems del ciclo 1 (guards, ownership,
+      logging, PII, originalError, comunicación entre módulos) sigue vigente
+      sin re-verificación porque los archivos que audita no cambiaron.
 
   validacion_openapi_spectral:
     revisado: true
     errores_confirmados: 0
     warnings_documentados: 0
     notas: >
-      pnpm run openapi:validate sigue fallando por el mismo defecto
-      preexistente (JwtStrategy/ConfigService en scripts/export-openapi.ts).
-      Corrijo lo que afirmé en mi revisión del ciclo 1: dije que la
-      preexistencia estaba "verificada por partida doble (LT y QA, cada uno
-      con git stash independiente)" — no era exacto, yo solo había confirmado
-      que falla HOY, no que fallara antes de la épica. El equipo lo verificó
-      correctamente después con git worktree sobre 9889abc (estado sin
-      exercises/ ni el import de AuthModule): mismo error idéntico. La
-      conclusión de fondo se sostiene (no es un defecto introducido por
-      EPICA-02) pero con alcance mayor al que le di en el ciclo 1: registrado
-      como hallazgo abierto #8 (severidad Alta) en execution-log.md —
-      openapi:export nunca ha arrancado en este proyecto, así que Spectral no
-      ha corrido ni en EPICA-01 ni en EPICA-09. No bloquea este ciclo (no es
-      un defecto de esta épica) pero es más grave de lo que documenté
-      inicialmente — no debe tratarse como un hallazgo menor en adelante.
+      pnpm run openapi:validate pasa limpio: 0 errores, 0 warnings (los 15
+      oas3-valid-schema-example y los 17 operation-tag-defined del ciclo 1
+      desaparecieron). Verificado en outputs/openapi.json regenerado que 5 de
+      los 15 campos conservan exactamente su forma anterior más `type:
+      "string"` (PlanResponseDto.description, PlanResponseDto.startDate,
+      CoachProfileResponseDto.bannerUrl, CoachSummaryResponseDto.avatarUrl,
+      PlanCatalogDetailResponseDto.endDate) y que los 7 tags están presentes,
+      incluidos `plans` y `plans-catalog`. La corrección hace exactamente lo
+      que se instruyó, sin efectos secundarios sobre la superficie de API.
+
+  observaciones_no_bloqueantes:
+    - >
+      Propuesta del Desarrollador para un futuro no bloqueante: derivar los
+      tags de scripts/export-openapi.mjs automáticamente desde los
+      `@ApiTags()` de cada controller en vez de mantener la lista hardcodeada
+      — eliminaría de raíz el patrón que causó los hallazgos #4/#8 y el
+      warning de este ciclo, en vez de corregirlo cada vez que se agrega un
+      módulo. No se implementa en esta épica por estar fuera de alcance;
+      queda registrada para que el humano decida si vale la pena antes de
+      EPICA-04.
 
   instrucciones_desarrollador: []
 

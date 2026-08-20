@@ -139,7 +139,7 @@ export class RegisterCoachDto {
 
   @ApiProperty({
     description:
-      'Descripcion del plan de entrenamiento que el entrenador ofrece. Texto libre que el administrador revisara.',
+      'Descripcion del programa de entrenamiento que el entrenador ofrece. El administrador la revisa al evaluar la solicitud y, una vez aprobada, se PUBLICA en el catalogo de planes para que los atletas conozcan de que va el programa antes de inscribirse. Redactarla pensando en ese lector.',
     example:
       'Entrenador certificado NSCA con 5 anos de experiencia en fuerza y acondicionamiento. Especializado en atletas de alto rendimiento.',
     maxLength: 2000,

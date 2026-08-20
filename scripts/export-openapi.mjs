@@ -47,6 +47,14 @@ async function exportOpenApi() {
     .addTag('coach-requests', 'Solicitudes de registro de entrenadores')
     .addTag('admin-invitations', 'Invitaciones para crear administradores')
     .addTag('exercises', 'Biblioteca global de ejercicios')
+    .addTag(
+      'plans',
+      'Construccion, publicacion y ciclo de vida de planes de entrenamiento (COACH)',
+    )
+    .addTag(
+      'plans-catalog',
+      'Catalogo publico de planes publicados, para cualquier usuario autenticado',
+    )
     .addBearerAuth()
     .build();
 

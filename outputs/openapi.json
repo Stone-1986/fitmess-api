@@ -1203,6 +1203,1456 @@
           "exercises"
         ]
       }
+    },
+    "/api/plans": {
+      "post": {
+        "description": "Crea el plan en estado Borrador con name obligatorio; description, startDate y endDate opcionales (D-3). CA-008-2 permite que el plan quede sin ninguna fase indefinidamente — RN-01 (estructura minima) y RN-02 (fecha de fin obligatoria) solo se verifican al publicar (HU-009), nunca al crear. Solo accesible para COACH (RN-18, D-12).",
+        "operationId": "PlansController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Plan creado exitosamente en estado Borrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Crear el shell de un plan de entrenamiento",
+        "tags": [
+          "plans"
+        ]
+      },
+      "get": {
+        "description": "Lista todos los planes del entrenador autenticado, en cualquier estado (Borrador, Publicado, Finalizado, Archivado), paginado. `status` refleja el valor efectivo de cada plan (D-1). Solo accesible para COACH.",
+        "operationId": "PlansController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de los planes propios del entrenador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar los planes propios del entrenador autenticado",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}": {
+      "get": {
+        "description": "Devuelve el plan con toda su estructura embebida: fases, semanas, sesiones y ejercicios de sesion, cada ejercicio con los datos de la version que la sesion conserva (RN-07). Lectura agregada en un solo GET (D-8). Solo el entrenador propietario del plan puede consultarlo (CA-008-6).",
+        "operationId": "PlansController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle del plan con su arbol completo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede consultarlo (CA-008-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener el detalle de un plan propio con su arbol completo",
+        "tags": [
+          "plans"
+        ]
+      },
+      "patch": {
+        "description": "name/description son editables en cualquier estado del plan (D-6). startDate/endDate solo se aceptan si el plan sigue en Borrador — si se envian con el plan ya publicado, rechaza con PLAN_IMMUTABLE (409) porque RN-31 inmoviliza la duracion total al publicar. Solo el entrenador propietario puede editarlo (CA-008-6).",
+        "operationId": "PlansController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan actualizado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del plan",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede editarlo (CA-008-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no permite modificar fechas fuera del estado Borrador (RN-31, D-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Editar los datos generales de un plan propio",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/phases": {
+      "post": {
+        "description": "Crea una fase dentro del plan. order se calcula server-side (maximo order existente en el plan + 1, D-5). Solo procede si el plan sigue en Borrador — una fase nueva es estructura, inmutable tras publicar (RN-31, PlanPublishedGuard).",
+        "operationId": "PlansController_addPhase",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPhaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Fase creada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhaseResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de la fase",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Agregar una fase al plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/phases/{phaseId}": {
+      "delete": {
+        "description": "Elimina la fase y, en cascada, sus semanas, sesiones y ejercicios de sesion (hard-delete real — D-7, solo procede en Borrador, donde ningun atleta ha tenido contacto con esa estructura todavia). PlanPublishedGuard rechaza si el plan ya no esta en Borrador.",
+        "operationId": "PlansController_removePhase",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phaseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fase eliminada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Fase eliminada exitosamente"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o fase no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Quitar una fase del plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/phases/{phaseId}/weeks": {
+      "post": {
+        "description": "Crea una semana dentro de la fase. Sin request body — weekNumber se calcula server-side como secuencial a lo largo de TODO el plan (no reinicia por fase, D-4), porque EPICA-05 necesita un numero de semana unico y comparable entre fases. Solo procede si el plan sigue en Borrador (RN-31, PlanPublishedGuard).",
+        "operationId": "PlansController_addWeek",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phaseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Semana creada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o fase no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Agregar una semana a una fase",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/weeks/{weekId}": {
+      "delete": {
+        "description": "Elimina la semana y, en cascada, sus sesiones y ejercicios de sesion (hard-delete real — D-7). Ruta plana con weekId, sin arrastrar phaseId (D-9). Solo procede en Borrador.",
+        "operationId": "PlansController_removeWeek",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "weekId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Semana eliminada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Semana eliminada exitosamente"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o semana no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Quitar una semana del plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/weeks/{weekId}/sessions": {
+      "post": {
+        "description": "Crea una sesion dentro de la semana. order se calcula server-side (maximo order existente en la semana + 1, D-5). Solo procede si el plan sigue en Borrador.",
+        "operationId": "PlansController_addSession",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "weekId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sesion creada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de la sesion",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o semana no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Agregar una sesion a una semana",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/sessions/{sessionId}": {
+      "delete": {
+        "description": "Elimina la sesion y, en cascada, sus ejercicios de sesion (hard-delete real — D-7). Ruta plana con sessionId (D-9). Solo procede en Borrador.",
+        "operationId": "PlansController_removeSession",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesion eliminada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Sesion eliminada exitosamente"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o sesion no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Quitar una sesion del plan",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/sessions/{sessionId}/exercises": {
+      "post": {
+        "description": "Agrega un ejercicio de la biblioteca global (Exercise) a una sesion (CA-008-3). El service resuelve exerciseId -> ExerciseVersion vigente (mayor versionNumber) en el momento de la llamada y persiste SessionExercise.exerciseVersionId — nunca un puntero al ejercicio (RN-07), de modo que si el ejercicio se modifica o se inhabilita despues, la sesion conserva la version original. Rechaza con ENTITY_NOT_FOUND (404) si el ejercicio no existe en la biblioteca global (RN-04), y con EXERCISE_INACTIVE (422) si existe pero esta inhabilitado (isActive=false) — mismo precedente que CA-006-6 de EPICA-02. Esta operacion es la que hace real isUsedInPlan(exerciseId) de EPICA-02 (D-2). Solo procede si el plan sigue en Borrador.",
+        "operationId": "PlansController_addSessionExercise",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSessionExerciseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ejercicio agregado exitosamente a la sesion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionExerciseResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del ejercicio de sesion",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o sesion no encontrados, o el ejercicio referenciado no existe en la biblioteca global (RN-04)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "El ejercicio referenciado existe pero esta inhabilitado en la biblioteca global (EXERCISE_INACTIVE)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Agregar un ejercicio de la biblioteca a una sesion",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/sessions/{sessionId}/exercises/{sessionExerciseId}": {
+      "delete": {
+        "description": "Elimina el ejercicio de sesion (hard-delete real — D-7). Solo procede si el plan sigue en Borrador.",
+        "operationId": "PlansController_removeSessionExercise",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionExerciseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejercicio eliminado exitosamente de la sesion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "nullable": true,
+                      "example": null
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Ejercicio eliminado exitosamente de la sesion"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan, sesion o ejercicio de sesion no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Quitar un ejercicio de una sesion",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/publish": {
+      "post": {
+        "description": "Transiciona el plan de Borrador a Publicado. Rechaza con INVALID_STATE_TRANSITION (409) si el estado actual no es Borrador; con PLAN_INCOMPLETE (422) si el plan no cumple RN-01 (name + fechas + al menos una fase con una semana con una sesion con un ejercicio — CA-009-2), listando explicitamente los requisitos faltantes. Emite el evento plan.published. Solo el entrenador propietario puede publicar (CA-009-5).",
+        "operationId": "PlansController_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan publicado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede publicarlo (CA-009-5)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — no puede publicarse desde su estado actual",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "El plan no cumple los requisitos minimos de validez para publicarse (RN-01, CA-009-2)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publicar un plan (Borrador -> Publicado)",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/unpublish": {
+      "post": {
+        "description": "Transiciona el plan de Publicado a Borrador. Rechaza con INVALID_STATE_TRANSITION (409) si el estado actual no es Publicado; con PLAN_HAS_SUBSCRIBERS (409) si el plan tiene atletas suscritos (CA-009-7). hasSubscribers(planId) es un stub que hoy siempre retorna false (mismo patron que isUsedInPlan de EPICA-02) — la rama \"con suscritos\" no es verificable end-to-end en esta epica, solo con test unitario. Solo el entrenador propietario puede despublicar (CA-009-5).",
+        "operationId": "PlansController_unpublish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan despublicado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede despublicarlo (CA-009-5)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Publicado, o tiene atletas suscritos y no puede regresar a Borrador (CA-009-7)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Despublicar un plan (Publicado -> Borrador)",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/plans/{id}/archive": {
+      "post": {
+        "description": "Transiciona el plan a Archivado desde Borrador, Publicado o Finalizado (CA-010-2). Rechaza con INVALID_STATE_TRANSITION (409) si el plan ya esta Archivado (CA-010-3). No verifica atletas suscritos — RN-27/CA-010-2 no lo exigen para archivar, a diferencia de unpublish. Un plan Publicado ya vencido (endDate pasada) se archiva sin problema aunque la columna persistida aun diga PUBLISHED (D-1). Emite plan.finalized antes de archivar solo si corresponde, y siempre plan.archived. Solo el entrenador propietario puede archivarlo (CA-010-4).",
+        "operationId": "PlansController_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan archivado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede archivarlo (CA-010-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan ya esta archivado (CA-010-3)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Archivar un plan manualmente",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/catalog/plans": {
+      "get": {
+        "description": "Lista los planes en estado Publicado y no vencidos (CA-011-1, CA-011-3). El filtro se aplica a nivel de query (status=PUBLISHED AND endDate>=now()), no sobre el campo computado — un plan Publicado ya vencido queda excluido de inmediato sin depender de que la columna persistida se haya actualizado a FINALIZED (D-1). Cada item incluye name, startDate, endDate y el perfil publico reducido del entrenador (id, name, avatarUrl). Accesible para cualquier usuario autenticado.",
+        "operationId": "PlansCatalogController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de planes publicados y vigentes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanCatalogSummaryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar el catalogo de planes publicados",
+        "tags": [
+          "plans-catalog"
+        ]
+      }
+    },
+    "/api/catalog/plans/{id}": {
+      "get": {
+        "description": "Devuelve el detalle de un plan en estado Publicado y no vencido (CA-011-2): name, description, startDate, endDate, la estructura de fases/semanas/sesiones con SOLO la cantidad de ejercicios por sesion (no el detalle de cada uno), mas el perfil publico COMPLETO del entrenador (id, name, avatarUrl, description, bannerUrl — los dos ultimos con fallback null si el entrenador no tiene una CoachRequest aprobada, D-2b). Un plan que no esta Publicado-y-vigente responde ENTITY_NOT_FOUND (404), igual que si no existiera — el atleta no debe poder distinguir \"no existe\" de \"no esta publicado\". Accesible para cualquier usuario autenticado.",
+        "operationId": "PlansCatalogController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle del plan publicado, con el perfil publico completo del entrenador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanCatalogDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado, o no esta en estado Publicado y vigente (mismo mensaje en ambos casos)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener el detalle de un plan publicado del catalogo",
+        "tags": [
+          "plans-catalog"
+        ]
+      }
     }
   },
   "info": {
@@ -1231,6 +2681,14 @@
     {
       "name": "exercises",
       "description": "Biblioteca global de ejercicios"
+    },
+    {
+      "name": "plans",
+      "description": "Construccion, publicacion y ciclo de vida de planes de entrenamiento (COACH)"
+    },
+    {
+      "name": "plans-catalog",
+      "description": "Catalogo publico de planes publicados, para cualquier usuario autenticado"
     }
   ],
   "servers": [
@@ -1578,7 +3036,7 @@
           },
           "planDescription": {
             "type": "string",
-            "description": "Descripcion del plan de entrenamiento que el entrenador ofrece. Texto libre que el administrador revisara.",
+            "description": "Descripcion del programa de entrenamiento que el entrenador ofrece. El administrador la revisa al evaluar la solicitud y, una vez aprobada, se PUBLICA en el catalogo de planes para que los atletas conozcan de que va el programa antes de inscribirse. Redactarla pensando en ese lector.",
             "example": "Entrenador certificado NSCA con 5 anos de experiencia en fuerza y acondicionamiento. Especializado en atletas de alto rendimiento.",
             "maxLength": 2000
           },
@@ -2544,6 +4002,760 @@
             "maxLength": 50
           }
         }
+      },
+      "CreatePlanDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre del plan de entrenamiento",
+            "example": "Fuerza e hipertrofia — bloque 1",
+            "minLength": 2,
+            "maxLength": 150
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion del plan visible para el atleta en el catalogo (HU-011). Opcional al crear — se puede completar despues, incluso tras publicar (D-6).",
+            "example": "Bloque de 8 semanas enfocado en fuerza maxima y volumen de hipertrofia para tren inferior.",
+            "maxLength": 1000
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Fecha de inicio del plan (YYYY-MM-DD). Opcional al crear — RN-02 solo la exige para PUBLICAR, nunca para guardar en Borrador (CA-008-2).",
+            "example": "2026-09-01",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Fecha de fin del plan (YYYY-MM-DD). Opcional al crear, obligatoria para publicar (RN-02) — no existen planes open-ended.",
+            "example": "2026-10-27",
+            "format": "date"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PlanResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del plan",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del plan",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion del plan, visible para el atleta en el catalogo",
+            "example": "Bloque de 8 semanas enfocado en fuerza maxima y volumen de hipertrofia para tren inferior.",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Fecha de inicio del plan",
+            "example": "2026-09-01",
+            "format": "date",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Fecha de fin del plan",
+            "example": "2026-10-27",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado efectivo del plan (D-1: si el valor persistido es PUBLISHED pero endDate ya paso, este campo retorna FINALIZED, calculado en el momento de la lectura).",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "FINALIZED",
+              "ARCHIVED"
+            ],
+            "example": "DRAFT"
+          },
+          "coachId": {
+            "type": "string",
+            "description": "UUID del entrenador propietario del plan",
+            "example": "a9b8c7d6-e5f4-3210-a9b8-c7d6e5f43210",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del plan",
+            "example": "2026-08-20T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion del plan",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "coachId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "SessionExerciseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del ejercicio de sesion (SessionExercise)",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            "format": "uuid"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de este ejercicio dentro de la sesion (calculada server-side, D-5)",
+            "example": 1
+          },
+          "exerciseId": {
+            "type": "string",
+            "description": "UUID del ejercicio de la biblioteca global (Exercise) referenciado",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio (identidad del catalogo, no versionado)",
+            "example": "Sentadilla con barra"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la version del ejercicio que esta sesion conserva (RN-07)",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso."
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal de la version del ejercicio que esta sesion conserva (RN-07)",
+            "example": "Cuadriceps"
+          },
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version del ejercicio que esta sesion conserva — la vigente al momento de agregarlo (RN-07), no necesariamente la vigente hoy en la biblioteca.",
+            "example": 1
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha en la que este ejercicio fue agregado a la sesion",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "order",
+          "exerciseId",
+          "name",
+          "description",
+          "muscleGroup",
+          "versionNumber",
+          "createdAt"
+        ]
+      },
+      "SessionDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la sesion",
+            "example": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la sesion",
+            "example": "Dia 1 — Tren inferior (fuerza)"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta sesion dentro de la semana",
+            "example": 1
+          },
+          "exercises": {
+            "description": "Ejercicios de esta sesion, en el orden en que fueron agregados",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionExerciseResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "order",
+          "exercises"
+        ]
+      },
+      "WeekDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la semana",
+            "example": "d4e5f6a7-b8c9-0123-defa-234567890123",
+            "format": "uuid"
+          },
+          "weekNumber": {
+            "type": "number",
+            "description": "Numero de la semana, secuencial a lo largo de TODO el plan (no reinicia por fase, D-4)",
+            "example": 1
+          },
+          "sessions": {
+            "description": "Sesiones de esta semana, en el orden en que fueron agregadas",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionDetailResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "weekNumber",
+          "sessions"
+        ]
+      },
+      "PhaseDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la fase",
+            "example": "e5f6a7b8-c9d0-1234-efab-345678901234",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la fase",
+            "example": "Fase 1 — Adaptacion anatomica"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta fase dentro del plan",
+            "example": 1
+          },
+          "weeks": {
+            "description": "Semanas de esta fase, en el orden en que fueron agregadas",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeekDetailResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "order",
+          "weeks"
+        ]
+      },
+      "PlanDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del plan",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del plan",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion del plan",
+            "example": "Bloque de 8 semanas enfocado en fuerza maxima y volumen de hipertrofia para tren inferior.",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Fecha de inicio del plan",
+            "example": "2026-09-01",
+            "format": "date",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Fecha de fin del plan",
+            "example": "2026-10-27",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado efectivo del plan (D-1: valor computado en el momento de la lectura, no necesariamente el valor persistido)",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "FINALIZED",
+              "ARCHIVED"
+            ],
+            "example": "DRAFT"
+          },
+          "coachId": {
+            "type": "string",
+            "description": "UUID del entrenador propietario del plan",
+            "example": "a9b8c7d6-e5f4-3210-a9b8-c7d6e5f43210",
+            "format": "uuid"
+          },
+          "phases": {
+            "description": "Arbol completo de fases del plan, en el orden en que fueron agregadas, cada una con sus semanas, sesiones y ejercicios embebidos (D-8).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhaseDetailResponseDto"
+            }
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion del plan",
+            "example": "2026-08-20T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion del plan",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "coachId",
+          "phases",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdatePlanDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nuevo nombre del plan. Editable en cualquier estado (D-6).",
+            "example": "Fuerza e hipertrofia — bloque 1 (revisado)",
+            "minLength": 2,
+            "maxLength": 150
+          },
+          "description": {
+            "type": "string",
+            "description": "Nueva descripcion del plan. Editable en cualquier estado (D-6).",
+            "example": "Bloque de 8 semanas enfocado en fuerza maxima y volumen de hipertrofia para tren inferior, con enfasis en tecnica de sentadilla.",
+            "maxLength": 1000
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Nueva fecha de inicio (YYYY-MM-DD). Solo se acepta si el plan sigue en Borrador — RN-31 la inmoviliza al publicar. Si se envia con el plan ya publicado, el service rechaza con PLAN_IMMUTABLE (409).",
+            "example": "2026-09-08",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Nueva fecha de fin (YYYY-MM-DD). Solo se acepta si el plan sigue en Borrador — RN-31 la inmoviliza al publicar. Si se envia con el plan ya publicado, el service rechaza con PLAN_IMMUTABLE (409).",
+            "example": "2026-11-03",
+            "format": "date"
+          }
+        }
+      },
+      "AddPhaseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre de la fase dentro del plan",
+            "example": "Fase 1 — Adaptacion anatomica",
+            "minLength": 2,
+            "maxLength": 150
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PhaseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la fase",
+            "example": "e5f6a7b8-c9d0-1234-efab-345678901234",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la fase",
+            "example": "Fase 1 — Adaptacion anatomica"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta fase dentro del plan (calculada server-side, D-5)",
+            "example": 1
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la fase",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "order",
+          "createdAt"
+        ]
+      },
+      "WeekResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la semana",
+            "example": "d4e5f6a7-b8c9-0123-defa-234567890123",
+            "format": "uuid"
+          },
+          "weekNumber": {
+            "type": "number",
+            "description": "Numero de la semana, secuencial a lo largo de TODO el plan (no reinicia por fase) — calculado server-side (decision D-4, necesario para EPICA-05).",
+            "example": 1
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la semana",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "weekNumber",
+          "createdAt"
+        ]
+      },
+      "AddSessionDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre de la sesion dentro de la semana",
+            "example": "Dia 1 — Tren inferior (fuerza)",
+            "minLength": 2,
+            "maxLength": 150
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "SessionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la sesion",
+            "example": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la sesion",
+            "example": "Dia 1 — Tren inferior (fuerza)"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta sesion dentro de la semana (calculada server-side, D-5)",
+            "example": 1
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la sesion",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "order",
+          "createdAt"
+        ]
+      },
+      "AddSessionExerciseDto": {
+        "type": "object",
+        "properties": {
+          "exerciseId": {
+            "type": "string",
+            "description": "UUID del ejercicio de la biblioteca global (Exercise) a agregar a la sesion. Debe existir (RN-04) y estar activo (isActive=true) — un ejercicio inhabilitado se rechaza con EXERCISE_INACTIVE (422) aunque exista.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "exerciseId"
+        ]
+      },
+      "CoachSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del entrenador",
+            "example": "a9b8c7d6-e5f4-3210-a9b8-c7d6e5f43210",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del entrenador",
+            "example": "Carlos Andres Rodriguez Perez"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del entrenador, si la tiene cargada",
+            "example": "https://storage.fitmess.co/avatars/carlos-rodriguez.jpg",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PlanCatalogSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del plan",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del plan",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Fecha de inicio del plan",
+            "example": "2026-09-01",
+            "format": "date",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Fecha de fin del plan",
+            "example": "2026-10-27",
+            "format": "date",
+            "nullable": true
+          },
+          "coach": {
+            "description": "Perfil publico reducido del entrenador que publico el plan",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CoachSummaryResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "coach"
+        ]
+      },
+      "PlanCatalogSessionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la sesion",
+            "example": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la sesion",
+            "example": "Dia 1 — Tren inferior (fuerza)"
+          },
+          "exerciseCount": {
+            "type": "number",
+            "description": "Cantidad de ejercicios que componen la sesion (no se expone el detalle de cada uno)",
+            "example": 5
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "exerciseCount"
+        ]
+      },
+      "PlanCatalogWeekResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la semana",
+            "example": "d4e5f6a7-b8c9-0123-defa-234567890123",
+            "format": "uuid"
+          },
+          "weekNumber": {
+            "type": "number",
+            "description": "Numero de la semana, secuencial a lo largo de TODO el plan (no reinicia por fase, D-4)",
+            "example": 1
+          },
+          "sessions": {
+            "description": "Sesiones de esta semana, en el orden en que fueron agregadas",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanCatalogSessionResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "weekNumber",
+          "sessions"
+        ]
+      },
+      "PlanCatalogPhaseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la fase",
+            "example": "e5f6a7b8-c9d0-1234-efab-345678901234",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la fase",
+            "example": "Fase 1 — Adaptacion anatomica"
+          },
+          "weeks": {
+            "description": "Semanas de esta fase, en el orden en que fueron agregadas",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanCatalogWeekResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "weeks"
+        ]
+      },
+      "CoachProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del entrenador",
+            "example": "a9b8c7d6-e5f4-3210-a9b8-c7d6e5f43210",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del entrenador",
+            "example": "Carlos Andres Rodriguez Perez"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "description": "URL de la foto de perfil del entrenador, si la tiene cargada",
+            "example": "https://storage.fitmess.co/avatars/carlos-rodriguez.jpg",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la propuesta de entrenamiento del entrenador (CoachRequest.planDescription). null si el entrenador no tiene una CoachRequest en estado APPROVED (D-2b). Sujeto a la advertencia legal de Ley 1581/2012 declarada en el reporte de validacion de producto.",
+            "example": "Entrenador certificado en fuerza y acondicionamiento con 8 anos de experiencia en powerlifting y periodizacion deportiva.",
+            "nullable": true
+          },
+          "bannerUrl": {
+            "type": "string",
+            "description": "URL del banner del entrenador (CoachRequest.bannerUrl). null si el entrenador no tiene una CoachRequest en estado APPROVED, o si no cargo banner (D-2b).",
+            "example": "https://storage.fitmess.co/banners/carlos-rodriguez.jpg",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PlanCatalogDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del plan",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del plan",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion del plan",
+            "example": "Bloque de 8 semanas enfocado en fuerza maxima y volumen de hipertrofia para tren inferior.",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Fecha de inicio del plan",
+            "example": "2026-09-01",
+            "format": "date",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Fecha de fin del plan",
+            "example": "2026-10-27",
+            "format": "date",
+            "nullable": true
+          },
+          "phases": {
+            "description": "Estructura del plan: fases con sus semanas y sesiones, cada sesion con la cantidad de ejercicios que la componen (no el detalle de cada ejercicio).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanCatalogPhaseResponseDto"
+            }
+          },
+          "coach": {
+            "description": "Perfil publico completo del entrenador que publico el plan",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CoachProfileResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "phases",
+          "coach"
+        ]
       }
     }
   }

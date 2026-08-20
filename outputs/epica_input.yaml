@@ -1,109 +1,155 @@
 epica:
-  id: "EPICA-02"
-  titulo: "Catalogo Global de Ejercicios"
+  id: "EPICA-03"
+  titulo: "Creacion y Publicacion de Planes de Entrenamiento"
   objetivo_de_negocio: >
-    Centralizar la biblioteca de ejercicios disponibles en la plataforma, garantizando
-    trazabilidad, inmutabilidad del historial y gestion controlada del contenido. La
-    biblioteca es el insumo con el que los entrenadores construyen los planes de
-    entrenamiento (EPICA-03): sin ella no hay nada que agendar en una sesion.
+    Permitir que los entrenadores construyan planes de entrenamiento estructurados
+    (nombre, fechas, fases, semanas, sesiones y ejercicios), los publiquen para que
+    los atletas los descubran en el catalogo, y gestionen su ciclo de vida completo
+    (Borrador, Publicado, Finalizado, Archivado). Esta epica es el puente entre la
+    biblioteca de ejercicios (EPICA-02) y la inscripcion de atletas (EPICA-04): sin un
+    plan publicado no hay nada a lo que un atleta pueda suscribirse.
   contexto_de_aplicacion: >
-    Plataforma de entrenamiento deportivo personalizado (fitmess-api). Hoy existen
-    registro y autenticacion de atletas, entrenadores y administradores (EPICA-01 y
-    EPICA-09), con los roles ATHLETE, COACH y ADMIN operativos en el enum UserRole y
-    los guards JwtAuthGuard + RolesGuard funcionando. No existe ningun modulo de
-    dominio mas alla de auth: el schema de Prisma tiene User, CoachRequest,
-    LegalAcceptance, AuditLog, RefreshToken y AdminInvitation, y ninguna tabla de
-    ejercicios ni de planes.
+    Plataforma de entrenamiento deportivo personalizado (fitmess-api). EPICA-01,
+    EPICA-09 y EPICA-02 ya estan implementadas en main: existen los roles ATHLETE,
+    COACH y ADMIN en el enum UserRole, los guards JwtAuthGuard + RolesGuard viven en
+    src/modules/common/, y el schema de Prisma tiene User, CoachRequest,
+    LegalAcceptance, AuditLog, RefreshToken, AdminInvitation, Exercise y
+    ExerciseVersion. No existe ninguna tabla de planes, fases, semanas, sesiones ni
+    suscripciones: todo eso lo crea esta epica.
 
-    El catalogo de errores en src/modules/common/exceptions/business-error.enum.ts ya
-    contiene las entradas EXERCISE_IN_USE y EXERCISE_INACTIVE, agregadas de forma
-    anticipada. EXERCISE_INACTIVE aplica a esta epica; EXERCISE_IN_USE no se usa aqui
-    (ver restricciones) y queda disponible para EPICA-03.
+    EPICA-02 dejo un punto de integracion explicito: el metodo privado
+    isUsedInPlan(exerciseId) en src/modules/exercises/exercises.service.ts:345 hoy
+    siempre retorna false porque no existe tabla de planes. Esta epica debe conectarlo
+    con una consulta real contra las sesiones de los planes. Mientras eso no ocurra,
+    CA-006-1 de EPICA-02 (modificar un ejercicio ya usado en un plan crea version
+    nueva) no es verificable end-to-end.
 
-    El skill design-patterns prescribe en su seccion 1 el modelo Exercise +
-    ExerciseVersion con el schema de Prisma y la logica de append-only ya redactados.
-    Ese patron es el punto de partida esperado, no una sugerencia.
+    Los campos del ejercicio (name, description, muscleGroup) quedaron cerrados en
+    EPICA-02 por decision del humano del 2026-08-05; esta epica no reabre esa
+    decision. El modelo ExerciseVersion es append-only (id propio, versionNumber,
+    @@unique([exerciseId, versionNumber])); un ejercicio inhabilitado (isActive=false)
+    sigue siendo legible por id junto con todas sus versiones, que es lo que RN-07
+    exige que los planes aprovechen para conservar la version original del ejercicio.
   restricciones_conocidas:
-    - "La biblioteca es global y unica: no hay bibliotecas por entrenador ni ejercicios privados (RN-04)"
-    - "Los ejercicios NUNCA se eliminan fisicamente, solo se inhabilitan con isActive = false (RN-06)"
-    - "Un ejercicio ya utilizado en un plan es inmutable: editarlo crea una version nueva y la anterior se conserva intacta (RN-05, RN-07)"
-    - "La inhabilitacion SIEMPRE procede, este el ejercicio en uso o no. Inhabilitar solo saca al ejercicio del catalogo para planes nuevos; los planes existentes conservan la version que ya referenciaban. NUNCA lanzar EXERCISE_IN_USE al inhabilitar — decision del humano del 2026-08-05 que resuelve la contradiccion entre CA-007-1 y la version anterior de design-patterns seccion 1, ya corregida"
-    - "Los campos del ejercicio son exactamente name, description y muscleGroup. Decision del humano del 2026-08-05: se descarto agregar equipo, dificultad y multimedia para no ampliar la superficie que hay que versionar"
-    - "El modelo de planes NO existe todavia (es EPICA-03) y el de instancias de ejecucion tampoco (EPICA-05). La consulta '¿este ejercicio ya fue usado?' no tiene tabla contra la cual resolverse en esta epica"
-    - "Tanto COACH como ADMIN pueden crear, modificar e inhabilitar ejercicios (RN-22). El atleta no accede a la gestion del catalogo"
+    - "No existen planes open-ended: la fecha de fin es obligatoria para publicar (RN-02)"
+    - "Solo el rol COACH crea, edita, publica, despublica y archiva planes (RN-18). El rol ATHLETE solo explora el catalogo publicado (HU-011). El documento fuente no le da al rol ADMIN ninguna funcion sobre planes"
+    - "RN-07 exige que los planes conserven la version del ejercicio (ExerciseVersion) que tenian al momento de agregarlo a una sesion, aunque el ejercicio se modifique o inhabilite despues. Una sesion del plan referencia una version especifica, nunca 'el ejercicio vigente'"
+    - "Esta epica es la que hace real el punto de integracion isUsedInPlan(exerciseId) dejado por EPICA-02: al agregar un ejercicio a una sesion de un plan (CA-008-3), el ejercicio queda referenciado por un plan, dato que EPICA-02 usa para decidir si versiona en vez de editar en el lugar (CA-006-1 de EPICA-02)"
+    - "Solo se pueden agregar a una sesion ejercicios ACTIVOS de la biblioteca (heredado del catalogo filtrado de EPICA-02, CA-007-2 de esa epica); un ejercicio inhabilitado no aparece como opcion para planes nuevos, aunque los planes que ya lo referenciaban lo conservan"
+    - "Los estados del plan son exactamente cuatro (RN-27): Borrador, Publicado, Finalizado, Archivado. No existen sub-estados adicionales"
   supuestos:
-    - "El nombre del ejercicio es unico entre los ejercicios ACTIVOS de la biblioteca, no en toda ella. CA-005-2 exige avisar ante un nombre repetido, lo que implica una restriccion de unicidad; el documento original no lo declara de forma explicita ni distingue activos de inhabilitados. Decision del humano del 2026-08-05: la unicidad aplica solo entre activos, porque de lo contrario el nombre de un ejercicio inhabilitado quedaba reservado para siempre — no se puede editar (CA-006-6), no se puede eliminar (RN-06) y no existe reactivacion, asi que ese nombre resultaba inutilizable sin salida"
-    - "El aviso de nombre duplicado de CA-005-2 se resuelve con un rechazo de la creacion (DUPLICATE_ENTITY, 409) y no con una creacion condicionada. La HU dice que el usuario 'puede revisar el existente o cambiar el nombre', lo que es comportamiento de cliente, no de API"
-    - "El historial de versiones de CA-006-2 se expone con el numero de version y su fecha de creacion, que es lo que la HU pide de forma literal"
-    - "muscleGroup es texto libre en esta epica. Convertirlo en enum exigiria un catalogo de grupos musculares que ninguna HU define"
+    - "DECISION CONFIRMADA (humano, 2026-08-20): la jerarquia del plan es Plan → Fase → Semana → Sesion → SessionExercise (Plan: name, description, startDate, endDate, status, coachId; Fase: name, order; Semana: weekNumber; Sesion: name, order; SessionExercise: referencia a exerciseVersionId — nunca al ejercicio vigente, por RN-07). La semana es una ENTIDAD PROPIA del modelo, no un campo calculado a partir de startDate: EPICA-05 necesita colgarle estado (abierta/cerrada/congelada) porque RN-30 dispara el cierre de semana 'cuando el atleta completa todas las sesiones programadas de esa semana', RN-33 declara que 'una vez iniciada, esa semana es inmutable', HU-016 asocia las sensaciones semanales 'a esa semana en su plan', y RN-09 congela los datos de la semana para la IA. Toda sesion pertenece a una semana, y toda semana a una fase; no existen sesiones sueltas ni semanas fuera de fase. Esta decision reemplaza el supuesto SUP-04 del documento fuente (que no distinguia la semana como nivel propio) y queda cerrada para que el Arquitecto y el DBA no la reabran"
+    - "DECISION CONFIRMADA: Borrador es un unico estado, sin sub-estados de 'completo/incompleto'. RN-01, re-expresado en la jerarquia con semana (al menos una fase con al menos una semana con al menos una sesion con al menos un ejercicio), solo bloquea la operacion de PUBLICAR (CA-009-2), nunca la de guardar en Borrador (CA-008-2)"
+    - "DECISION CONFIRMADA (humano, 2026-08-20): CA-009-3/CA-009-7 (un plan Publicado solo puede regresar a Borrador si no tiene atletas suscritos) depende del modelo de suscripciones de EPICA-04, que todavia no existe. Se sigue el mismo patron que isUsedInPlan en EPICA-02: la verificacion se aisla detras de un unico metodo privado del service, hasSubscribers(planId), que hoy retorna siempre false. Las dos ramas (con y sin suscritos) se cubren con tests unitarios mockeando ese metodo. Consecuencia aceptada: CA-009-7 (rechazo por atletas suscritos) NO es verificable end-to-end en esta epica, solo en tests unitarios; su cobertura e2e llega con EPICA-04. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio — mismo tratamiento que CA-006-1 de EPICA-02"
+    - "DECISION CONFIRMADA (humano, 2026-08-20): el perfil publico del entrenador expuesto en el catalogo (HU-011) se limita a los campos verificados contra prisma/schema.prisma: id y name de User; avatarUrl de User (opcional); description, mapeado desde CoachRequest.planDescription; y bannerUrl, mapeado desde CoachRequest.bannerUrl (opcional). Quedan EXCLUIDOS por la Ley 1581/2012 y NUNCA se exponen a un atleta: email, phone, phoneCountryCode, identificationType, identificationNumber, dateOfBirth. User NO tiene campos 'centro' ni 'descripcion' propios — el supuesto original de esta epica que los mencionaba fue una hipotesis incorrecta, corregida en esta version. planDescription y bannerUrl viven en CoachRequest, la solicitud de onboarding que el entrenador redacto y que un ADMIN aprobo en EPICA-01: son texto propio del entrenador que ya paso revision humana, lo que los hace aptos para publicarse. Consecuencia para el Arquitecto: el perfil publico de un entrenador solo existe si tiene una CoachRequest aprobada"
+    - "El mecanismo tecnico por el cual un plan pasa a Finalizado al llegar su fecha de fin (job programado, evaluacion perezosa u otro) es decision de la etapa de arquitectura y no de esta epica; el unico compromiso funcional es el resultado observable: a partir de la fecha de fin, cualquier consulta del plan debe mostrarlo en estado Finalizado"
+    - "Fuera de alcance de esta epica (pertenecen a EPICA-04 y EPICA-05): el bloqueo de nuevas inscripciones en un plan Finalizado, el bloqueo de registro de resultados en un plan Archivado (RN-28, RN-29), y la vista del atleta sobre sus propias suscripciones distinguiendo un plan Finalizado de uno Archivado (CA-010-3 del documento fuente). Esta epica solo garantiza que el ESTADO del plan (Publicado/Finalizado/Archivado) quede correctamente reflejado y que el catalogo (HU-011) muestre unicamente planes Publicados"
   glosario:
-    biblioteca_global: "Coleccion unica de ejercicios compartida por todos los entrenadores de la plataforma. No hay copias ni bibliotecas privadas"
-    version_de_ejercicio: "Registro inmutable del contenido de un ejercicio en un momento dado. Cada modificacion de un ejercicio ya usado agrega una version nueva sin tocar las anteriores"
-    version_vigente: "La version de mayor versionNumber de un ejercicio. Es la que se ofrece al construir planes nuevos"
-    ejercicio_inhabilitado: "Ejercicio con isActive = false. No aparece en el catalogo para planes nuevos, pero sigue existiendo y sus versiones siguen siendo legibles desde los planes que ya lo referenciaban"
-    append_only: "Estrategia de escritura en la que los registros se agregan y nunca se modifican ni se borran, de modo que el historial completo queda disponible"
+    plan_de_entrenamiento: "Estructura creada por un entrenador que define nombre, fecha de inicio, fecha de fin, fases, semanas y sesiones con ejercicios, para un periodo determinado"
+    plantilla_base: "Version original del plan tal como la crea el entrenador; es el punto de partida a partir del cual se genera la instancia personalizada de cada atleta (EPICA-05)"
+    fase: "Agrupacion nombrada y ordenada de semanas dentro de un plan. Su cantidad, orden y las semanas que contiene quedan fijas junto con las fechas del plan una vez publicado (decision confirmada del 2026-08-20, ver supuestos)"
+    semana: "Entidad propia del plan, anidada dentro de una fase e identificada por su numero de semana (weekNumber). Agrupa las sesiones que el atleta debe completar en ese periodo. Es el nivel sobre el que EPICA-05 aplica el cierre automatico (RN-30), la inmutabilidad tras iniciarse (RN-33), el registro de sensaciones semanales (HU-016) y el congelamiento de datos para la IA (RN-09). No existen semanas fuera de una fase"
+    sesion: "Unidad de entrenamiento dentro de una semana, compuesta por uno o mas ejercicios de la biblioteca global. No existen sesiones fuera de una semana"
+    estado_del_plan: "Ciclo de vida del plan: Borrador (en construccion, no visible para atletas), Publicado (visible en el catalogo, acepta inscripciones), Finalizado (alcanzo su fecha de fin, ya no acepta inscripciones nuevas), Archivado (retirado manualmente o desde cualquier otro estado, no visible para atletas)"
+    catalogo_de_planes: "Listado de planes en estado Publicado, visible para cualquier atleta registrado que haya iniciado sesion"
   dependencias:
-    - desde: "HU-006"
+    - desde: "HU-008"
       hacia: "HU-005"
-      descripcion: "No se puede modificar ni versionar un ejercicio que no existe. HU-005 crea el ejercicio y su primera version"
-    - desde: "HU-007"
-      hacia: "HU-005"
-      descripcion: "No se puede inhabilitar un ejercicio que no existe"
+      descripcion: "No se puede agregar un ejercicio a una sesion del plan si el ejercicio no existe en la biblioteca global de EPICA-02"
+    - desde: "HU-009"
+      hacia: "HU-008"
+      descripcion: "No se puede publicar un plan que no fue creado primero como plantilla base en Borrador"
+    - desde: "HU-010"
+      hacia: "HU-009"
+      descripcion: "Solo un plan que alcanzo el estado Publicado puede pasar a Finalizado o ser archivado desde ese estado"
+    - desde: "HU-011"
+      hacia: "HU-009"
+      descripcion: "El catalogo de planes solo puede mostrar planes que ya alcanzaron el estado Publicado"
+    - desde: "HU-011"
+      hacia: "HU-003"
+      descripcion: "Solo un atleta que completo su registro inicial (EPICA-01) puede iniciar sesion y explorar el catalogo"
   historias_de_usuario:
-    - id: "HU-005"
-      titulo: "Creacion de ejercicio en la biblioteca global"
-      como: "entrenador o administrador"
-      quiero: "agregar un nuevo ejercicio a la biblioteca global de la plataforma"
-      para: "que pueda usarse en la construccion de planes de entrenamiento"
+    - id: "HU-008"
+      titulo: "Creacion de la plantilla base de un plan de entrenamiento"
+      como: "entrenador"
+      quiero: "crear la estructura base de un plan de entrenamiento definiendo su nombre, fechas, fases, semanas y sesiones con ejercicios"
+      para: "tener una plantilla que luego pueda publicar y que se personalice para cada atleta"
       criterios_de_aceptacion:
-        - "CA-005-1: Dado que un entrenador o administrador accede a la biblioteca de ejercicios, Cuando completa la informacion del ejercicio (name, description, muscleGroup) y lo guarda, Entonces el ejercicio queda disponible en la biblioteca para ser usado en planes, con isActive = true y su primera version (versionNumber = 1)"
-        - "CA-005-2: Dado que el entrenador o administrador esta creando un ejercicio, Cuando ingresa un nombre que coincide con el de un ejercicio ACTIVO de la biblioteca, comparando sin distinguir mayusculas de minusculas y recortando los espacios al inicio y al final, Entonces la creacion se rechaza indicando que ya existe un ejercicio con ese nombre, sin crear el registro"
-        - "CA-005-6: Dado que existe en la biblioteca un ejercicio inhabilitado con un nombre determinado, Cuando un entrenador o administrador crea un ejercicio nuevo con ese mismo nombre, Entonces la creacion procede con exito: el nombre de un ejercicio inhabilitado queda liberado para reutilizarse"
-        - "CA-005-3: Dado que un ejercicio fue guardado exitosamente en la biblioteca, Cuando cualquier entrenador consulta el catalogo, Entonces puede ver y seleccionar el ejercicio recien creado, sin ningun paso de aprobacion intermedio"
-        - "CA-005-4: Dado que un usuario con rol ATHLETE intenta crear un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-        - "CA-005-5: Dado que un usuario sin autenticar intenta crear un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-008-1: Dado que un entrenador autenticado accede al modulo de creacion de planes, Cuando completa el nombre del plan, la fecha de inicio, la fecha de fin, y agrega al menos una fase con al menos una semana que contiene al menos una sesion con al menos un ejercicio, Entonces el plan queda guardado en estado Borrador con esa estructura completa"
+        - "CA-008-2: Dado que un entrenador esta construyendo un plan, Cuando lo guarda sin ninguna fase, o con fases sin semanas, o con semanas sin sesiones, o con sesiones sin ejercicios, Entonces el plan se guarda igualmente en estado Borrador, Y ve un mensaje indicando que aun no cumple los requisitos minimos para publicarse (al menos una fase con al menos una semana con al menos una sesion y cada sesion con al menos un ejercicio)"
+        - "CA-008-3: Dado que un entrenador agrega a una sesion del plan un ejercicio existente de la biblioteca global, Cuando el plan se guarda, Entonces la sesion queda vinculada a la version del ejercicio vigente en ese momento, de modo que si el ejercicio se modifica o se inhabilita despues, el plan conserva la version original"
+        - "CA-008-4: Dado que un usuario con rol ATHLETE intenta crear o modificar un plan de entrenamiento, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-008-5: Dado que un usuario sin autenticar intenta crear un plan de entrenamiento, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-008-6: Dado que un entrenador intenta modificar un plan en Borrador creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario del plan puede modificarlo"
       reglas_de_negocio:
-        - "RN-04: La biblioteca de ejercicios es global y unica, visible para todos los entrenadores"
-        - "RN-22: El Administrador tambien puede crear ejercicios, ademas del Entrenador"
+        - "RN-01: Plan valido = nombre + fecha inicio/fin + al menos una fase con al menos una semana con al menos una sesion + cada sesion con al menos un ejercicio"
+        - "RN-02: No existen planes open-ended (sin fecha de fin)"
+        - "RN-04: La biblioteca de ejercicios es global y unica; un plan solo puede referenciar ejercicios que existan en ella"
+        - "RN-07: Los planes conservan la version del ejercicio que tenian al momento de agregarlo, aunque el ejercicio se modifique o inhabilite despues"
+        - "RN-18: El entrenador es quien crea y publica los planes"
+        - "RN-31: El plan base actua como plantilla; cada atleta tendra su propia instancia personalizada"
       notas:
-        - "El supuesto original de la HU ('los campos del ejercicio no estan especificados; el equipo debe definirlos') quedo RESUELTO por decision del humano el 2026-08-05: name, description y muscleGroup, sin campos adicionales"
-        - "La creacion debe generar el ejercicio y su primera version en una sola operacion atomica ($transaction): un Exercise sin ninguna ExerciseVersion es un estado invalido del dominio"
-        - "CA-005-2 se preciso y CA-005-6 se agrego el 2026-08-05. La unicidad de nombre es case-insensitive, con trim, y aplica SOLO entre ejercicios activos. En Postgres se implementa con un indice unico parcial y funcional: CREATE UNIQUE INDEX ON exercises (lower(name)) WHERE is_active = true. El schema declarativo de Prisma no expresa ni el lower() ni el WHERE, asi que la migracion de esta epica lleva SQL escrito a mano"
-    - id: "HU-006"
-      titulo: "Modificacion de un ejercicio existente genera nueva version"
-      como: "entrenador o administrador"
-      quiero: "modificar la informacion de un ejercicio de la biblioteca"
-      para: "mantener el contenido actualizado sin afectar los planes que ya usan la version anterior"
+        - "DECISION CONFIRMADA (humano, 2026-08-20): la jerarquia del plan es Plan → Fase → Semana → Sesion → SessionExercise. La semana es una entidad propia (no un campo calculado desde las fechas), porque EPICA-05 necesita colgarle estado (abierta/cerrada/congelada) para el cierre de semana (RN-30), la inmutabilidad de una semana ya iniciada (RN-33), la asociacion de sensaciones semanales a la semana del plan (HU-016) y el congelamiento de datos para la IA (RN-09). Toda sesion pertenece a una semana, y toda semana a una fase; no existen sesiones sueltas ni semanas fuera de fase. Este es el reemplazo confirmado del supuesto SUP-04 del documento fuente"
+        - "Guardar un plan incompleto (sin fases, sin semanas, sin sesiones, o con sesiones sin ejercicios) SIEMPRE es posible en Borrador (CA-008-2). RN-01 solo bloquea al momento de PUBLICAR (ver HU-009, CA-009-2). Borrador es un unico estado, sin sub-estados de 'incompleto/completo'"
+        - "CA-008-3 es el punto que conecta con el gap declarado de EPICA-02: al vincular una sesion a una version especifica del ejercicio, el metodo isUsedInPlan(exerciseId) de exercises.service.ts deja de retornar false siempre y pasa a consultar contra las sesiones de los planes existentes"
+        - "Solo se pueden agregar a una sesion ejercicios ACTIVOS de la biblioteca (heredado del catalogo filtrado de EPICA-02, CA-007-2 de esa epica); un ejercicio inhabilitado no aparece como opcion para planes nuevos"
+    - id: "HU-009"
+      titulo: "Publicacion de un plan de entrenamiento"
+      como: "entrenador"
+      quiero: "publicar un plan que ya cumple los requisitos minimos de validez"
+      para: "que quede visible en el catalogo y los atletas puedan explorarlo y solicitar inscribirse"
       criterios_de_aceptacion:
-        - "CA-006-1: Dado que un entrenador o administrador edita un ejercicio que ya fue incluido en al menos un plan, Cuando guarda los cambios, Entonces se crea una version nueva con versionNumber incrementado en uno, Y la version anterior permanece sin cambios y sigue siendo la que referencian los planes que ya la usaban"
-        - "CA-006-2: Dado que un entrenador consulta el detalle de un ejercicio de la biblioteca, Cuando el ejercicio tiene mas de una version, Entonces obtiene el historial de versiones con el numero y la fecha de creacion de cada una"
-        - "CA-006-3: Dado que un entrenador o administrador edita un ejercicio que aun no ha sido incluido en ningun plan, Cuando guarda los cambios, Entonces la version vigente se actualiza en el lugar y NO se crea una version nueva"
-        - "CA-006-4: Dado que un entrenador o administrador intenta modificar un ejercicio que no existe, Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio no fue encontrado"
-        - "CA-006-5: Dado que un usuario con rol ATHLETE intenta modificar un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-        - "CA-006-6: Dado que un entrenador o administrador intenta modificar un ejercicio que ya fue inhabilitado (isActive = false), Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio ya no esta activo, sin crear una version nueva ni alterar la vigente"
+        - "CA-009-1: Dado que un entrenador tiene un plan propio en Borrador con nombre, fecha de inicio, fecha de fin, y al menos una fase con al menos una semana con al menos una sesion con al menos un ejercicio, Cuando lo publica, Entonces el plan cambia a estado Publicado, Y pasa a ser visible en el catalogo de planes para los atletas"
+        - "CA-009-2: Dado que un entrenador tiene un plan propio en Borrador que no cumple los requisitos minimos de validez (fechas incompletas, o sin fases, semanas, sesiones o ejercicios), Cuando intenta publicarlo, Entonces ve un mensaje indicando cuales requisitos le faltan, Y el plan permanece en Borrador"
+        - "CA-009-3: Dado que un entrenador tiene un plan propio en Publicado sin atletas suscritos, Cuando lo regresa a Borrador, Entonces el plan deja de ser visible en el catalogo, Y el entrenador puede seguir editando la plantilla base"
+        - "CA-009-4: Dado que un entrenador tiene un plan propio en Publicado, Cuando intenta modificar la fecha de inicio, la fecha de fin, o la cantidad, el orden o las semanas y sesiones de sus fases, Entonces ve un mensaje indicando que esa estructura es inmutable una vez publicado el plan"
+        - "CA-009-5: Dado que un entrenador intenta publicar, despublicar o modificar el estado de un plan creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario puede cambiar el estado del plan"
+        - "CA-009-6: Dado que un usuario con rol ATHLETE intenta publicar o despublicar un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-009-7: Dado que un entrenador tiene un plan propio en Publicado con al menos un atleta suscrito, Cuando intenta regresarlo a Borrador, Entonces ve un mensaje indicando que no puede despublicarse mientras tenga atletas suscritos, Y el plan permanece en Publicado"
       reglas_de_negocio:
-        - "RN-05: Los ejercicios son inmutables una vez usados; los cambios generan una version nueva"
-        - "RN-07: Los planes activos conservan la version original del ejercicio"
+        - "RN-27: Estados del plan: Borrador, Publicado, Finalizado, Archivado"
+        - "RN-01: Un plan solo puede publicarse si cumple los requisitos minimos de validez"
+        - "RN-02: La fecha de fin es obligatoria para publicar"
+        - "RN-03: No es obligatorio tener atletas suscritos para publicar un plan"
+        - "RN-31: La duracion total (fechas) y la estructura de fases y semanas quedan inmutables una vez publicado el plan"
       notas:
-        - "La decision entre versionar y editar en el lugar depende de si el ejercicio fue usado en algun plan. El modelo de planes es EPICA-03 y el de instancias EPICA-05: en esta epica no existe la tabla contra la cual consultarlo"
-        - "Por decision del humano del 2026-08-05 la epica se implementa completa: la verificacion de uso se aisla detras de un unico metodo del service que hoy devuelve siempre false, para que EPICA-03 lo conecte cambiando un solo punto. Las dos ramas (usado y no usado) se cubren con tests unitarios mockeando ese metodo"
-        - "Consecuencia aceptada: CA-006-1 y CA-006-3 no son verificables end-to-end en esta epica, solo en tests unitarios. Su cobertura e2e llega con EPICA-03. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio"
-        - "CA-006-6 se agrego el 2026-08-05 por decision del humano, tras detectar el Arquitecto que ninguna CA definia el comportamiento del PATCH sobre un ejercicio inhabilitado. Usa EXERCISE_INACTIVE, la misma entrada del catalogo que la doble inhabilitacion. Racional: un ejercicio retirado del catalogo no debe seguir mutandose, y como esta epica no define reactivacion, en la practica queda congelado — que es lo coherente con RN-06"
-    - id: "HU-007"
-      titulo: "Inhabilitacion de un ejercicio en la biblioteca"
-      como: "entrenador o administrador"
-      quiero: "inhabilitar un ejercicio de la biblioteca"
-      para: "que no pueda ser seleccionado en nuevos planes, sin borrar el historial de planes donde ya se uso"
+        - "DECISION CONFIRMADA (humano, 2026-08-20): igual que EPICA-02 con isUsedInPlan(exerciseId), la verificacion de si un plan tiene atletas suscritos se aisla detras de un unico metodo del service, hasSubscribers(planId), que hoy retorna siempre false porque el modelo de suscripciones es de EPICA-04 y todavia no existe. Las dos ramas (con suscritos: CA-009-7: y sin suscritos: CA-009-3) se cubren con tests unitarios mockeando ese metodo. Consecuencia aceptada: CA-009-7 NO es verificable end-to-end en esta epica, solo en tests unitarios; su cobertura e2e llega con EPICA-04. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio"
+        - "CA-009-4 solo cubre fechas y la estructura de fases y semanas (RN-31). El documento fuente no define si otros cambios a la plantilla base (por ejemplo, cambiar un ejercicio dentro de una sesion existente) siguen permitidos despues de publicar; queda fuera de alcance de esta epica y no se asume ninguna respuesta"
+    - id: "HU-010"
+      titulo: "Finalizacion y archivo de un plan de entrenamiento"
+      como: "entrenador"
+      quiero: "gestionar el cierre de un plan cuando llega a su fecha de fin o cuando decido retirarlo"
+      para: "mantener el catalogo actualizado y controlar en que estado queda cada plan"
       criterios_de_aceptacion:
-        - "CA-007-1: Dado que un entrenador o administrador accede a un ejercicio activo de la biblioteca, Cuando lo inhabilita, Entonces el ejercicio pasa a isActive = false, deja de aparecer en el catalogo de ejercicios disponibles, Y la operacion procede sin importar si el ejercicio esta siendo usado en algun plan"
-        - "CA-007-2: Dado que un entrenador consulta el catalogo para construir un plan, Cuando un ejercicio esta inhabilitado, Entonces no aparece en los resultados por defecto ni puede seleccionarse"
-        - "CA-007-3: Dado que se consulta un ejercicio inhabilitado por su identificador, Cuando la consulta es directa y no un listado, Entonces el ejercicio es legible junto con sus versiones y su estado inactivo, de modo que un plan historico pueda mostrarlo indicando que ya no esta activo en la biblioteca"
-        - "CA-007-4: Dado que un entrenador o administrador intenta inhabilitar un ejercicio que ya esta inhabilitado, Cuando envia la peticion, Entonces la operacion se rechaza indicando que el ejercicio ya no esta activo"
-        - "CA-007-5: Dado que un usuario con rol ATHLETE intenta inhabilitar un ejercicio, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-010-1: Dado que un plan publicado alcanzo su fecha de fin, Cuando se consulta el plan a partir de esa fecha, Entonces su estado se refleja como Finalizado"
+        - "CA-010-2: Dado que un entrenador tiene un plan propio en Borrador, Publicado o Finalizado, Cuando decide archivarlo manualmente, Entonces el plan cambia a estado Archivado, Y deja de ser visible en el catalogo de planes"
+        - "CA-010-3: Dado que un entrenador tiene un plan propio ya Archivado, Cuando intenta archivarlo de nuevo, Entonces ve un mensaje indicando que el plan ya esta archivado"
+        - "CA-010-4: Dado que un entrenador intenta archivar un plan creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario puede archivarlo"
+        - "CA-010-5: Dado que un usuario con rol ATHLETE intenta archivar o cambiar el estado de un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
       reglas_de_negocio:
-        - "RN-06: Los ejercicios no se eliminan, solo se inhabilitan"
-        - "RN-07: Los planes activos conservan el ejercicio aunque este sea inhabilitado despues"
+        - "RN-27: Estados del plan: Borrador, Publicado, Finalizado, Archivado"
+        - "RN-28: Un plan Finalizado sigue permitiendo que los atletas ya suscritos registren resultados de sesiones pendientes (la implementacion de ese registro es de EPICA-05)"
+        - "RN-29: Un plan Archivado no es visible para los atletas y no acepta nuevos registros de resultados (la implementacion de ese bloqueo es de EPICA-04/EPICA-05)"
       notas:
-        - "La inhabilitacion NUNCA se bloquea por uso. Bloquearla haria imposible retirar un ejercicio popular, y contradice CA-007-1. La entrada EXERCISE_IN_USE del catalogo de errores NO se usa en esta epica"
-        - "CA-007-4 usa la entrada EXERCISE_INACTIVE, que ya existe en el catalogo de errores"
-        - "No se define reactivacion de un ejercicio inhabilitado: ninguna HU la pide y agregarla ampliaria el alcance"
+        - "El mecanismo tecnico por el cual el plan pasa a Finalizado al llegar la fecha de fin (job programado, evaluacion perezosa u otro) es decision de la etapa de arquitectura; esta HU solo exige el resultado observable descrito en CA-010-1"
+        - "'Cierre de semana' (RN-30, EPICA-05) es un concepto distinto de la finalizacion del plan definida aqui. Esta epica crea la entidad Semana como parte de la estructura del plan (ver HU-008), pero su ciclo de vida (abierta/cerrada/congelada) y el evento de cierre automatico son responsabilidad de EPICA-05; no deben confundirse"
+        - "Fuera de alcance: el bloqueo de nuevas inscripciones en un plan Finalizado, el bloqueo de registro de resultados en un plan Archivado (RN-28, RN-29), y la vista del atleta sobre sus propias suscripciones distinguiendo un plan Finalizado de uno Archivado (CA-010-3 del documento fuente original) pertenecen a EPICA-04 y EPICA-05. Esta HU solo garantiza que el ESTADO del plan quede correctamente reflejado"
+    - id: "HU-011"
+      titulo: "Exploracion del catalogo de entrenadores y planes publicados"
+      como: "atleta registrado en la plataforma"
+      quiero: "explorar los planes publicados y la informacion publica de los entrenadores que los ofrecen"
+      para: "encontrar el plan que mejor se adapte a mis objetivos antes de solicitar inscribirme"
+      criterios_de_aceptacion:
+        - "CA-011-1: Dado que un atleta autenticado que completo su registro inicial (Fase 1) navega al catalogo de planes, Cuando consulta el listado, Entonces ve los planes en estado Publicado de todos los entrenadores, cada uno con el nombre del plan, sus fechas, y los datos publicos del entrenador que lo publico: nombre y, si lo tiene cargado, avatar"
+        - "CA-011-2: Dado que el atleta esta explorando el catalogo, Cuando selecciona un plan especifico, Entonces ve el detalle del plan (nombre, descripcion, fecha de inicio, fecha de fin, y la estructura de fases, semanas y sesiones con la cantidad de ejercicios de cada una), Y ve el perfil publico del entrenador que lo ofrece: nombre, avatar (si lo tiene), la descripcion de su propuesta de entrenamiento y su banner (si lo tiene)"
+        - "CA-011-3: Dado que existen planes en estado Borrador, Finalizado o Archivado, Cuando el atleta consulta el catalogo, Entonces esos planes no aparecen en el listado de planes disponibles"
+        - "CA-011-4: Dado que un usuario sin autenticar intenta consultar el catalogo de planes, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+      reglas_de_negocio:
+        - "RN-25: El atleta pasa por dos fases: Fase 1 (registro y exploracion) y Fase 2 (inscripcion a un plan con aprobacion del entrenador)"
+        - "RN-26: El atleta en Fase 1 puede explorar entrenadores y planes publicados sin estar suscrito"
+        - "RN-27: Solo los planes en estado Publicado son visibles en el catalogo"
+        - "RN-24: Datos obligatorios del entrenador: nombre/centro, email, telefono, numero de identificacion, descripcion; el catalogo solo expone el subconjunto no sensible: nombre y avatar (User), y descripcion y banner (CoachRequest.planDescription y CoachRequest.bannerUrl)"
+      notas:
+        - "DECISION CONFIRMADA (humano, 2026-08-20): el perfil publico del entrenador expuesto en el catalogo se limita a los campos verificados contra prisma/schema.prisma: id y name de User; avatarUrl de User (opcional); description, mapeado desde CoachRequest.planDescription; y bannerUrl, mapeado desde CoachRequest.bannerUrl (opcional). Quedan EXCLUIDOS por la Ley 1581/2012 y NUNCA se exponen a un atleta: email, phone, phoneCountryCode, identificationType, identificationNumber, dateOfBirth. User NO tiene campos 'centro' ni 'descripcion' propios"
+        - "planDescription y bannerUrl viven en CoachRequest, la solicitud de onboarding que el entrenador redacto y que un ADMIN aprobo en EPICA-01: son texto propio del entrenador que ya paso revision humana, lo que los hace aptos para publicarse. Consecuencia para el Arquitecto: el perfil publico de un entrenador solo existe para entrenadores con una CoachRequest aprobada"
+        - "No se define en esta HU un perfil de entrenador mas amplio que los campos listados arriba (historial, calificaciones, testimonios). Si el negocio lo requiere, se documenta como una HU o epica futura, no como parte de este alcance"
