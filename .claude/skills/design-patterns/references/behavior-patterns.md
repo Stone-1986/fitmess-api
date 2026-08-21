@@ -59,8 +59,18 @@ async unpublish(planId: string, coachId: string): Promise<Plan> {
     );
   }
 
+  // Cuenta APPROVED o ACTIVE, NUNCA PENDING (decision del humano,
+  // EPICA-04): una solicitud sin responder no es un suscriptor — el propio
+  // coach puede rechazarla en el mismo momento en que intenta despublicar,
+  // asi que bloquearlo por ella no tiene sentido de negocio. Un
+  // `{ not: REJECTED }` incluiria las Pendientes y compila igual: es un
+  // error silencioso que solo detecta un test que cree una suscripcion
+  // Pendiente y verifique que la despublicacion SI procede.
   const subscriberCount = await this.prisma.subscription.count({
-    where: { planId, status: { not: SubscriptionStatus.REJECTED } },
+    where: {
+      planId,
+      status: { in: [SubscriptionStatus.APPROVED, SubscriptionStatus.ACTIVE] },
+    },
   });
 
   if (subscriberCount > 0) {
@@ -191,9 +201,16 @@ async approve(subscriptionId: string, coachId: string): Promise<Subscription> {
     );
   }
 
+  // reviewedAt/reviewedBy, no `approvedAt`: los escriben JUNTOS approve() y
+  // reject(), porque son la misma pregunta ("quien decidio y cuando") con
+  // dos respuestas posibles.
   const updated = await this.prisma.subscription.update({
     where: { id: subscriptionId },
-    data: { status: SubscriptionStatus.APPROVED, approvedAt: new Date() },
+    data: {
+      status: SubscriptionStatus.APPROVED,
+      reviewedAt: new Date(),
+      reviewedBy: coachId,
+    },
   });
 
   this.eventEmitter.emit(
@@ -204,7 +221,10 @@ async approve(subscriptionId: string, coachId: string): Promise<Subscription> {
   return updated;
 }
 
-async reject(subscriptionId: string, coachId: string, reason: string): Promise<Subscription> {
+// Sin parametro `reason`: ninguna CA de HU-013 pide capturar un motivo de
+// rechazo, a diferencia de CoachRequest.rejectionReason de EPICA-01. El
+// modelo Subscription NO tiene esa columna.
+async reject(subscriptionId: string, coachId: string): Promise<Subscription> {
   const sub = await this.findOrFail(subscriptionId);
 
   if (sub.status !== SubscriptionStatus.PENDING) {
@@ -215,22 +235,96 @@ async reject(subscriptionId: string, coachId: string, reason: string): Promise<S
     );
   }
 
-  return this.prisma.subscription.update({
+  const updated = await this.prisma.subscription.update({
     where: { id: subscriptionId },
-    data: { status: SubscriptionStatus.REJECTED, rejectedReason: reason },
+    data: {
+      status: SubscriptionStatus.REJECTED,
+      reviewedAt: new Date(),
+      reviewedBy: coachId,
+    },
   });
+
+  this.eventEmitter.emit(
+    'subscription.rejected',
+    new SubscriptionRejectedEvent(subscriptionId, sub.planId, sub.athleteId),
+  );
+
+  return updated;
+}
+
+// APPROVED -> ACTIVE. NO hay estado intermedio: "esperando consentimiento"
+// es `status = APPROVED` con `activatedAt = null`, no un valor del enum.
+async acceptConsent(
+  subscriptionId: string,
+  athleteId: string,
+  documentVersion: string,
+  ip: string,
+  userAgent: string,
+): Promise<Subscription> {
+  const sub = await this.findOwnOrFail(subscriptionId, athleteId);
+
+  if (sub.status !== SubscriptionStatus.APPROVED) {
+    throw new BusinessException(
+      BusinessError.INVALID_STATE_TRANSITION,
+      `No se puede aceptar el consentimiento de la suscripcion '${subscriptionId}' desde estado '${sub.status}'`,
+      { entity: 'Subscription', currentState: sub.status, targetState: 'ACTIVE' },
+    );
+  }
+
+  // El plan debe seguir VIGENTE (CA-014-8). No basta con leer la columna:
+  // un plan con status PUBLISHED y endDate pasada esta efectivamente
+  // Finalizado, y la columna solo se corrige cuando el propio coach lee su
+  // plan. Un `plan.status !== PUBLISHED` a secas deja pasar justo ese caso.
+  if (!this.isPlanCurrentlyPublished(sub.plan)) {
+    throw new BusinessException(
+      BusinessError.PLAN_NOT_PUBLISHED,
+      `El plan '${sub.planId}' ya no esta vigente`,
+      { planId: sub.planId },
+    );
+  }
+
+  // Atomico: la aceptacion legal y la activacion son un solo hecho.
+  const [, updated] = await this.prisma.$transaction([
+    this.prisma.legalAcceptance.create({
+      data: {
+        userId: athleteId,
+        documentType: DocumentType.SPORT_CONSENT,
+        documentVersion,
+        planId: sub.planId,
+        ip,
+        userAgent,
+      },
+    }),
+    this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: { status: SubscriptionStatus.ACTIVE, activatedAt: new Date() },
+    }),
+  ]);
+
+  this.eventEmitter.emit(
+    'subscription.activated',
+    new SubscriptionActivatedEvent(subscriptionId, sub.planId, athleteId),
+  );
+
+  return updated;
 }
 ```
 
-```prisma
-enum SubscriptionStatus {
-  PENDING
-  APPROVED
-  CONSENT_PENDING
-  ACTIVE
-  REJECTED
-}
+`SubscriptionStatus` tiene **cuatro** valores y se importa SIEMPRE desde
+`generated/prisma` — nunca se redefine aqui ni en ningun modulo
+(`rulesCodigo § Enums`):
+
+```typescript
+import { SubscriptionStatus } from '../../../generated/prisma/index.js';
+// PENDING | APPROVED | REJECTED | ACTIVE
 ```
+
+No existe un `CONSENT_PENDING`: la espera del consentimiento ya es
+observable como `status = APPROVED` con `activatedAt = null`. Agregar ese
+quinto valor romperia ademas el indice unico parcial de `subscriptions`,
+cuyo `WHERE status IN ('PENDING','APPROVED','ACTIVE')` no lo cubriria — una
+fila parada ahi escaparia de la unicidad y el mismo atleta podria abrir una
+segunda suscripcion viva al mismo plan.
 
 ---
 
@@ -549,15 +643,21 @@ export class InstanceFactoryService {
 **Listener que invoca el deep copy:**
 
 ```typescript
-// src/modules/execution/listeners/subscription-approved.listener.ts
+// src/modules/execution/listeners/subscription-activated.listener.ts
+//
+// Cuelga de subscription.activated, NO de subscription.approved. La
+// aprobacion del entrenador no habilita nada por si sola: el atleta todavia
+// debe aceptar el consentimiento informado (EPICA-04, HU-014). Crear la
+// instancia al aprobar le daria un plan de ejecucion a alguien que no
+// consintio — justo lo que CA-014-8 prohibe.
 @Injectable()
-export class SubscriptionApprovedListener {
-  private readonly logger = new Logger(SubscriptionApprovedListener.name);
+export class SubscriptionActivatedListener {
+  private readonly logger = new Logger(SubscriptionActivatedListener.name);
 
   constructor(private readonly instanceFactory: InstanceFactoryService) {}
 
-  @OnEvent('subscription.approved')
-  async handle(event: SubscriptionApprovedEvent): Promise<void> {
+  @OnEvent('subscription.activated')
+  async handle(event: SubscriptionActivatedEvent): Promise<void> {
     try {
       await this.instanceFactory.createInstanceFromPlan(event.planId, event.athleteId);
       this.logger.log(`Instancia creada para atleta ${event.athleteId} en plan ${event.planId}`);

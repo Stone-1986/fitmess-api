@@ -346,34 +346,34 @@ describe('WeekFrozenGuard', () => {
 Los listeners requieren try/catch. Testear que NO relanzan excepciones y que loggean el error.
 
 ```typescript
-// src/modules/execution/listeners/subscription-approved.listener.spec.ts
+// src/modules/execution/listeners/subscription-activated.listener.spec.ts
 import { Test, TestingModule } from '@nestjs/testing';
-import { SubscriptionApprovedListener } from './subscription-approved.listener';
+import { SubscriptionActivatedListener } from './subscription-activated.listener';
 import { InstanceFactoryService } from '../services/instance-factory.service';
-import { SubscriptionApprovedEvent } from '../../subscriptions/events/subscription-approved.event';
+import { SubscriptionActivatedEvent } from '../../subscriptions/events/subscription-activated.event';
 
 const mockInstanceFactory = {
   createInstanceFromPlan: vi.fn(),
 };
 
-describe('SubscriptionApprovedListener', () => {
-  let listener: SubscriptionApprovedListener;
+describe('SubscriptionActivatedListener', () => {
+  let listener: SubscriptionActivatedListener;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        SubscriptionApprovedListener,
+        SubscriptionActivatedListener,
         { provide: InstanceFactoryService, useValue: mockInstanceFactory },
       ],
     }).compile();
 
-    listener = module.get<SubscriptionApprovedListener>(SubscriptionApprovedListener);
+    listener = module.get<SubscriptionActivatedListener>(SubscriptionActivatedListener);
   });
 
   afterEach(() => vi.clearAllMocks());
 
-  it('crea instancia al recibir evento subscription.approved', async () => {
-    const event = new SubscriptionApprovedEvent('sub-uuid', 'plan-uuid', 'athlete-uuid', 'coach-uuid');
+  it('crea instancia al recibir evento subscription.activated', async () => {
+    const event = new SubscriptionActivatedEvent('sub-uuid', 'plan-uuid', 'athlete-uuid');
 
     mockInstanceFactory.createInstanceFromPlan.mockResolvedValue({ id: 'instance-uuid' });
 
@@ -383,7 +383,7 @@ describe('SubscriptionApprovedListener', () => {
   });
 
   it('NO relanza si el service falla — solo loggea', async () => {
-    const event = new SubscriptionApprovedEvent('sub-uuid', 'plan-uuid', 'athlete-uuid', 'coach-uuid');
+    const event = new SubscriptionActivatedEvent('sub-uuid', 'plan-uuid', 'athlete-uuid');
 
     mockInstanceFactory.createInstanceFromPlan.mockRejectedValue(new Error('DB connection lost'));
 

@@ -47,10 +47,19 @@ DRAFT ──publish──→ PUBLISHED ──finalize──→ FINALIZED ──a
 **Subscription Lifecycle:**
 
 ```
-PENDING ──approve──→ APPROVED ──request_consent──→ CONSENT_PENDING ──accept──→ ACTIVE
+PENDING ──approve──→ APPROVED ──accept-consent──→ ACTIVE
   │
-  └──reject──→ REJECTED
+  └──reject──→ REJECTED ──(el atleta puede volver a solicitar)──→ PENDING
 ```
+
+**Cuatro estados, no cinco.** "Esperando consentimiento" NO es un estado del
+enum: es `APPROVED` con `activatedAt = null`. Un `CONSENT_PENDING` rompería
+además el índice único parcial de `subscriptions`, cuyo
+`WHERE status IN ('PENDING','APPROVED','ACTIVE')` no lo cubriría.
+
+`REJECTED` no es terminal para el par (atleta, plan): un rechazo permite una
+solicitud nueva, que crea otra fila. Por eso la unicidad va por índice
+parcial y no por `@@unique([athleteId, planId])`.
 
 Implementacion completa → [references/behavior-patterns.md](references/behavior-patterns.md)
 
@@ -146,8 +155,9 @@ Tabla autoritativa de todos los eventos del sistema. Convencion: `[entidad].[acc
 | `plan.archived` | plans | subscriptions, execution |
 | `plan.finalized` | plans | subscriptions |
 | `subscription.requested` | subscriptions | notifications |
-| `subscription.approved` | subscriptions | execution (deep copy), notifications |
-| `subscription.cancelled` | subscriptions | plans, notifications |
+| `subscription.approved` | subscriptions | notifications |
+| `subscription.rejected` | subscriptions | notifications |
+| `subscription.activated` | subscriptions | execution (deep copy), notifications |
 | `week.closed` | execution | ai, metrics |
 | `execution.completed` | execution | metrics, ai |
 | `ai.recommendation.approved` | ai | execution |
