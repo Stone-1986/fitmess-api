@@ -250,6 +250,16 @@
         "description": "Autentica al usuario con email y password via Passport LocalStrategy. Retorna accessToken JWT y refreshToken. El mensaje de error es identico para email inexistente y password incorrecto (anti-enumeracion, Ley 1273/2009). Bloqueo por cuenta tras 5 intentos fallidos consecutivos durante 15 minutos (Ley 1273/2009, OWASP 2025). ThrottlerGuard aplica automaticamente como medida adicional contra fuerza bruta (100 req/min). El entrenador con solicitud PENDING o REJECTED no puede iniciar sesion.",
         "operationId": "AuthController_login",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Autenticacion exitosa. Retorna tokens de acceso.",
@@ -257,16 +267,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AuthTokenResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Error de validacion en los datos de inicio de sesion",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailDto"
                 }
               }
             }
@@ -3775,6 +3775,27 @@
           "email",
           "role",
           "createdAt"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Correo electronico del usuario",
+            "example": "usuario@ejemplo.com",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "description": "Contrasena del usuario. NUNCA se loggea.",
+            "example": "MiContrasena2026!",
+            "maxLength": 72
+          }
+        },
+        "required": [
+          "email",
+          "password"
         ]
       },
       "AuthUserDto": {

@@ -7,11 +7,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { ApiProblemResponse } from '../../common/swagger/error-responses.js';
 import { AuthService } from './auth.service.js';
 import { LocalAuthGuard } from '../shared/guards/local-auth.guard.js';
+import { LoginDto } from './dto/login.dto.js';
 import { RegisterCoachDto } from './dto/register-coach.dto.js';
 import { RegisterAthleteDto } from './dto/register-athlete.dto.js';
 import { RegisterAdminDto } from '../admin-invitations/dto/register-admin.dto.js';
@@ -199,6 +200,12 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @UseGuards(LocalAuthGuard)
+  // El body lo consume LocalStrategy via Passport, no un parametro @Body() del
+  // handler, asi que Swagger no puede inferir su forma — sin este @ApiBody el
+  // contrato publica el endpoint SIN requestBody y un cliente no sabe que debe
+  // enviar. Es documentacion pura: no vincula el DTO al pipeline ni cambia el
+  // runtime (hallazgo #3).
+  @ApiBody({ type: LoginDto })
   @ApiOperation({
     security: [],
     summary: 'Iniciar sesion en la plataforma',
@@ -215,10 +222,13 @@ export class AuthController {
     description: 'Autenticacion exitosa. Retorna tokens de acceso.',
     type: AuthTokenResponseDto,
   })
-  @ApiProblemResponse(
-    400,
-    'Error de validacion en los datos de inicio de sesion',
-  )
+  // SIN @ApiProblemResponse(400): es inalcanzable en esta ruta y documentarlo
+  // era una promesa que el runtime no puede cumplir (hallazgo #3). Los guards
+  // corren ANTES que los pipes en NestJS, asi que LocalAuthGuard resuelve la
+  // peticion antes de que el ValidationPipe pueda intervenir; y ademas el
+  // handler no recibe ningun @Body(), de modo que no hay nada que validar. Un
+  // body vacio o malformado responde 401 INVALID_CREDENTIALS, que es coherente
+  // con el diseno anti-enumeracion del endpoint.
   @ApiProblemResponse(401, 'Credenciales invalidas')
   @ApiProblemResponse(
     403,

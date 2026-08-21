@@ -583,11 +583,17 @@ describe('POST /api/auth/login — HU-004: Inicio de sesion', () => {
   });
 
   it('401 — falla cuando falta el campo email', async () => {
-    // NOTA: se espera 401 y no 400. En NestJS los guards corren ANTES de los pipes,
-    // asi que LocalAuthGuard intercepta el request antes de que el ValidationPipe
-    // evalue el LoginDto: Passport no encuentra el campo email y responde 401.
-    // El decorador @ApiProblemResponse(400) del endpoint documenta un status que el
-    // runtime no puede producir — discrepancia contrato/codigo pendiente de decidir.
+    // NOTA: se espera 401 y no 400, y esto es el comportamiento DECIDIDO, no una
+    // discrepancia pendiente. En NestJS los guards corren ANTES de los pipes, asi
+    // que LocalAuthGuard intercepta el request antes de que el ValidationPipe
+    // pueda intervenir: Passport no encuentra el campo email y responde 401.
+    // Ademas el handler no recibe ningun @Body(), de modo que no hay nada que
+    // validar aunque el orden fuera el inverso.
+    // El hallazgo #3 se cerro el 2026-08-21 quitando el @ApiProblemResponse(400)
+    // del endpoint en vez de forzar el 400 movilizando la validacion antes del
+    // guard: el 401 no filtra informacion y es coherente con el diseno
+    // anti-enumeracion ya documentado en la descripcion del endpoint. Este test
+    // es lo que impide que alguien vuelva a agregar ese 400 al contrato.
     const response = await supertest(app.getHttpServer())
       .post('/api/auth/login')
       .send({ password: 'Password123' })
