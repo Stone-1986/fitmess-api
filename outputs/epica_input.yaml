@@ -1,155 +1,146 @@
 epica:
-  id: "EPICA-03"
-  titulo: "Creacion y Publicacion de Planes de Entrenamiento"
+  id: "EPICA-04"
+  titulo: "Inscripcion de Atletas a Planes"
   objetivo_de_negocio: >
-    Permitir que los entrenadores construyan planes de entrenamiento estructurados
-    (nombre, fechas, fases, semanas, sesiones y ejercicios), los publiquen para que
-    los atletas los descubran en el catalogo, y gestionen su ciclo de vida completo
-    (Borrador, Publicado, Finalizado, Archivado). Esta epica es el puente entre la
-    biblioteca de ejercicios (EPICA-02) y la inscripcion de atletas (EPICA-04): sin un
-    plan publicado no hay nada a lo que un atleta pueda suscribirse.
+    Gestionar el flujo completo de suscripcion de un atleta a un plan de entrenamiento
+    publicado: la solicitud del atleta, la aprobacion o rechazo del entrenador, y la
+    aceptacion del consentimiento informado deportivo, cumpliendo los requisitos legales
+    de cada inscripcion de forma independiente por plan. Criterio de exito: ningun
+    atleta puede iniciar sesiones de un plan sin haber completado las tres etapas del
+    flujo (solicitud, aprobacion, consentimiento).
   contexto_de_aplicacion: >
     Plataforma de entrenamiento deportivo personalizado (fitmess-api). EPICA-01,
-    EPICA-09 y EPICA-02 ya estan implementadas en main: existen los roles ATHLETE,
-    COACH y ADMIN en el enum UserRole, los guards JwtAuthGuard + RolesGuard viven en
-    src/modules/common/, y el schema de Prisma tiene User, CoachRequest,
-    LegalAcceptance, AuditLog, RefreshToken, AdminInvitation, Exercise y
-    ExerciseVersion. No existe ninguna tabla de planes, fases, semanas, sesiones ni
-    suscripciones: todo eso lo crea esta epica.
+    EPICA-09, EPICA-02 y EPICA-03 ya estan implementadas en main: existen los roles
+    ATHLETE, COACH y ADMIN en el enum UserRole; los guards JwtAuthGuard + RolesGuard
+    viven en src/modules/common/; el modelo Plan (con su jerarquia Fase -> Semana ->
+    Sesion -> SessionExercise) esta implementado con los cuatro estados de RN-27
+    (Borrador, Publicado, Finalizado, Archivado); y el modelo LegalAcceptance
+    (append-only, con documentType, documentVersion, ip, userAgent y momento de
+    aceptacion) ya registra la aceptacion de documentos legales del atleta en su
+    registro inicial (EPICA-01, HU-003).
 
-    EPICA-02 dejo un punto de integracion explicito: el metodo privado
-    isUsedInPlan(exerciseId) en src/modules/exercises/exercises.service.ts:345 hoy
-    siempre retorna false porque no existe tabla de planes. Esta epica debe conectarlo
-    con una consulta real contra las sesiones de los planes. Mientras eso no ocurra,
-    CA-006-1 de EPICA-02 (modificar un ejercicio ya usado en un plan crea version
-    nueva) no es verificable end-to-end.
+    El schema de Prisma ya anticipa esta epica en dos puntos concretos, verificados
+    contra prisma/schema.prisma:
 
-    Los campos del ejercicio (name, description, muscleGroup) quedaron cerrados en
-    EPICA-02 por decision del humano del 2026-08-05; esta epica no reabre esa
-    decision. El modelo ExerciseVersion es append-only (id propio, versionNumber,
-    @@unique([exerciseId, versionNumber])); un ejercicio inhabilitado (isActive=false)
-    sigue siendo legible por id junto con todas sus versiones, que es lo que RN-07
-    exige que los planes aprovechen para conservar la version original del ejercicio.
+    1. El enum SubscriptionStatus (PENDING, APPROVED, REJECTED, ACTIVE) ya existe,
+    definido junto a PlanStatus desde el diseno base, aunque el modelo Subscription (la
+    tabla en si, con sus relaciones a User y Plan) todavia no existe: crearlo es
+    responsabilidad de esta epica. Sus cuatro valores encajan exactamente con las tres
+    HUs de esta epica: PENDING es el resultado de la solicitud del atleta (HU-012),
+    APPROVED/REJECTED son la decision del entrenador (HU-013), y ACTIVE es el resultado
+    de que el atleta acepte el consentimiento informado deportivo (HU-014). El
+    comentario del modelo Plan en el schema lo confirma explicitamente: "EPICA-04/05
+    referenciaran desde Subscription/SessionResult".
+
+    2. El enum DocumentType ya incluye el valor SPORT_CONSENT (junto a HABEAS_DATA,
+    TERMS_OF_SERVICE y HEALTH_DATA_CONSENT, usados en EPICA-01), y LegalAcceptance ya
+    tiene un campo planId opcional sin uso hasta ahora. Esto indica que el
+    consentimiento informado deportivo de HU-014 se registra con el mismo mecanismo de
+    trazabilidad legal que el habeas data del registro inicial: un registro append-only
+    con documentType = SPORT_CONSENT y planId apuntando al plan especifico, uno por cada
+    par (atleta, plan), lo que cumple RN-20 (el consentimiento se acepta de forma
+    independiente en cada inscripcion).
+
+    Esta epica tambien resuelve el punto de integracion que EPICA-03 dejo
+    deliberadamente abierto: el metodo privado hasSubscribers(planId) en
+    src/modules/plans/plans.service.ts hoy siempre retorna false porque no existia
+    tabla de suscripciones. El comentario del propio metodo indica que EPICA-04 debe
+    reemplazar unicamente su cuerpo por una consulta real contra Subscription, sin
+    tocar el resto de unpublish(). Mientras eso no ocurra, CA-009-7 de EPICA-03
+    (bloqueo de despublicacion de un plan con atletas suscritos) no es verificable
+    end-to-end, solo por test unitario — ese gap fue documentado y aceptado en EPICA-03
+    con la condicion explicita de resolverse aqui.
   restricciones_conocidas:
-    - "No existen planes open-ended: la fecha de fin es obligatoria para publicar (RN-02)"
-    - "Solo el rol COACH crea, edita, publica, despublica y archiva planes (RN-18). El rol ATHLETE solo explora el catalogo publicado (HU-011). El documento fuente no le da al rol ADMIN ninguna funcion sobre planes"
-    - "RN-07 exige que los planes conserven la version del ejercicio (ExerciseVersion) que tenian al momento de agregarlo a una sesion, aunque el ejercicio se modifique o inhabilite despues. Una sesion del plan referencia una version especifica, nunca 'el ejercicio vigente'"
-    - "Esta epica es la que hace real el punto de integracion isUsedInPlan(exerciseId) dejado por EPICA-02: al agregar un ejercicio a una sesion de un plan (CA-008-3), el ejercicio queda referenciado por un plan, dato que EPICA-02 usa para decidir si versiona en vez de editar en el lugar (CA-006-1 de EPICA-02)"
-    - "Solo se pueden agregar a una sesion ejercicios ACTIVOS de la biblioteca (heredado del catalogo filtrado de EPICA-02, CA-007-2 de esa epica); un ejercicio inhabilitado no aparece como opcion para planes nuevos, aunque los planes que ya lo referenciaban lo conservan"
-    - "Los estados del plan son exactamente cuatro (RN-27): Borrador, Publicado, Finalizado, Archivado. No existen sub-estados adicionales"
+    - "Solo el rol ATHLETE puede solicitar inscripcion a un plan y aceptar el consentimiento informado correspondiente (RN-18)"
+    - "Solo el rol COACH propietario del plan puede aprobar o rechazar una solicitud de inscripcion a ESE plan (RN-18); ni ADMIN ni otro entrenador tienen esa facultad"
+    - "Un atleta solo puede solicitar inscripcion a planes en estado Publicado (RN-27, heredado de EPICA-03); planes en Borrador, Finalizado o Archivado no aceptan nuevas solicitudes"
+    - "El consentimiento informado deportivo se solicita de forma independiente en cada inscripcion: un registro de aceptacion por cada par (atleta, plan), nunca reutilizado entre planes distintos aunque sea el mismo atleta (RN-20)"
+    - "El consentimiento debe incluir explicitamente que las recomendaciones de la IA no sustituyen asesoria medica profesional (CA-014-5)"
+    - "Ningun atleta puede iniciar sesiones de un plan sin haber completado el flujo completo: solicitud, aprobacion del entrenador y aceptacion del consentimiento informado (criterio de exito de la epica)"
+    - "Las suscripciones no se eliminan bajo ninguna circunstancia, incluidas las Rechazadas: se conservan como parte del historial, extendiendo a suscripciones el mismo criterio de inmutabilidad historica que RN-13 ya aplica a planes y resultados"
   supuestos:
-    - "DECISION CONFIRMADA (humano, 2026-08-20): la jerarquia del plan es Plan → Fase → Semana → Sesion → SessionExercise (Plan: name, description, startDate, endDate, status, coachId; Fase: name, order; Semana: weekNumber; Sesion: name, order; SessionExercise: referencia a exerciseVersionId — nunca al ejercicio vigente, por RN-07). La semana es una ENTIDAD PROPIA del modelo, no un campo calculado a partir de startDate: EPICA-05 necesita colgarle estado (abierta/cerrada/congelada) porque RN-30 dispara el cierre de semana 'cuando el atleta completa todas las sesiones programadas de esa semana', RN-33 declara que 'una vez iniciada, esa semana es inmutable', HU-016 asocia las sensaciones semanales 'a esa semana en su plan', y RN-09 congela los datos de la semana para la IA. Toda sesion pertenece a una semana, y toda semana a una fase; no existen sesiones sueltas ni semanas fuera de fase. Esta decision reemplaza el supuesto SUP-04 del documento fuente (que no distinguia la semana como nivel propio) y queda cerrada para que el Arquitecto y el DBA no la reabran"
-    - "DECISION CONFIRMADA: Borrador es un unico estado, sin sub-estados de 'completo/incompleto'. RN-01, re-expresado en la jerarquia con semana (al menos una fase con al menos una semana con al menos una sesion con al menos un ejercicio), solo bloquea la operacion de PUBLICAR (CA-009-2), nunca la de guardar en Borrador (CA-008-2)"
-    - "DECISION CONFIRMADA (humano, 2026-08-20): CA-009-3/CA-009-7 (un plan Publicado solo puede regresar a Borrador si no tiene atletas suscritos) depende del modelo de suscripciones de EPICA-04, que todavia no existe. Se sigue el mismo patron que isUsedInPlan en EPICA-02: la verificacion se aisla detras de un unico metodo privado del service, hasSubscribers(planId), que hoy retorna siempre false. Las dos ramas (con y sin suscritos) se cubren con tests unitarios mockeando ese metodo. Consecuencia aceptada: CA-009-7 (rechazo por atletas suscritos) NO es verificable end-to-end en esta epica, solo en tests unitarios; su cobertura e2e llega con EPICA-04. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio — mismo tratamiento que CA-006-1 de EPICA-02"
-    - "DECISION CONFIRMADA (humano, 2026-08-20): el perfil publico del entrenador expuesto en el catalogo (HU-011) se limita a los campos verificados contra prisma/schema.prisma: id y name de User; avatarUrl de User (opcional); description, mapeado desde CoachRequest.planDescription; y bannerUrl, mapeado desde CoachRequest.bannerUrl (opcional). Quedan EXCLUIDOS por la Ley 1581/2012 y NUNCA se exponen a un atleta: email, phone, phoneCountryCode, identificationType, identificationNumber, dateOfBirth. User NO tiene campos 'centro' ni 'descripcion' propios — el supuesto original de esta epica que los mencionaba fue una hipotesis incorrecta, corregida en esta version. planDescription y bannerUrl viven en CoachRequest, la solicitud de onboarding que el entrenador redacto y que un ADMIN aprobo en EPICA-01: son texto propio del entrenador que ya paso revision humana, lo que los hace aptos para publicarse. Consecuencia para el Arquitecto: el perfil publico de un entrenador solo existe si tiene una CoachRequest aprobada"
-    - "El mecanismo tecnico por el cual un plan pasa a Finalizado al llegar su fecha de fin (job programado, evaluacion perezosa u otro) es decision de la etapa de arquitectura y no de esta epica; el unico compromiso funcional es el resultado observable: a partir de la fecha de fin, cualquier consulta del plan debe mostrarlo en estado Finalizado"
-    - "Fuera de alcance de esta epica (pertenecen a EPICA-04 y EPICA-05): el bloqueo de nuevas inscripciones en un plan Finalizado, el bloqueo de registro de resultados en un plan Archivado (RN-28, RN-29), y la vista del atleta sobre sus propias suscripciones distinguiendo un plan Finalizado de uno Archivado (CA-010-3 del documento fuente). Esta epica solo garantiza que el ESTADO del plan (Publicado/Finalizado/Archivado) quede correctamente reflejado y que el catalogo (HU-011) muestre unicamente planes Publicados"
+    - "[CONFIRMADO por el humano — 2026-08-20] Una suscripcion existente en estado Pendiente, Aprobada o Activa para el mismo par (atleta, plan) bloquea una nueva solicitud de inscripcion a ese plan (CA-012-2). Si la suscripcion previa quedo Rechazada, el atleta SI puede volver a solicitar inscripcion al mismo plan, creando una nueva suscripcion (CA-012-3). CONSECUENCIA PARA EL DBA: el par (atleta, plan) puede repetirse legitimamente en la tabla, por lo que un @@unique([athleteId, planId]) simple es INCORRECTO — la unicidad debe ser parcial (solo sobre los estados que bloquean: Pendiente, Aprobada, Activa) o no existir, resolviendose la exclusividad en el service"
+    - "[CONFIRMADO por el humano — 2026-08-20] Para efectos de hasSubscribers(planId) (el gap dejado por EPICA-03, CA-009-7), 'atleta suscrito' significa una suscripcion en estado Aprobada o Activa. Una suscripcion en Pendiente NO cuenta como 'suscrito', porque el entrenador todavia podria rechazarla en el mismo momento en que intenta despublicar el plan"
+    - "[CONFIRMADO por el humano — 2026-08-20] El consentimiento informado deportivo es un documento unico y versionado a nivel de plataforma (mismo patron que habeas data y terminos de EPICA-01), no un texto redactado individualmente por cada entrenador para su plan. RN-20 exige una ACEPTACION independiente por cada plan (un registro por cada par atleta-plan), no un CONTENIDO distinto por plan. La personalizacion del texto por entrenador queda FUERA del alcance de esta epica"
+    - "[CONFIRMADO por el humano — 2026-08-20] No existe una accion explicita de 'rechazar' o 'declinar' el consentimiento informado. El atleta solo tiene dos posibilidades frente al consentimiento: aceptarlo o dejarlo pendiente indefinidamente, sin poder iniciar sesiones mientras tanto. NO se modela un estado adicional de 'consentimiento rechazado' ni se agrega ningun valor al enum SubscriptionStatus, que se mantiene con los cuatro valores ya definidos en el schema"
+    - "[PENDIENTE — decision del Arquitecto/DBA] LegalAcceptance.planId existe hoy como columna suelta (String? sin relacion a Plan, prisma/schema.prisma:116). Al usarla para el consentimiento de HU-014 debe decidirse si se le agrega la FK a Plan o se deja como esta; sin FK, un planId invalido entra sin error"
+    - "[PENDIENTE — decision del Arquitecto] CA-014-3 ('el atleta no puede acceder a las sesiones del plan sin aceptar el consentimiento') describe un comportamiento sobre endpoints de sesiones que son alcance de EPICA-05 y todavia no existen. Debe decidirse si se reformula como regla que EPICA-05 esta obligada a respetar, o si queda como gap declarado y verificable solo por test unitario — mismo patron que hasSubscribers en EPICA-03"
   glosario:
-    plan_de_entrenamiento: "Estructura creada por un entrenador que define nombre, fecha de inicio, fecha de fin, fases, semanas y sesiones con ejercicios, para un periodo determinado"
-    plantilla_base: "Version original del plan tal como la crea el entrenador; es el punto de partida a partir del cual se genera la instancia personalizada de cada atleta (EPICA-05)"
-    fase: "Agrupacion nombrada y ordenada de semanas dentro de un plan. Su cantidad, orden y las semanas que contiene quedan fijas junto con las fechas del plan una vez publicado (decision confirmada del 2026-08-20, ver supuestos)"
-    semana: "Entidad propia del plan, anidada dentro de una fase e identificada por su numero de semana (weekNumber). Agrupa las sesiones que el atleta debe completar en ese periodo. Es el nivel sobre el que EPICA-05 aplica el cierre automatico (RN-30), la inmutabilidad tras iniciarse (RN-33), el registro de sensaciones semanales (HU-016) y el congelamiento de datos para la IA (RN-09). No existen semanas fuera de una fase"
-    sesion: "Unidad de entrenamiento dentro de una semana, compuesta por uno o mas ejercicios de la biblioteca global. No existen sesiones fuera de una semana"
-    estado_del_plan: "Ciclo de vida del plan: Borrador (en construccion, no visible para atletas), Publicado (visible en el catalogo, acepta inscripciones), Finalizado (alcanzo su fecha de fin, ya no acepta inscripciones nuevas), Archivado (retirado manualmente o desde cualquier otro estado, no visible para atletas)"
-    catalogo_de_planes: "Listado de planes en estado Publicado, visible para cualquier atleta registrado que haya iniciado sesion"
+    suscripcion: "Relacion entre un atleta y un plan de entrenamiento especifico, con estado propio (Pendiente, Aprobada, Rechazada, Activa) que refleja en que punto del flujo de inscripcion se encuentra. Es la entidad que resuelve la relacion N:N de RN-17 entre atletas y entrenadores"
+    solicitud_de_inscripcion: "Accion inicial del atleta que crea una suscripcion en estado Pendiente para un plan Publicado especifico"
+    consentimiento_informado_deportivo: "Documento legal versionado que el atleta debe aceptar explicitamente por cada plan al que fue aprobado, dejando constancia de que comprende los riesgos del entrenamiento y de que las recomendaciones de la IA no sustituyen asesoria medica profesional. Es independiente del habeas data aceptado en el registro inicial (EPICA-01, HU-003)"
+    suscripcion_activa: "Estado final del flujo de inscripcion: el entrenador aprobo la solicitud Y el atleta acepto el consentimiento informado. Solo una suscripcion Activa habilita al atleta a iniciar las sesiones de ese plan (implementacion de ese inicio es alcance de EPICA-05)"
   dependencias:
-    - desde: "HU-008"
-      hacia: "HU-005"
-      descripcion: "No se puede agregar un ejercicio a una sesion del plan si el ejercicio no existe en la biblioteca global de EPICA-02"
-    - desde: "HU-009"
-      hacia: "HU-008"
-      descripcion: "No se puede publicar un plan que no fue creado primero como plantilla base en Borrador"
-    - desde: "HU-010"
-      hacia: "HU-009"
-      descripcion: "Solo un plan que alcanzo el estado Publicado puede pasar a Finalizado o ser archivado desde ese estado"
-    - desde: "HU-011"
-      hacia: "HU-009"
-      descripcion: "El catalogo de planes solo puede mostrar planes que ya alcanzaron el estado Publicado"
-    - desde: "HU-011"
+    - desde: "HU-012"
       hacia: "HU-003"
-      descripcion: "Solo un atleta que completo su registro inicial (EPICA-01) puede iniciar sesion y explorar el catalogo"
+      descripcion: "Solo un atleta que completo su registro inicial (EPICA-01) puede solicitar inscripcion a un plan"
+    - desde: "HU-012"
+      hacia: "HU-011"
+      descripcion: "El atleta debe poder ver el detalle de un plan en estado Publicado (EPICA-03) antes de poder solicitar su inscripcion"
+    - desde: "HU-013"
+      hacia: "HU-012"
+      descripcion: "No puede aprobarse ni rechazarse una solicitud de inscripcion que el atleta no haya creado primero"
+    - desde: "HU-014"
+      hacia: "HU-013"
+      descripcion: "El consentimiento informado solo se solicita despues de que el entrenador aprobo la suscripcion (estado Aprobada); sin aprobacion previa no hay nada que aceptar"
   historias_de_usuario:
-    - id: "HU-008"
-      titulo: "Creacion de la plantilla base de un plan de entrenamiento"
+    - id: "HU-012"
+      titulo: "Solicitud de inscripcion a un plan de entrenamiento"
+      como: "atleta"
+      quiero: "solicitar mi inscripcion a un plan de entrenamiento publicado"
+      para: "iniciar el proceso de incorporacion a ese plan"
+      criterios_de_aceptacion:
+        - "CA-012-1: Dado que un atleta autenticado esta viendo el detalle de un plan en estado Publicado y no tiene ninguna suscripcion Pendiente, Aprobada ni Activa a ese plan, Cuando solicita su inscripcion, Entonces la solicitud queda registrada como una suscripcion en estado Pendiente, Y el entrenador propietario del plan recibe una notificacion de nueva solicitud de inscripcion"
+        - "CA-012-2: Dado que el atleta ya tiene una suscripcion en estado Pendiente, Aprobada o Activa para un plan especifico, Cuando intenta solicitar inscripcion nuevamente a ese mismo plan, Entonces ve un mensaje indicando que ya tiene una solicitud en curso o ya esta inscrito en ese plan, Y la nueva solicitud no se registra"
+        - "CA-012-3: Dado que el atleta tiene una suscripcion Rechazada previa a un plan, Cuando solicita inscripcion nuevamente a ese mismo plan, Entonces se registra una nueva suscripcion en estado Pendiente, igual que si fuera la primera solicitud"
+        - "CA-012-4: Dado que el atleta intenta inscribirse a un plan que no esta en estado Publicado (Borrador, Finalizado o Archivado), Cuando realiza la solicitud, Entonces ve un mensaje indicando que el plan ya no acepta nuevas inscripciones, Y la solicitud no se registra"
+        - "CA-012-5: Dado que un usuario con rol COACH o ADMIN intenta solicitar inscripcion a un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos, ya que solo un atleta puede solicitar su propia inscripcion"
+        - "CA-012-6: Dado que un usuario sin autenticar intenta solicitar inscripcion a un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+      reglas_de_negocio:
+        - "RN-17: Relacion N:N entre atletas y entrenadores mediante suscripcion a planes"
+        - "RN-18: El entrenador publica planes; el atleta se suscribe; el entrenador aprueba la inscripcion"
+        - "RN-27 (heredada de EPICA-03): Solo los planes en estado Publicado aceptan nuevas solicitudes de inscripcion"
+      notas:
+        - "El estado inicial de toda suscripcion es Pendiente (enum SubscriptionStatus ya definido en el schema: Pendiente, Aprobada, Rechazada, Activa, verificado en prisma/schema.prisma). Esta HU solo produce ese primer estado; HU-013 y HU-014 producen los siguientes"
+        - "[CONFIRMADO por el humano — 2026-08-20] Bloqueo de reintento mientras exista una suscripcion Pendiente/Aprobada/Activa (CA-012-2), y permiso de reintento tras un Rechazo (CA-012-3). Ver la seccion de supuestos de la epica para la consecuencia sobre la unicidad de la tabla"
+    - id: "HU-013"
+      titulo: "Aprobacion o rechazo de inscripcion de atleta a un plan"
       como: "entrenador"
-      quiero: "crear la estructura base de un plan de entrenamiento definiendo su nombre, fechas, fases, semanas y sesiones con ejercicios"
-      para: "tener una plantilla que luego pueda publicar y que se personalice para cada atleta"
+      quiero: "revisar las solicitudes de inscripcion pendientes a mis planes y aprobarlas o rechazarlas"
+      para: "controlar quienes forman parte de mi grupo de atletas"
       criterios_de_aceptacion:
-        - "CA-008-1: Dado que un entrenador autenticado accede al modulo de creacion de planes, Cuando completa el nombre del plan, la fecha de inicio, la fecha de fin, y agrega al menos una fase con al menos una semana que contiene al menos una sesion con al menos un ejercicio, Entonces el plan queda guardado en estado Borrador con esa estructura completa"
-        - "CA-008-2: Dado que un entrenador esta construyendo un plan, Cuando lo guarda sin ninguna fase, o con fases sin semanas, o con semanas sin sesiones, o con sesiones sin ejercicios, Entonces el plan se guarda igualmente en estado Borrador, Y ve un mensaje indicando que aun no cumple los requisitos minimos para publicarse (al menos una fase con al menos una semana con al menos una sesion y cada sesion con al menos un ejercicio)"
-        - "CA-008-3: Dado que un entrenador agrega a una sesion del plan un ejercicio existente de la biblioteca global, Cuando el plan se guarda, Entonces la sesion queda vinculada a la version del ejercicio vigente en ese momento, de modo que si el ejercicio se modifica o se inhabilita despues, el plan conserva la version original"
-        - "CA-008-4: Dado que un usuario con rol ATHLETE intenta crear o modificar un plan de entrenamiento, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-        - "CA-008-5: Dado que un usuario sin autenticar intenta crear un plan de entrenamiento, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
-        - "CA-008-6: Dado que un entrenador intenta modificar un plan en Borrador creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario del plan puede modificarlo"
+        - "CA-013-1: Dado que existe una suscripcion en estado Pendiente de un atleta a un plan propio del entrenador, Cuando el entrenador aprueba la solicitud, Entonces la suscripcion cambia a estado Aprobada, Y el atleta recibe una notificacion indicando que su solicitud fue aprobada y que debe aceptar el consentimiento informado del plan para poder iniciar sus sesiones"
+        - "CA-013-2: Dado que existe una suscripcion en estado Pendiente de un atleta a un plan propio del entrenador, Cuando el entrenador la rechaza, Entonces la suscripcion cambia a estado Rechazada, Y el atleta recibe una notificacion indicando que su solicitud fue rechazada, Y puede volver a solicitar inscripcion a ese u otros planes"
+        - "CA-013-3: Dado que el entrenador accede al panel de gestion de sus atletas, Cuando consulta las solicitudes pendientes, Entonces ve el listado de suscripciones en estado Pendiente para sus planes, con el nombre del atleta y el plan al que solicito inscribirse"
+        - "CA-013-4: Dado que un entrenador intenta aprobar o rechazar una suscripcion de un plan que no le pertenece, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario del plan puede decidir sobre sus solicitudes de inscripcion"
+        - "CA-013-5: Dado que un usuario con rol ATHLETE o ADMIN intenta aprobar o rechazar una solicitud de inscripcion, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
+        - "CA-013-6: Dado que una suscripcion ya fue aprobada o rechazada anteriormente, Cuando el entrenador intenta aprobarla o rechazarla de nuevo, Entonces ve un mensaje indicando que esa solicitud ya fue resuelta, Y el estado de la suscripcion no cambia"
+        - "CA-013-7: Dado que un usuario sin autenticar intenta aprobar o rechazar una solicitud de inscripcion, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
       reglas_de_negocio:
-        - "RN-01: Plan valido = nombre + fecha inicio/fin + al menos una fase con al menos una semana con al menos una sesion + cada sesion con al menos un ejercicio"
-        - "RN-02: No existen planes open-ended (sin fecha de fin)"
-        - "RN-04: La biblioteca de ejercicios es global y unica; un plan solo puede referenciar ejercicios que existan en ella"
-        - "RN-07: Los planes conservan la version del ejercicio que tenian al momento de agregarlo, aunque el ejercicio se modifique o inhabilite despues"
-        - "RN-18: El entrenador es quien crea y publica los planes"
-        - "RN-31: El plan base actua como plantilla; cada atleta tendra su propia instancia personalizada"
+        - "RN-18: El entrenador debe aceptar la inscripcion del atleta al plan antes de que quede confirmada"
+        - "RN-20: Una vez aprobada la solicitud, el atleta debe aceptar el consentimiento informado especifico de ese plan (ver HU-014); la aprobacion del entrenador por si sola no habilita el inicio de sesiones"
       notas:
-        - "DECISION CONFIRMADA (humano, 2026-08-20): la jerarquia del plan es Plan → Fase → Semana → Sesion → SessionExercise. La semana es una entidad propia (no un campo calculado desde las fechas), porque EPICA-05 necesita colgarle estado (abierta/cerrada/congelada) para el cierre de semana (RN-30), la inmutabilidad de una semana ya iniciada (RN-33), la asociacion de sensaciones semanales a la semana del plan (HU-016) y el congelamiento de datos para la IA (RN-09). Toda sesion pertenece a una semana, y toda semana a una fase; no existen sesiones sueltas ni semanas fuera de fase. Este es el reemplazo confirmado del supuesto SUP-04 del documento fuente"
-        - "Guardar un plan incompleto (sin fases, sin semanas, sin sesiones, o con sesiones sin ejercicios) SIEMPRE es posible en Borrador (CA-008-2). RN-01 solo bloquea al momento de PUBLICAR (ver HU-009, CA-009-2). Borrador es un unico estado, sin sub-estados de 'incompleto/completo'"
-        - "CA-008-3 es el punto que conecta con el gap declarado de EPICA-02: al vincular una sesion a una version especifica del ejercicio, el metodo isUsedInPlan(exerciseId) de exercises.service.ts deja de retornar false siempre y pasa a consultar contra las sesiones de los planes existentes"
-        - "Solo se pueden agregar a una sesion ejercicios ACTIVOS de la biblioteca (heredado del catalogo filtrado de EPICA-02, CA-007-2 de esa epica); un ejercicio inhabilitado no aparece como opcion para planes nuevos"
-    - id: "HU-009"
-      titulo: "Publicacion de un plan de entrenamiento"
-      como: "entrenador"
-      quiero: "publicar un plan que ya cumple los requisitos minimos de validez"
-      para: "que quede visible en el catalogo y los atletas puedan explorarlo y solicitar inscribirse"
+        - "El estado Aprobada es intermedio: habilita el flujo de HU-014, pero no equivale por si solo a que el atleta pueda iniciar sesiones del plan (eso requiere ademas el estado Activa, resultado de aceptar el consentimiento). Por eso SubscriptionStatus define cuatro valores y no solo tres"
+        - "[CONFIRMADO por el humano — 2026-08-20] Esta HU resuelve el punto de integracion que EPICA-03 dejo abierto: el metodo hasSubscribers(planId) (hoy un stub que siempre retorna false en plans.service.ts) debe consultar si existe al menos una suscripcion en estado Aprobada o Activa para el plan. Una suscripcion en Pendiente NO cuenta como 'suscrito' para ese proposito. Con esta resolucion, CA-009-7 de EPICA-03 (bloqueo de despublicacion de un plan con atletas suscritos) deja de ser un gap y pasa a ser verificable end-to-end"
+        - "A diferencia del documento fuente original, CA-013-1 ya no incluye la presentacion del consentimiento informado como parte de este mismo criterio: esa verificacion es responsabilidad exclusiva de HU-014, que la cubre con sus propios criterios de aceptacion. Aqui solo se garantiza que la notificacion al atleta menciona el paso pendiente"
+    - id: "HU-014"
+      titulo: "Aceptacion del consentimiento informado deportivo al inscribirse a un plan"
+      como: "atleta"
+      quiero: "revisar y aceptar el consentimiento informado deportivo del plan al que fui aprobado"
+      para: "dejar constancia de que comprendo los riesgos y condiciones del entrenamiento, y poder iniciar mis sesiones"
       criterios_de_aceptacion:
-        - "CA-009-1: Dado que un entrenador tiene un plan propio en Borrador con nombre, fecha de inicio, fecha de fin, y al menos una fase con al menos una semana con al menos una sesion con al menos un ejercicio, Cuando lo publica, Entonces el plan cambia a estado Publicado, Y pasa a ser visible en el catalogo de planes para los atletas"
-        - "CA-009-2: Dado que un entrenador tiene un plan propio en Borrador que no cumple los requisitos minimos de validez (fechas incompletas, o sin fases, semanas, sesiones o ejercicios), Cuando intenta publicarlo, Entonces ve un mensaje indicando cuales requisitos le faltan, Y el plan permanece en Borrador"
-        - "CA-009-3: Dado que un entrenador tiene un plan propio en Publicado sin atletas suscritos, Cuando lo regresa a Borrador, Entonces el plan deja de ser visible en el catalogo, Y el entrenador puede seguir editando la plantilla base"
-        - "CA-009-4: Dado que un entrenador tiene un plan propio en Publicado, Cuando intenta modificar la fecha de inicio, la fecha de fin, o la cantidad, el orden o las semanas y sesiones de sus fases, Entonces ve un mensaje indicando que esa estructura es inmutable una vez publicado el plan"
-        - "CA-009-5: Dado que un entrenador intenta publicar, despublicar o modificar el estado de un plan creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario puede cambiar el estado del plan"
-        - "CA-009-6: Dado que un usuario con rol ATHLETE intenta publicar o despublicar un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-        - "CA-009-7: Dado que un entrenador tiene un plan propio en Publicado con al menos un atleta suscrito, Cuando intenta regresarlo a Borrador, Entonces ve un mensaje indicando que no puede despublicarse mientras tenga atletas suscritos, Y el plan permanece en Publicado"
+        - "CA-014-1: Dado que el entrenador aprobo la suscripcion del atleta a un plan (estado Aprobada), Cuando el atleta accede a la plataforma, Entonces ve el consentimiento informado deportivo pendiente de aceptacion para ese plan"
+        - "CA-014-2: Dado que el atleta esta visualizando el consentimiento informado de un plan cuya suscripcion propia esta en estado Aprobada, Cuando lo acepta explicitamente, Entonces la suscripcion cambia a estado Activa, Y queda habilitado para iniciar las sesiones de ese plan, Y el sistema registra la aceptacion con el momento exacto, la version del documento y el plan al que corresponde"
+        - "CA-014-3: Dado que la suscripcion del atleta a un plan esta en estado Aprobada pero aun no acepto el consentimiento informado, Cuando intenta acceder a las sesiones de ese plan, Entonces ve el consentimiento pendiente y no puede continuar hasta aceptarlo"
+        - "CA-014-4: Dado que un atleta tiene suscripciones Aprobadas o Activas en planes de diferentes entrenadores, Cuando revisa sus consentimientos, Entonces ve un consentimiento independiente por cada plan, aunque el contenido del documento sea el mismo"
+        - "CA-014-5: Dado que la plataforma usa IA para generar recomendaciones sobre el entrenamiento, Cuando el atleta visualiza el consentimiento informado, Entonces ve incluida la advertencia de que las recomendaciones de la IA no sustituyen asesoria medica profesional"
+        - "CA-014-6: Dado que un atleta intenta aceptar el consentimiento informado de una suscripcion que no es propia (de otro atleta), Cuando envia la peticion, Entonces la operacion se rechaza porque solo el titular de la suscripcion puede aceptar su propio consentimiento"
+        - "CA-014-7: Dado que un usuario sin autenticar intenta aceptar un consentimiento informado, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
       reglas_de_negocio:
-        - "RN-27: Estados del plan: Borrador, Publicado, Finalizado, Archivado"
-        - "RN-01: Un plan solo puede publicarse si cumple los requisitos minimos de validez"
-        - "RN-02: La fecha de fin es obligatoria para publicar"
-        - "RN-03: No es obligatorio tener atletas suscritos para publicar un plan"
-        - "RN-31: La duracion total (fechas) y la estructura de fases y semanas quedan inmutables una vez publicado el plan"
+        - "RN-20: El consentimiento informado se solicita en cada inscripcion a un plan, de forma independiente"
+        - "Cada aceptacion se registra con el momento exacto, la version del documento y el identificador del atleta, mismo mecanismo de trazabilidad legal usado en EPICA-01 para el habeas data (HU-003)"
+        - "El disclaimer de IA es obligatorio en el contenido del consentimiento (CA-014-5)"
       notas:
-        - "DECISION CONFIRMADA (humano, 2026-08-20): igual que EPICA-02 con isUsedInPlan(exerciseId), la verificacion de si un plan tiene atletas suscritos se aisla detras de un unico metodo del service, hasSubscribers(planId), que hoy retorna siempre false porque el modelo de suscripciones es de EPICA-04 y todavia no existe. Las dos ramas (con suscritos: CA-009-7: y sin suscritos: CA-009-3) se cubren con tests unitarios mockeando ese metodo. Consecuencia aceptada: CA-009-7 NO es verificable end-to-end en esta epica, solo en tests unitarios; su cobertura e2e llega con EPICA-04. Debe quedar registrado como gap explicito en el reporte de QA, no omitido en silencio"
-        - "CA-009-4 solo cubre fechas y la estructura de fases y semanas (RN-31). El documento fuente no define si otros cambios a la plantilla base (por ejemplo, cambiar un ejercicio dentro de una sesion existente) siguen permitidos despues de publicar; queda fuera de alcance de esta epica y no se asume ninguna respuesta"
-    - id: "HU-010"
-      titulo: "Finalizacion y archivo de un plan de entrenamiento"
-      como: "entrenador"
-      quiero: "gestionar el cierre de un plan cuando llega a su fecha de fin o cuando decido retirarlo"
-      para: "mantener el catalogo actualizado y controlar en que estado queda cada plan"
-      criterios_de_aceptacion:
-        - "CA-010-1: Dado que un plan publicado alcanzo su fecha de fin, Cuando se consulta el plan a partir de esa fecha, Entonces su estado se refleja como Finalizado"
-        - "CA-010-2: Dado que un entrenador tiene un plan propio en Borrador, Publicado o Finalizado, Cuando decide archivarlo manualmente, Entonces el plan cambia a estado Archivado, Y deja de ser visible en el catalogo de planes"
-        - "CA-010-3: Dado que un entrenador tiene un plan propio ya Archivado, Cuando intenta archivarlo de nuevo, Entonces ve un mensaje indicando que el plan ya esta archivado"
-        - "CA-010-4: Dado que un entrenador intenta archivar un plan creado por otro entrenador, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario puede archivarlo"
-        - "CA-010-5: Dado que un usuario con rol ATHLETE intenta archivar o cambiar el estado de un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-      reglas_de_negocio:
-        - "RN-27: Estados del plan: Borrador, Publicado, Finalizado, Archivado"
-        - "RN-28: Un plan Finalizado sigue permitiendo que los atletas ya suscritos registren resultados de sesiones pendientes (la implementacion de ese registro es de EPICA-05)"
-        - "RN-29: Un plan Archivado no es visible para los atletas y no acepta nuevos registros de resultados (la implementacion de ese bloqueo es de EPICA-04/EPICA-05)"
-      notas:
-        - "El mecanismo tecnico por el cual el plan pasa a Finalizado al llegar la fecha de fin (job programado, evaluacion perezosa u otro) es decision de la etapa de arquitectura; esta HU solo exige el resultado observable descrito en CA-010-1"
-        - "'Cierre de semana' (RN-30, EPICA-05) es un concepto distinto de la finalizacion del plan definida aqui. Esta epica crea la entidad Semana como parte de la estructura del plan (ver HU-008), pero su ciclo de vida (abierta/cerrada/congelada) y el evento de cierre automatico son responsabilidad de EPICA-05; no deben confundirse"
-        - "Fuera de alcance: el bloqueo de nuevas inscripciones en un plan Finalizado, el bloqueo de registro de resultados en un plan Archivado (RN-28, RN-29), y la vista del atleta sobre sus propias suscripciones distinguiendo un plan Finalizado de uno Archivado (CA-010-3 del documento fuente original) pertenecen a EPICA-04 y EPICA-05. Esta HU solo garantiza que el ESTADO del plan quede correctamente reflejado"
-    - id: "HU-011"
-      titulo: "Exploracion del catalogo de entrenadores y planes publicados"
-      como: "atleta registrado en la plataforma"
-      quiero: "explorar los planes publicados y la informacion publica de los entrenadores que los ofrecen"
-      para: "encontrar el plan que mejor se adapte a mis objetivos antes de solicitar inscribirme"
-      criterios_de_aceptacion:
-        - "CA-011-1: Dado que un atleta autenticado que completo su registro inicial (Fase 1) navega al catalogo de planes, Cuando consulta el listado, Entonces ve los planes en estado Publicado de todos los entrenadores, cada uno con el nombre del plan, sus fechas, y los datos publicos del entrenador que lo publico: nombre y, si lo tiene cargado, avatar"
-        - "CA-011-2: Dado que el atleta esta explorando el catalogo, Cuando selecciona un plan especifico, Entonces ve el detalle del plan (nombre, descripcion, fecha de inicio, fecha de fin, y la estructura de fases, semanas y sesiones con la cantidad de ejercicios de cada una), Y ve el perfil publico del entrenador que lo ofrece: nombre, avatar (si lo tiene), la descripcion de su propuesta de entrenamiento y su banner (si lo tiene)"
-        - "CA-011-3: Dado que existen planes en estado Borrador, Finalizado o Archivado, Cuando el atleta consulta el catalogo, Entonces esos planes no aparecen en el listado de planes disponibles"
-        - "CA-011-4: Dado que un usuario sin autenticar intenta consultar el catalogo de planes, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
-      reglas_de_negocio:
-        - "RN-25: El atleta pasa por dos fases: Fase 1 (registro y exploracion) y Fase 2 (inscripcion a un plan con aprobacion del entrenador)"
-        - "RN-26: El atleta en Fase 1 puede explorar entrenadores y planes publicados sin estar suscrito"
-        - "RN-27: Solo los planes en estado Publicado son visibles en el catalogo"
-        - "RN-24: Datos obligatorios del entrenador: nombre/centro, email, telefono, numero de identificacion, descripcion; el catalogo solo expone el subconjunto no sensible: nombre y avatar (User), y descripcion y banner (CoachRequest.planDescription y CoachRequest.bannerUrl)"
-      notas:
-        - "DECISION CONFIRMADA (humano, 2026-08-20): el perfil publico del entrenador expuesto en el catalogo se limita a los campos verificados contra prisma/schema.prisma: id y name de User; avatarUrl de User (opcional); description, mapeado desde CoachRequest.planDescription; y bannerUrl, mapeado desde CoachRequest.bannerUrl (opcional). Quedan EXCLUIDOS por la Ley 1581/2012 y NUNCA se exponen a un atleta: email, phone, phoneCountryCode, identificationType, identificationNumber, dateOfBirth. User NO tiene campos 'centro' ni 'descripcion' propios"
-        - "planDescription y bannerUrl viven en CoachRequest, la solicitud de onboarding que el entrenador redacto y que un ADMIN aprobo en EPICA-01: son texto propio del entrenador que ya paso revision humana, lo que los hace aptos para publicarse. Consecuencia para el Arquitecto: el perfil publico de un entrenador solo existe para entrenadores con una CoachRequest aprobada"
-        - "No se define en esta HU un perfil de entrenador mas amplio que los campos listados arriba (historial, calificaciones, testimonios). Si el negocio lo requiere, se documenta como una HU o epica futura, no como parte de este alcance"
+        - "El consentimiento informado deportivo se registra con el mismo mecanismo de trazabilidad legal usado en el registro inicial del atleta (EPICA-01, HU-003): un registro append-only por aceptacion, con el tipo de documento, su version y el plan al que corresponde. Es un registro independiente por cada par (atleta, plan), aunque el contenido del documento sea el mismo salvo que cambie de version — verificado contra el schema: LegalAcceptance ya tiene un campo planId opcional y DocumentType ya incluye SPORT_CONSENT"
+        - "[CONFIRMADO por el humano — 2026-08-20] No existe una accion explicita de 'rechazar' o 'declinar' el consentimiento informado: el atleta solo puede aceptarlo o dejarlo pendiente indefinidamente, sin poder iniciar sesiones mientras tanto. No se modela un estado adicional de consentimiento rechazado ni se agrega ningun valor al enum SubscriptionStatus"
+        - "El inicio efectivo de las sesiones del plan una vez la suscripcion queda Activa es alcance de EPICA-05, no de esta HU: aqui solo se garantiza que la suscripcion transiciona a Activa y que sin esa transicion el atleta no puede avanzar"
