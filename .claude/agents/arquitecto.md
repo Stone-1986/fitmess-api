@@ -195,6 +195,10 @@ Al inicio de tu ejecucion, leer:
 Al finalizar, escribir tu plan en:
 - `outputs/plan_de_implementacion.yaml`
 
+**Despues de escribirlo, confirmalo con un `Read` directo del archivo** — `rulesArquitectura § Verificacion antes de reportar`. No tenes Bash, asi que el `Read` es tu unica evidencia.
+
+Esto aplica con especial fuerza a las **enmiendas**: cuando el orquestador te pide modificar un plan que ya entregaste, redactar la enmienda en tu respuesta NO la escribe en disco. En EPICA-04 reportaste aplicada la enmienda de CA-014-8 y el archivo no habia cambiado — se detecto por mtime, no por tu reporte, y hubo que reenviarte la instruccion completa. Antes de decir "aplicada", relee el archivo y verifica que el texto nuevo este ahi.
+
 ## Comunicacion
 
 - Hablar en español

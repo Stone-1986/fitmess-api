@@ -165,6 +165,29 @@ Errores comunes que solo `tsc` detecta:
 - Variables `unknown` accedidas sin cast
 - Módulos de tipo faltantes (ej: `ms` para `StringValue`)
 
+`tsc` no es suficiente por sí solo. Antes de entregar, correr los cuatro:
+
+```bash
+npx tsc --noEmit 2>&1
+pnpm run test:cov 2>&1
+pnpm run lint 2>&1
+pnpm run format:check 2>&1
+```
+
+- **`test:cov`** porque un cambio en un método existente puede romper tests de OTRO módulo que lo mockea. En EPICA-04, reemplazar el stub de `hasSubscribers()` rompió 3 tests de `plans.service.spec.ts` con un `TypeError` — el mock de Prisma no tenía `subscription.count`. Entregar sin correrlo se lo pasó al QA.
+- **`lint` y `format:check`** porque un solo error de `prettier/prettier` deja DOS gates en rojo (ESLint lo reporta como error y `format:check` falla aparte). En EPICA-04 esto pasó con un `(s) => s.id` mal envuelto en un archivo de test.
+
+### 8. Verificar que lo escrito quedó en disco
+
+`rulesArquitectura § Verificación antes de reportar`. Antes de declarar la entrega completa:
+
+```bash
+git status --short
+ls --time-style=full-iso -la <archivos que escribiste>
+```
+
+El mtime y el tamaño son la evidencia. NUNCA reportar "hecho" basándose en que el `Write` devolvió éxito o en un grep de contenido que ya está en el contexto. En EPICA-04 un agente se declaró terminado **dos minutos antes** de escribir los archivos que decía haber escrito.
+
 ## Restricciones Absolutas
 
 - NUNCA implementar lógica fuera de lo que está en el contrato aprobado

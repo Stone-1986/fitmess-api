@@ -48,6 +48,22 @@ No tienen excepciones salvo decisión explícita documentada en este archivo.
 - NUNCA loggear el body completo de requests en producción — solo en nivel `debug` en desarrollo
 - El `originalError` de `TechnicalException` se loggea pero NUNCA se expone en la respuesta al cliente
 
+### Rastro de habeas data en lecturas de datos de terceros
+
+- Todo endpoint que devuelva datos personales de **terceros** y cuyos IDs NO viajen en la URL DEBE llevar `@AuditResources('<Entidad>')` en el handler
+- El decorador vive en `src/modules/common/decorators/audit-resources.decorator.ts`; `AuditResourcesInterceptor` recoge los IDs devueltos y `AuditMiddleware` los persiste en `audit_logs.resource_ids`. El mecanismo YA está construido — marcar el endpoint es lo único que hace falta, nunca modificar el interceptor ni el middleware
+- El criterio es **de quién son los datos**, no qué rol los pide: `GET /subscriptions/pending` lo lleva porque un entrenador ve nombres de atletas; `GET /subscriptions` NO lo lleva porque el atleta consulta lo suyo
+- Sin el decorador, la fila de auditoría registra que alguien consultó pero no **a quién** — y la pregunta de habeas data ("¿quién consultó mis datos?") queda sin responder para esas rutas. Es el hallazgo #9, cerrado para `POST /coach-requests/search` y reabierto por omisión en EPICA-04 pese a que la entrada de mantenimiento que lo cerró ya había dejado escrito que HU-013 lo necesitaría. Una anotación en el execution log no es una regla: nadie la leyó al implementar
+
+## Verificación antes de reportar
+
+- Ningún agente reporta un trabajo como completo sin haberlo confirmado **contra el disco**
+- Con Bash disponible: `ls --time-style=full-iso` sobre el archivo, o `git status --short`. El mtime y el tamaño son la evidencia
+- Sin Bash (Arquitecto, Líder Técnico, DBA, Analistas): un `Read` explícito del archivo después del Write
+- NUNCA vale como confirmación el valor de retorno del propio `Write`, ni un grep del contenido que ya está en el contexto de la conversación — ese grep coincide con lo que el agente redactó, no prueba que el archivo en disco haya cambiado
+- Motivo: en EPICA-04 esto ocurrió **seis veces en una sola épica**, en agentes con y sin Bash. El Arquitecto reportó una enmienda al plan que nunca escribió (detectado por mtime); el Desarrollador se declaró terminado dos minutos antes de escribir los listeners; dos subagentes de análisis se fueron a idle sin entregar reporte; el Líder Técnico confirmó su revisión con el retorno del Write en vez de releerla. Ninguno se detectó por los reportes — todos por verificación externa
+- Un artefacto que no se escribió es indistinguible de uno que sí, igual que un gate que no corre es indistinguible de uno que pasa
+
 ## Testing
 
 - Cobertura mínima de dominio/lógica de negocio: **80%**

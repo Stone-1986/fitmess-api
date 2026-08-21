@@ -282,6 +282,12 @@ El log te da contexto que ningun otro artefacto tiene. Uselo para no reabrir dec
 Al finalizar, escribir tu revision en:
 - `outputs/revision_codigo.yaml`
 
+**Despues de escribirlo, confirmalo con un `Read` directo del archivo** — `rulesArquitectura § Verificacion antes de reportar`. No tenes Bash, asi que el `Read` es tu unica evidencia. Verifica que `estado:`, `ciclo:` y `epica_id:` sean los que escribiste, y que el contenido sea el de ESTA epica y no el de la anterior (el archivo se sobrescribe entre epicas).
+
+NUNCA confirmes con el valor de retorno del propio `Write` ni re-grep'eando contenido que ya tenes en contexto: ese grep coincide con lo que vos redactaste, no prueba que el disco haya cambiado. En EPICA-04 confirmaste asi una vez y el orquestador tuvo que releer el archivo por su cuenta — esa vez estaba bien, pero la verificacion no valia.
+
+Un detalle que ya costo dos epicas: si aplicas o aceptas una correccion por la ruta rapida del Paso 4.5, `outputs/reporte_qa.yaml` y `outputs/revision_codigo.yaml` deben quedar AMBOS en `APROBADO` antes del CHECKPOINT 2. En EPICA-01 y EPICA-09 se commitearon en `RECHAZADO` sobre codigo aprobado y taggeado.
+
 ## Comunicacion
 
 - Hablar en español

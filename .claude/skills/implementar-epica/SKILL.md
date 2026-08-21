@@ -49,6 +49,19 @@ Continuar escribiendo en `outputs/execution-log.md` (creado en Fase 1).
 
 **Después de cada paso**, agregar una fila con el resultado. Los estados posibles son: `OK`, `FAIL`, `RECHAZADO`, `APROBADO`, `ESCALADO`.
 
+## El alcance no lo fija `orden_de_implementacion`
+
+`orden_de_implementacion` **secuencia dependencias** — qué debe existir antes de qué. NO delimita el alcance de la épica. Lo que no bloquea a nada no aparece ahí, y eso no lo deja fuera.
+
+El alcance lo fijan dos cosas, y las dos hay que leerlas:
+
+- **Los criterios de aceptación** de `outputs/epica_input.yaml` — si un CA dice "recibe una notificación", esa notificación es entregable
+- **`modulos_afectados`** de `outputs/plan_de_implementacion.yaml` — enumera todo lo que la épica toca, no solo lo que tiene endpoint propio
+
+En EPICA-04 el Desarrollador entregó sin los 3 listeners de `notifications` razonando que no estaban en `orden_de_implementacion`. Estaban en `modulos_afectados`, tres CAs los exigían literalmente (CA-012-1, CA-013-1, CA-013-2) y el plan hasta dejaba escrito el test del QA que los validaba. Sin ellos, tres CAs quedaban sin implementar y el QA los habría devuelto como error crítico — un ciclo completo desperdiciado.
+
+**Al armar el prompt del Desarrollador, enumerá el alcance completo explícitamente** en vez de remitirlo al `orden_de_implementacion`: endpoints, listeners, cambios en services de otros módulos, entradas nuevas al catálogo de errores.
+
 ## Flujo de Ejecución
 
 ### Paso 1 — Lanzar Desarrollador

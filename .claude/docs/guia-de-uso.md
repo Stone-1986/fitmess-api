@@ -230,6 +230,12 @@ Necesita la base de datos levantada. Si no lo esta, el hook **no bloquea el comm
 
 Si los tests corren y fallan de verdad, el commit **si** se bloquea.
 
+**El hook tarda mas de 2 minutos** cuando dispara la suite e2e — son ~200 tests contra la base real, mas lint-staged y `tsc`. Si vas a commitear codigo, dale tiempo y no lo interrumpas.
+
+Si el commit se corta a mitad del hook (timeout, Ctrl-C), **no queda nada roto**: lint-staged restaura el estado original y los archivos siguen staged. Verificalo con `git log --oneline -1` (el commit no se creo), `git status --short` (los archivos siguen ahi) y `git stash list` (vacio — si quedara un stash de lint-staged, ese seria el respaldo a recuperar). Basta reintentar el mismo `git commit`.
+
+Un commit que solo toca `outputs/` o documentacion no dispara la e2e, asi que es rapido. Ahi `--no-verify` no aporta nada y conviene no usarlo.
+
 ---
 
 ## Resumen rapido
