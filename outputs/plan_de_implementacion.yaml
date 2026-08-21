@@ -1,570 +1,1183 @@
 plan_de_implementacion:
-  version: "1.0"
-  epica_id: "EPICA-04"
+  version: "1.4"
+  epica_id: "EPICA-05"
   ciclo: 1
+  razonamiento: >
+    QUE: (1) D-6 se completa — la escala 1-10 de dolor muscular/motivacion
+    pasa de "confirmada" a RESUELTA con su mecanismo de rechazo explicito
+    (CA-016-9: valor fuera de rango rechaza TODO el registro de esa semana,
+    nada se guarda). (2) D-4 se revisa contra la definicion explicita de
+    "sesion completada" (CA-015-10/CA-015-11, nuevas): se confirma que el
+    diseño ya existente (contar InstanceSession sin SessionResult) YA ERA
+    equivalente a "sesion con resultado de TODOS sus ejercicios", porque
+    RESULT_FIELDS_INVALID (paso 3 del flujo, ya diseñado en v1.0) rechaza
+    cualquier registro parcial ANTES de que exista una fila SessionResult —
+    se documenta la equivalencia explicitamente, sin cambiar el mecanismo.
+    (3) D-15 se completa con dos puntos que el Analista señalo: cita
+    explicita de que `validatePlanCompleteness()` (plans.service.ts:989-1021)
+    es el mismo metodo acumulativo que ya existe, no uno nuevo; y la
+    decision de que hacer con planes YA Publicados sin prescripcion al
+    aplicar la migracion (revertir a Borrador, no backfill con datos
+    inventados). POR QUE: decisiones del humano en el tercer CHECKPOINT,
+    mas hallazgos del Analista sobre reutilizacion de patron existente y un
+    hueco de migracion. REFERENCIA: mensaje del team lead del 2026-08-21
+    (cuarto) + `outputs/epica_input.yaml` releido completo (175 lineas, ya
+    incorpora CA-016-9, CA-015-10, CA-015-11). D-1, D-2, D-3, D-5, D-7 a
+    D-14 NO se tocan en esta pasada.
 
   modulos_afectados:
-    - "subscriptions (modulo nuevo — src/modules/subscriptions/)"
-    - "plans (hasSubscribers(planId) en plans.service.ts:1080 pasa a consultar Subscription real — unico cambio de cuerpo, sin tocar el resto de unpublish(); cierra el gap declarado de CA-009-7 de EPICA-03)"
-    - "notifications (3 listeners nuevos: subscription.requested → coach, subscription.approved → atleta, subscription.rejected → atleta; 3 metodos nuevos en EmailService)"
-    - "common (el catalogo de BusinessError ya trae SUBSCRIPTION_ALREADY_EXISTS y CONSENT_REQUIRED reservados desde su creacion — se usan tal cual; se agrega UNA entry nueva, PLAN_NOT_PUBLISHED, ver decision D-6, reutilizada ahora en DOS endpoints — ver decision D-10)"
+    - "execution (modulo nuevo — src/modules/execution/, EPICA-05 + 06 segun CLAUDE.md). Su copia profunda (D-3) ahora tambien copia los 5 campos de prescripcion de SessionExercise a InstanceSessionExercise (ver D-15), y su SessionResult pasa de Json a un agregado con hijos tipados (ver D-6)"
+    - "plans: CAMBIOS DE CODIGO REALES (D-15 — EPICA-03 REABIERTA): AddSessionExerciseDto y SessionExerciseResponseDto ganan 5 campos de prescripcion; nuevo endpoint PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId (primera edicion posible de un SessionExercise — antes solo existia add/remove); validatePlanCompleteness() (plans.service.ts:989-1021, metodo YA existente y acumulativo, D-15) extendida con la regla de prescripcion significativa. NO se toca Phase/Week/Session ni su jerarquia — solo SessionExercise. Migracion incluye backfill de datos: planes Publicados sin prescripcion significativa se revierten a Borrador (ver D-15)"
+    - "subscriptions: CAMBIOS DE CODIGO REALES (D-14 rama (a) — EPICA-04 REABIERTA): AcceptConsentDto gana un segundo campo de version; acceptConsent() registra un segundo LegalAcceptance (HEALTH_DATA_CONSENT) dentro de la misma $transaction que ya crea SPORT_CONSENT. CERO cambio de schema — DocumentType.HEALTH_DATA_CONSENT ya existe en el enum desde EPICA-01 (ver D-14)"
+    - "exercises: SIN cambios de codigo. ExerciseVersion se referencia por id (misma tabla compartida) — la instancia copia el puntero exerciseVersionId ya congelado por el propio Plan (RN-07 ya resuelto en EPICA-03), no vuelve a resolver la version vigente (ver D-13)"
+    - "common: CERO entradas nuevas en BusinessError (confirmado tras D-14 resuelto en rama (a) — la unica entrada que la rama (b) habria requerido, HEALTH_DATA_CONSENT_REQUIRED, no se implementa). Reutiliza sin cambios ENTITY_NOT_FOUND, RESOURCE_OWNERSHIP_DENIED, CONSENT_REQUIRED (reservado desde EPICA-01, formalmente asignado en D-9 de EPICA-04), WEEK_FROZEN (reservado desde su creacion) y PLAN_INCOMPLETE (ya existente desde EPICA-03, ahora cubre DOS motivos — estructura Y prescripcion, ver D-15 y riesgos). RESULT_FIELDS_INVALID (reservado, sin uso hasta ahora) obtiene su primer uso real en esta epica — ver D-6, ahora respaldado por regla de negocio explicita (CA-015-10) en vez de inferencia del Arquitecto. WEEK_STARTED y EDIT_WINDOW_EXPIRED permanecen reservados SIN USO (RN-08 derogada, ver D-10)"
 
-  # ── RESUMEN (6 endpoints, 1 controller nuevo) ────────────────────────────
+  # ── RESUMEN (5 endpoints nuevos en execution, 1 endpoint nuevo + 2 modificados en plans/subscriptions, 1 listener) ───
   #
-  # SubscriptionsController (/subscriptions) — roles mixtos por endpoint
-  # (a diferencia de PlansController/ExercisesController, que fijan el rol
-  # a nivel de controller — ver decision D-1):
-  #   1. POST /subscriptions                    — ATHLETE — solicitar inscripcion (HU-012)
-  #   2. GET  /subscriptions                     — ATHLETE — listar mis suscripciones (HU-014)
-  #   3. GET  /subscriptions/pending              — COACH   — panel de solicitudes pendientes (HU-013)
-  #   4. POST /subscriptions/:id/approve          — COACH   — aprobar solicitud (HU-013)
-  #   5. POST /subscriptions/:id/reject           — COACH   — rechazar solicitud (HU-013)
-  #   6. POST /subscriptions/:id/accept-consent   — ATHLETE — aceptar consentimiento (HU-014, incluye CA-014-8)
+  # InstancesController (/instances) — roles mixtos por endpoint, cada uno
+  # con parametros distintos (no comparten handler — ver D-9):
+  #   1. GET  /instances                              — ATHLETE — listar mis instancias (HU-023)
+  #   2. GET  /instances/:planId                       — ATHLETE — detalle propio, auto-reparable (HU-023)
+  #   3. GET  /instances/:planId/athletes/:athleteId    — COACH   — panel del atleta (HU-017, lectura HU-016)
+  #   4. POST /instances/:planId/sessions/:sessionId/results — ATHLETE — registrar/editar resultados tipados (HU-015, dispara HU-017)
+  #   5. POST /instances/:planId/weeks/:weekId/feelings      — ATHLETE — registrar/editar sensaciones (HU-016)
   #
-  # Cambio interno sin endpoint propio:
-  #   - plans.service.ts: hasSubscribers(planId) deja de ser stub.
+  # PlansController (D-15, EPICA-03 reabierta):
+  #   6. PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId — COACH — editar prescripcion (NUEVO)
+  #   (modificados, mismo metodo/ruta que ya existian: POST .../exercises gana prescripcion opcional al crear; POST /plans/:id/publish exige prescripcion significativa)
+  #
+  # SubscriptionsController (D-14 rama (a), EPICA-04 reabierta):
+  #   (modificado, misma ruta: POST /subscriptions/:id/accept-consent ahora registra tambien HEALTH_DATA_CONSENT)
+  #
+  # Sin endpoint propio:
+  #   - SubscriptionActivatedListener (src/modules/execution/listeners/) —
+  #     dispara la copia profunda de HU-023 al recibir subscription.activated.
+  #   - No existe NINGUN endpoint de creacion manual de instancia (CA-023-1
+  #     lo exige explicitamente: "sin intervencion manual").
+  #   - NO existe el sexto endpoint POST /instances/:planId/health-data-consent
+  #     que la v1.2 dejaba condicional a D-14 — D-14 se resolvio en rama (a),
+  #     ese endpoint queda descartado (ver D-14).
 
   endpoints:
     # ══════════════════════════════════════════════════════════════════════
-    # HU-012 — Solicitud de inscripcion
+    # HU-023 — Creacion e instancia personalizada
     # ══════════════════════════════════════════════════════════════════════
 
-    - hu_id: "HU-012"
-      metodo: POST
-      ruta: /subscriptions
+    - hu_id: "HU-023"
+      metodo: GET
+      ruta: /instances
       proposito: >
-        Crear una suscripcion en estado Pendiente para el par (atleta
-        autenticado, planId del body) — CA-012-1. Precondiciones
-        verificadas en el service, en este orden: (1) el plan existe y su
-        estado EFECTIVO (mismo `computeEffectiveStatus` de EPICA-03,
-        reutilizado via PrismaService, NO importado de PlansService — ver
-        decision D-2) es PUBLISHED, si no rechaza con PLAN_NOT_PUBLISHED
-        (409, CA-012-4); (2) no existe ya una suscripcion propia a ese plan
-        en estado Pendiente, Aprobada o Activa, si existe rechaza con
-        SUBSCRIPTION_ALREADY_EXISTS (409, CA-012-2) — una suscripcion
-        Rechazada previa NO bloquea (CA-012-3, nueva fila). El pre-check en
-        service se complementa con el indice UNICO PARCIAL de base de datos
-        (ver decision D-3) que cierra la ventana de carrera entre el
-        SELECT y el INSERT. Emite subscription.requested. El check (1) usa
-        el mismo helper privado `isPlanCurrentlyPublished()` que reutiliza
-        POST /subscriptions/:id/accept-consent para CA-014-8 — ver D-10.
-      request_body: CreateSubscriptionDto
-      response: SubscriptionResponseDto (201)
-      errores: [400, 401, 403, 404, 409]
+        Lista, paginada, todas las instancias propias del atleta autenticado
+        (CA-023-4, CA-023-5) — un item por plan al que el atleta llego a
+        tener una suscripcion Activa. Resumen liviano (id, planId, planName,
+        createdAt), sin el arbol completo — mismo criterio D-8 de EPICA-03
+        (GET /plans no trae el arbol, GET /plans/:id si). planName resuelto
+        via join de solo lectura contra Plan (D-2, EPICA-04). Endpoint de
+        soporte para que el atleta ubique sus instancias sin conocer el
+        planId de antemano.
+      response: InstanceSummaryResponseDto[] + PaginationMeta (200)
+      errores: [401, 403]
       guards: [JwtAuthGuard, RolesGuard(ATHLETE)]
-      eventos: [subscription.requested]
+      eventos: []
       dependencias: []
 
-    - hu_id: "HU-014"
+    - hu_id: "HU-023"
       metodo: GET
-      ruta: /subscriptions
+      ruta: /instances/:planId
       proposito: >
-        Listar TODAS las suscripciones propias del atleta autenticado, en
-        cualquier estado, paginado — mismo criterio D-8 de EPICA-03 (GET
-        /plans lista todos los estados sin filtro server-side; el filtrado
-        por "requiere consentimiento" se hace en el cliente sobre
-        status=Aprobada). Cubre CA-014-1 (ver el consentimiento pendiente)
-        y CA-014-4 (un item independiente por cada plan, incluso de
-        entrenadores distintos). No incluye contenido del documento de
-        consentimiento — ver decision D-8.
-      response: SubscriptionResponseDto[] + PaginationMeta (200)
-      errores: [401, 403]
+        Detalle de la instancia propia del atleta autenticado para el plan
+        `:planId`, con el arbol completo embebido: fases -> semanas (con
+        isClosed/closedAt y las sensaciones registradas, si existen) ->
+        sesiones (con el resultado registrado, si existe) -> ejercicios de
+        sesion (con la version congelada Y la prescripcion copiada de la
+        plantilla — series, repeticiones, carga, duracion, distancia, ver
+        D-15). Un solo GET agregado, mismo patron D-8 de EPICA-03. El
+        parametro de ruta es el planId de la PLANTILLA, no el id propio de
+        la instancia (D-8b) — el atleta razona en terminos de "mi instancia
+        del plan X", nunca conoce ni necesita el id interno de PlanInstance.
+        Verifica PRIMERO que el plan exista (ENTITY_NOT_FOUND 404 si no),
+        LUEGO que exista una Subscription del atleta para ese plan en
+        estado Activa (CONSENT_REQUIRED 422 si no, CA-023-6 — obligacion
+        heredada de EPICA-04 D-9). Si la subscripcion esta Activa pero la
+        instancia todavia no existe (ventana de carrera del listener, ver
+        D-3), la crea sobre la marcha con el mismo metodo idempotente que
+        usa el listener — el atleta nunca ve un 404 "todavia no existe"
+        mientras su suscripcion siga Activa (CA-023-1: "puede consultar su
+        instancia inmediatamente despues").
+      response: InstanceDetailResponseDto (200)
+      errores: [401, 403, 404, 422]
       guards: [JwtAuthGuard, RolesGuard(ATHLETE)]
       eventos: []
-      dependencias: [POST /subscriptions]
+      dependencias: []
 
-    # ══════════════════════════════════════════════════════════════════════
-    # HU-013 — Aprobacion / rechazo
-    # ══════════════════════════════════════════════════════════════════════
-
-    - hu_id: "HU-013"
+    - hu_id: "HU-017"
       metodo: GET
-      ruta: /subscriptions/pending
+      ruta: /instances/:planId/athletes/:athleteId
       proposito: >
-        Panel de solicitudes pendientes del entrenador autenticado
-        (CA-013-3): lista, paginada, las suscripciones en estado Pendiente
-        de TODOS los planes propios del coach, filtrando por relacion
-        (`where: { status: PENDING, plan: { coachId } }`, cubierto por el
-        indice ya existente `Plan.@@index([coachId])` de EPICA-03 — sin
-        indice adicional). Cada item incluye el nombre del atleta y el
-        nombre del plan (join de solo lectura via PrismaService, NO
-        importa AuthModule/PlansModule — mismo criterio D-2 de EPICA-03
-        para lecturas cross-dominio). Ruta separada de GET /subscriptions
-        (no un query param `?role=coach` sobre el mismo endpoint) porque la
-        forma de la respuesta es distinta (resumen enriquecido vs
-        SubscriptionResponseDto propio del atleta) — cada GET del proyecto
-        retorna un unico tipo de respuesta fijo, sin ramificar por rol
-        dentro del mismo handler (ver decision D-1).
-      response: SubscriptionPendingSummaryResponseDto[] + PaginationMeta (200)
-      errores: [401, 403]
+        Panel del entrenador sobre la instancia de UN atleta especifico en
+        UNO de sus planes (CA-017-2, CA-017-4; tambien satisface la lectura
+        de sensaciones de CA-016-3/CA-016-6). Verifica que `:planId`
+        pertenece al entrenador autenticado (RESOURCE_OWNERSHIP_DENIED 403
+        si no, CA-017-4) — endpoint separado de GET /instances/:planId (no
+        un branch de rol sobre el mismo handler) porque toma un parametro
+        adicional que el atleta nunca necesita (athleteId) y porque D-1 de
+        EPICA-04 ya establecio el criterio: parametros distintos ->
+        endpoints distintos (ver D-9). Misma forma de respuesta que la vista
+        propia del atleta (InstanceDetailResponseDto) — a diferencia de
+        subscriptions/pending, aqui SI se reutiliza el mismo DTO porque el
+        contenido es identico, solo cambia quien pregunta. Si el atleta no
+        tiene una suscripcion Activa a `:planId` (o el plan no existe),
+        responde ENTITY_NOT_FOUND (404) — NO CONSENT_REQUIRED: ese codigo es
+        un mensaje dirigido al propio atleta ("active su suscripcion"), no
+        tiene sentido como respuesta a un entrenador (ver D-9b). `:athleteId`
+        SI viaja en la URL — por eso este endpoint NO requiere
+        @AuditResources (ver D-12): la fila de auditoria ya identifica al
+        titular consultado via la columna `url`.
+      response: InstanceDetailResponseDto (200)
+      errores: [401, 403, 404]
       guards: [JwtAuthGuard, RolesGuard(COACH)]
       eventos: []
-      dependencias: [POST /subscriptions]
-
-    - hu_id: "HU-013"
-      metodo: POST
-      ruta: /subscriptions/:id/approve
-      proposito: >
-        Pendiente → Aprobada (CA-013-1). findOwnedByCoachOrFail carga la
-        suscripcion con su plan y verifica plan.coachId === coach
-        autenticado, si no rechaza con RESOURCE_OWNERSHIP_DENIED (403,
-        CA-013-4). Si status !== PENDING rechaza con
-        INVALID_STATE_TRANSITION (409, CA-013-6 — "ya fue resuelta", mismo
-        codigo que usa el ciclo de vida de Plan en EPICA-03). Persiste
-        reviewedAt=now() y reviewedBy=coachId. Emite subscription.approved
-        — el listener de notifications avisa al atleta que debe aceptar el
-        consentimiento (texto del CA-013-1); el listener de deep-copy hacia
-        execution (catalogado en design-patterns skill §7) es alcance de
-        EPICA-05, NO se implementa aqui. approve() NO verifica vigencia del
-        plan (a diferencia de accept-consent, D-10): CA-013-1 no lo exige,
-        y un plan que vence entre la aprobacion y el intento de aceptar el
-        consentimiento es precisamente el escenario que CA-014-8 cubre en
-        el otro extremo del flujo.
-      response: SubscriptionResponseDto (200)
-      errores: [401, 403, 404, 409]
-      guards: [JwtAuthGuard, RolesGuard(COACH)]
-      eventos: [subscription.approved]
-      dependencias: [POST /subscriptions]
-
-    - hu_id: "HU-013"
-      metodo: POST
-      ruta: /subscriptions/:id/reject
-      proposito: >
-        Pendiente → Rechazada (CA-013-2). Mismo mecanismo de ownership y de
-        estado que approve (findOwnedByCoachOrFail, INVALID_STATE_TRANSITION
-        si status !== PENDING). Sin motivo de rechazo en el body — a
-        diferencia de CoachRequest (EPICA-01), ninguna CA de esta epica pide
-        capturar una razon (ver decision D-4). Persiste reviewedAt/
-        reviewedBy. La suscripcion Rechazada NUNCA se elimina (restriccion
-        de la epica) y queda disponible para que el atleta vuelva a
-        solicitar el mismo plan (CA-012-3). Emite subscription.rejected.
-      response: SubscriptionResponseDto (200)
-      errores: [401, 403, 404, 409]
-      guards: [JwtAuthGuard, RolesGuard(COACH)]
-      eventos: [subscription.rejected]
-      dependencias: [POST /subscriptions]
+      dependencias: ["GET /instances/:planId"]
 
     # ══════════════════════════════════════════════════════════════════════
-    # HU-014 — Consentimiento informado deportivo
+    # HU-015 — Registro de resultados (dispara HU-017 como efecto)
     # ══════════════════════════════════════════════════════════════════════
 
-    - hu_id: "HU-014"
+    - hu_id: "HU-015"
+      metodo: POST
+      ruta: /instances/:planId/sessions/:sessionId/results
+      proposito: >
+        Registra o edita los resultados de la sesion `:sessionId` de la
+        instancia propia del atleta para `:planId` (CA-015-1/2/3, upsert —
+        ver D-6b: un solo endpoint, no POST+PATCH separados, porque el
+        recurso es 1:1 con la sesion y ninguna CA distingue logica de
+        negocio entre "primera vez" y "edicion"). El payload trae, por cada
+        ejercicio de la sesion: series realizadas, repeticiones, carga,
+        duracion, distancia (los que apliquen segun el tipo de ejercicio —
+        CA-015-11: solo fuerza [series/reps/carga] o solo resistencia
+        [duracion/distancia] es valido, no se exigen los 5) y una nota
+        libre opcional — columnas tipadas (CA-015-9, D-6 RESUELTO), no un
+        `Json` opaco. Orden de verificacion en el service: (1) Subscription
+        Activa del atleta para `:planId`, si no CONSENT_REQUIRED (422,
+        CA-015-7); (2) la sesion pertenece a la instancia propia del
+        atleta, si no ENTITY_NOT_FOUND (no existe en su arbol) o
+        RESOURCE_OWNERSHIP_DENIED (403, existe pero es de otro atleta —
+        CA-015-6, mismo patron de dos pasos que findOwnSubscriptionOrFail
+        de EPICA-04); (3) el payload trae EXACTAMENTE los ejercicios de esa
+        sesion (ni de mas ni de menos), si no RESULT_FIELDS_INVALID (422 —
+        primer uso real de este error reservado, ver D-6, AHORA respaldado
+        por regla de negocio explicita: CA-015-10, "registro sin todos los
+        ejercicios se rechaza y la sesion NO cuenta como completada"); (4)
+        la semana de la sesion no esta cerrada, si lo esta WEEK_FROZEN (409,
+        CA-015-4/5 — RN-08/EDIT_WINDOW_EXPIRED NUNCA se evalua, derogada).
+        Si las cuatro pasan, en una UNICA $transaction interactiva (D-4):
+        upserta SessionResult (por instanceSessionId) y, para cada item del
+        payload, upserta su SessionExerciseResult hijo (por
+        instanceSessionExerciseId) con los valores tipados; cuenta las
+        sesiones de esa semana sin resultado, y si el conteo llega a cero
+        marca InstanceWeek.isClosed=true/closedAt=now() (RN-30) de forma
+        idempotente (`where: { isClosed: false }`, sin doble emision si dos
+        requests concurrentes empujan el conteo a cero — ver D-4, VER
+        confirmacion de equivalencia con CA-015-10 en la propia D-4).
+        Congelamiento inmediato de esa semana desde ese instante (RN-09) —
+        cualquier intento posterior de editar CUALQUIER resultado o sensacion
+        de esa semana, sin importar cuanto haya pasado, cae en WEEK_FROZEN
+        (CA-015-5). Si la semana cerro, emite week.closed DESPUES del commit
+        (evento ya catalogado, emisor execution, listeners ai/metrics —
+        ninguno implementado en esta epica). A diferencia de la prescripcion
+        (obligatoria para publicar, D-15), el resultado NO exige que cada
+        ejercicio traiga sus 5 campos completos — el atleta reporta lo que
+        efectivamente hizo, solo los campos de su tipo (CA-015-11), y ningun
+        CA de HU-015 pide validar completitud de VALORES dentro de cada
+        item, solo que el CONJUNTO de ejercicios referenciados coincida con
+        la sesion (paso 3 arriba, CA-015-10).
+      request_body: RegisterSessionResultDto
+      response: SessionResultResponseDto (200)
+      errores: [400, 401, 403, 404, 409, 422]
+      guards: [JwtAuthGuard, RolesGuard(ATHLETE)]
+      eventos: ["week.closed (condicional — solo si esta sesion era la ultima pendiente de su semana)"]
+      dependencias: ["GET /instances/:planId"]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HU-016 — Sensaciones semanales
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-016"
+      metodo: POST
+      ruta: /instances/:planId/weeks/:weekId/feelings
+      proposito: >
+        Registra o edita las sensaciones (dolor muscular, motivacion; escala
+        1-10 entera inclusive, RESUELTA — D-6) de la semana `:weekId` de la
+        instancia propia del atleta para `:planId` (CA-016-1, upsert —
+        mismo criterio D-6b que resultados: un solo registro por semana,
+        ningun CA distingue alta de edicion). Un valor fuera de 1-10 se
+        rechaza con 400 (validacion estructural de `RegisterWeeklyFeelingDto`
+        via `@IsInt() @Min(1) @Max(10)`, atrapada por el `ValidationPipe`
+        GLOBAL antes de que el controller o el service se ejecuten) y NO
+        SE GUARDA NADA de esa semana (CA-016-9) — no es un 422 de regla de
+        negocio, es un 400 de forma, coherente con el resto de DTOs del
+        proyecto. Mismo orden de verificacion que resultados, sin el paso 3
+        (no hay "ejercicios" que validar aqui): (1) Subscription Activa, si
+        no CONSENT_REQUIRED (422, CA-016-5); (2) la semana pertenece a la
+        instancia propia, si no ENTITY_NOT_FOUND/RESOURCE_OWNERSHIP_DENIED
+        (403, CA-016-4); (3) la semana no esta cerrada, si lo esta
+        WEEK_FROZEN (409, CA-016-2). Dolor muscular y motivacion son datos
+        sensibles de salud (Ley 1581/2012) — el DTO de respuesta NUNCA se
+        expone en ningun otro endpoint que no sea este o
+        GET /instances/:planId(/athletes/:athleteId) (CA-016-6, ver D-12),
+        y ninguno de sus valores se loggea, ni siquiera en nivel debug
+        (rulesArquitectura ya nombra explicitamente "dolor muscular,
+        motivacion" en su prohibicion de logging). El consentimiento
+        especifico de datos sensibles de salud (CA-016-8) se captura en
+        EPICA-04, no aqui — ver D-14 (RESUELTO, rama (a)): para cuando este
+        endpoint se llama, la Subscription ya esta Activa, lo que YA
+        implica que accept-consent se ejecuto y por tanto que
+        HEALTH_DATA_CONSENT ya se registro en el mismo acto — este endpoint
+        NO necesita una verificacion adicional propia.
+      request_body: RegisterWeeklyFeelingDto
+      response: WeeklyFeelingResponseDto (200)
+      errores: [400, 401, 403, 404, 409, 422]
+      guards: [JwtAuthGuard, RolesGuard(ATHLETE)]
+      eventos: []
+      dependencias: ["GET /instances/:planId"]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # D-15 (EPICA-03 REABIERTA) — Prescripcion en la plantilla
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-023"
+      metodo: POST
+      ruta: /plans/:id/sessions/:sessionId/exercises
+      proposito: >
+        MODIFICADO (mismo metodo/ruta ya existente de EPICA-03). Agrega un
+        ejercicio de la biblioteca global a una sesion (comportamiento
+        original sin cambios: resuelve exerciseId -> ExerciseVersion
+        vigente, persiste exerciseVersionId, RN-07). AddSessionExerciseDto
+        gana 5 campos de prescripcion OPCIONALES (sets, reps, loadKg,
+        durationSeconds, distanceMeters, ver D-15) — el entrenador puede
+        agregar el ejercicio SIN prescripcion y completarla despues via el
+        nuevo PATCH. Sin validacion de "prescripcion significativa" en este
+        punto — esa regla solo se evalua al publicar (D-15), nunca al
+        guardar.
+      request_body: AddSessionExerciseDto (extendido, D-15)
+      response: SessionExerciseResponseDto (extendido, D-15) (201)
+      errores: [400, 401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: []
+
+    - hu_id: "HU-023"
+      metodo: PATCH
+      ruta: /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId
+      proposito: >
+        NUEVO (D-15). Edita la prescripcion (sets, reps, loadKg,
+        durationSeconds, distanceMeters — todos opcionales, actualizacion
+        parcial) de un ejercicio de sesion ya agregado. Primer endpoint de
+        edicion de SessionExercise — hasta esta epica, EPICA-03 solo
+        exponia add/remove, nunca update. Mismos guards que sus vecinos de
+        estructura en PlansController: solo procede si el plan sigue en
+        Borrador (PlanPublishedGuard, RN-31), mismo ownership
+        (findOwnedOrFail) que el resto del controller.
+      request_body: UpdateSessionExercisePrescriptionDto (nuevo, D-15)
+      response: SessionExerciseResponseDto (extendido, D-15) (200)
+      errores: [400, 401, 403, 404, 409]
+      guards: [JwtAuthGuard, RolesGuard(COACH), PlanPublishedGuard]
+      eventos: []
+      dependencias: ["POST /plans/:id/sessions/:sessionId/exercises"]
+
+    - hu_id: "HU-023"
+      metodo: POST
+      ruta: /plans/:id/publish
+      proposito: >
+        MODIFICADO (mismo metodo/ruta ya existente de EPICA-03).
+        validatePlanCompleteness() (plans.service.ts:989-1021 — metodo YA
+        existente, acumulativo, que ya reporta requisitos faltantes via
+        PLAN_INCOMPLETE; D-15 es ADITIVO sobre ese mismo metodo, no una
+        validacion nueva desde cero) se extiende con una segunda pasada:
+        ADEMAS de la estructura minima ya exigida (nombre, fechas, al menos
+        una fase/semana/sesion/ejercicio), recorre TODOS los SessionExercise
+        del arbol y exige que CADA UNO tenga "prescripcion significativa"
+        (regla exacta en D-15). Si alguno no la tiene, PLAN_INCOMPLETE
+        (422) — MISMO codigo de error que la validacion estructural (es la
+        misma regla de negocio, RN-01 extendida, no una regla distinta —
+        sin BusinessError nuevo), listando explicitamente CADA ejercicio
+        incompleto en `missingRequirements` (mismo criterio ya establecido:
+        nunca un mensaje generico).
+      response: PlanResponseDto (200)
+      errores: [401, 403, 404, 409, 422]
+      guards: [JwtAuthGuard, RolesGuard(COACH)]
+      eventos: ["plan.published"]
+      dependencias: ["PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId"]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # D-14 (EPICA-04 REABIERTA, rama (a)) — Consentimiento de salud
+    # ══════════════════════════════════════════════════════════════════════
+
+    - hu_id: "HU-016"
       metodo: POST
       ruta: /subscriptions/:id/accept-consent
       proposito: >
-        Aprobada → Activa (CA-014-2). findOwnSubscriptionOrFail verifica
-        que la suscripcion pertenece al atleta autenticado, si no rechaza
-        con RESOURCE_OWNERSHIP_DENIED (403, CA-014-6). Si status !==
-        APPROVED rechaza con INVALID_STATE_TRANSITION (409) — mismo
-        tratamiento defensivo que CA-013-6, sin CA propia que lo exija mas
-        alla de proteger la maquina de estados. Si status === APPROVED
-        pero el plan referenciado ya NO esta vigente (CA-014-8: el
-        entrenador lo archivo, o su fecha de fin ya paso y su estado
-        EFECTIVO es Finalizado), rechaza con PLAN_NOT_PUBLISHED (409) SIN
-        escribir nada — la suscripcion permanece en Aprobada, ninguna
-        $transaction se abre. Este segundo check reutiliza el MISMO helper
-        privado `isPlanCurrentlyPublished()` de SubscriptionsService que ya
-        usa POST /subscriptions (ver D-2 y D-10) — NO puede leer la columna
-        `plan.status` cruda: un plan con status persistido PUBLISHED cuya
-        endDate ya paso esta efectivamente Finalizado
-        (`computeEffectiveStatus` de plans.service.ts:1027), y el
-        write-through que actualiza esa columna en la base de datos solo
-        corre cuando el propio COACH lee su plan — exactamente el caso que
-        CA-014-8 exige cubrir y que un chequeo ingenuo `plan.status !==
-        PUBLISHED` dejaria pasar. Solo si AMBOS checks de estado pasan
-        (subscripcion Aprobada Y plan vigente) procede la $transaction
-        atomica (mismo patron que AuthService.registerAthlete de EPICA-01):
-        crea LegalAcceptance(documentType=SPORT_CONSENT,
-        planId=subscription.planId, userId=atleta, documentVersion del
-        body, ip, userAgent) + Subscription.update(status=ACTIVE,
-        activatedAt=now()). Emite subscription.activated (evento nuevo —
-        ver decision D-7): sin listener en esta epica, queda disponible
-        como punto de integracion para EPICA-05 (deep-copy de instancia /
-        habilitacion de sesiones). El CONTENIDO del documento (texto,
-        disclaimer de IA de CA-014-5) es responsabilidad del frontend con
-        contenido versionado estatico — mismo precedente que habeas
-        data/terminos de HU-003, ver decision D-8. Un planId huerfano ya no
-        es posible: LegalAcceptance.planId pasa a tener FK real a Plan
-        (decision D-5). No se agrega ningun estado nuevo a
-        SubscriptionStatus para el caso CA-014-8 — la suscripcion queda en
-        Aprobada como via muerta (decision confirmada por el humano, ver
-        D-10).
-      request_body: AcceptConsentDto
+        MODIFICADO (mismo metodo/ruta ya existente de EPICA-04, ver D-14
+        RESUELTO rama (a)). AcceptConsentDto gana un segundo campo de
+        version: el campo `documentVersion` existente se renombra
+        `sportConsentDocumentVersion`, y se agrega
+        `healthDataConsentDocumentVersion` (ambos obligatorios — el atleta
+        acepta AMBOS documentos en el mismo acto, sin opcion de aceptar uno
+        y declinar el otro, ver D-14). acceptConsent() agrega un segundo
+        `legalAcceptance.create` (documentType=HEALTH_DATA_CONSENT,
+        planId=subscription.planId, userId=atleta,
+        documentVersion=dto.healthDataConsentDocumentVersion, ip,
+        userAgent) DENTRO de la MISMA $transaction que ya crea SPORT_CONSENT
+        y actualiza la Subscription a Activa — sin escritura adicional fuera
+        de esa transaccion, sin cambio de comportamiento en las
+        precondiciones existentes (ownership, estado Aprobada, plan
+        vigente — D-10 de EPICA-04 intacto). CERO cambio de schema:
+        DocumentType.HEALTH_DATA_CONSENT ya existe en el enum desde
+        EPICA-01.
+      request_body: AcceptConsentDto (extendido, D-14)
       response: SubscriptionResponseDto (200)
       errores: [400, 401, 403, 404, 409]
       guards: [JwtAuthGuard, RolesGuard(ATHLETE)]
-      eventos: [subscription.activated]
-      dependencias: [POST /subscriptions/:id/approve]
+      eventos: ["subscription.activated"]
+      dependencias: []
 
   orden_de_implementacion:
-    - "Prisma: modelo Subscription + indice unico parcial + FK de LegalAcceptance.planId a Plan (DBA, ver decisiones D-3 y D-5 — bloquea todo lo siguiente)"
-    - "plans.service.ts: hasSubscribers(planId) — reemplazo de cuerpo (solo depende del modelo Subscription, no de ningun endpoint de este modulo)"
-    - POST /subscriptions
-    - GET /subscriptions
-    - GET /subscriptions/pending
-    - POST /subscriptions/:id/approve
-    - POST /subscriptions/:id/reject
-    - POST /subscriptions/:id/accept-consent
+    - "Prisma (DBA), migracion 1 — plans/EPICA-03 REABIERTA: agregar 5 columnas NULLABLE a SessionExercise (sets, reps, loadKg, durationSeconds, distanceMeters) — D-15. Incluye backfill de datos: planes en estado PUBLISHED cuyos SessionExercise no cumplan la regla de prescripcion significativa se revierten a DRAFT (ver D-15). NO toca Phase/Week/Session"
+    - "Prisma (DBA), migracion 2 — execution/EPICA-05: PlanInstance/InstancePhase/InstanceWeek/InstanceSession/InstanceSessionExercise (ahora con los mismos 5 campos de prescripcion copiados, D-15) + SessionResult + SessionExerciseResult (hijo tipado, reemplaza el diseño Json de versiones anteriores de este plan, D-6) + WeeklyFeeling + constraints de unicidad (subscriptionId; instanceId+weekNumber; instanceSessionId en SessionResult; instanceSessionExerciseId en SessionExerciseResult; instanceWeekId en WeeklyFeeling) — bloquea todo lo de execution"
+    - "subscriptions/EPICA-04 REABIERTA: CERO migracion — DocumentType.HEALTH_DATA_CONSENT ya existe en el enum desde EPICA-01 (D-14)"
+    - "plans.service.ts: addSessionExercise() persiste los 5 campos si vienen en el DTO; updateSessionExercisePrescription() nuevo; validatePlanCompleteness() extendida con la regla de prescripcion significativa (D-15)"
+    - "plans.controller.ts: AddSessionExerciseDto extendido; nuevo endpoint PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId"
+    - "subscriptions.service.ts: acceptConsent() — segundo legalAcceptance.create (HEALTH_DATA_CONSENT) en la misma $transaction (D-14)"
+    - "subscriptions/dto/accept-consent.dto.ts: AcceptConsentDto extendido (dos campos de version)"
+    - "InstancesService.createInstanceFromSubscription() (deep copy, $transaction — ahora copia tambien los 5 campos de prescripcion, D-15) + getOrCreateInstance() (wrapper idempotente, compartido por el listener y por el self-heal de GET)"
+    - "SubscriptionActivatedListener (src/modules/execution/listeners/)"
+    - "GET /instances"
+    - "GET /instances/:planId"
+    - "GET /instances/:planId/athletes/:athleteId"
+    - "POST /instances/:planId/sessions/:sessionId/results (SessionExerciseResult tipado, D-6)"
+    - "POST /instances/:planId/weeks/:weekId/feelings"
 
   decisiones_arquitectonicas:
     - decision: >
-        D-1. subscriptions es un modulo/controller separado de plans, con
-        UN SOLO controller (SubscriptionsController, ruta base
-        /subscriptions) cuyos 6 endpoints fijan el rol requerido POR
-        METODO (@Roles a nivel de handler, no de clase) en vez de fijarlo a
-        nivel de controller como hacen PlansController (COACH) y
-        ExercisesController (COACH+ADMIN).
+        D-1. Modelo de datos de la instancia: PlanInstance (contenedor,
+        FK planId + athleteId + subscriptionId UNICO) -> InstancePhase ->
+        InstanceWeek (instanceId denormalizado desde instancePhaseId, MISMO
+        criterio que Week.planId en EPICA-03, para poder declarar
+        `@@unique([instanceId, weekNumber])` con weekNumber secuencial a lo
+        largo de TODA la instancia, no por fase — espeja exactamente la
+        decision D-4 de EPICA-03 para Week) -> InstanceSession ->
+        InstanceSessionExercise (exerciseVersionId copiado tal cual, ver
+        D-13). Ningun modelo de la instancia lleva `updatedAt` salvo
+        InstanceWeek (closedAt) y SessionResult/WeeklyFeeling (SI llevan
+        updatedAt — son los unicos que reciben escrituras UPDATE reales,
+        mismo criterio ya usado para distinguir Subscription de
+        Phase/Week/Session en EPICA-03/04).
       justificacion: >
-        Es el primer modulo de la epica donde el mismo recurso (Subscription)
-        tiene operaciones exclusivas de ATHLETE (solicitar, listar propias,
-        aceptar consentimiento) y otras exclusivas de COACH (listar
-        pendientes, aprobar, rechazar) — fijar un rol a nivel de controller
-        como en los modulos anteriores bloquearia la mitad de las rutas.
-        RolesGuard ya soporta esto sin cambios: usa
-        `reflector.getAllAndOverride(ROLES_KEY, [handler, class])`, que
-        resuelve el metadato mas especifico (el del metodo) cuando existe.
-        No requiere separar en dos controllers (uno por rol) porque, a
-        diferencia de PlansController/PlansCatalogController en EPICA-03
-        (decision D-10, separados por ambiguedad de RUTAS entre "catalog" y
-        ":id"), aqui no hay colision de segmentos: /subscriptions,
-        /subscriptions/pending y /subscriptions/:id/[accion] no compiten
-        entre si.
+        Mismo patron estructural que Plan (EPICA-03), nombrado con el
+        prefijo "Instance" para dejar explicito que es una copia propia del
+        atleta, no la plantilla. Reutilizar la forma exacta del arbol de
+        Plan (en vez de aplanar en una sola tabla JSON) permite reutilizar
+        el mismo tipo de queries e indices ya probados en EPICA-03, y deja
+        espacio para que EPICA-06 (personalizacion del entrenador) module
+        sobre la misma jerarquia sin rediseñar.
 
     - decision: >
-        D-2. subscriptions lee Plan/User/CoachRequest directamente via
-        PrismaService (compartido, @Global) para: (a) verificar el estado
-        efectivo del plan al solicitar inscripcion y al aceptar el
-        consentimiento (CA-012-4 y CA-014-8, ver D-10), replicando la misma
-        logica `computeEffectiveStatus` de PlansService (PUBLISHED con
-        endDate vencida se trata como no-publicable); y (b) resolver
-        athleteName/planName en el panel de pendientes (HU-013). NO importa
-        PlansModule, PlansService, AuthModule ni AuthService. DENTRO de
-        subscriptions.service.ts, esa logica de estado efectivo vive en UN
-        SOLO metodo privado (`isPlanCurrentlyPublished(plan)`), invocado
-        tanto por create() como por acceptConsent() — evita duplicarla dos
-        veces dentro del mismo archivo; lo que SI se duplica, a proposito,
-        es entre este metodo y `computeEffectiveStatus` de PlansService
-        (dos modulos distintos).
+        D-2. GET /instances/:planId(/athletes/:athleteId) devuelven el
+        arbol completo en un unico DTO (InstanceDetailResponseDto), sin
+        endpoints separados por nivel (fase/semana/sesion) — mismo criterio
+        D-8 de EPICA-03. Cada InstanceWeekResponseDto incluye el
+        WeeklyFeelingResponseDto de esa semana si existe (null si no,
+        satisface CA-016-3: el cliente distingue por presencia/ausencia del
+        objeto, no por un flag booleano aparte), y cada
+        InstanceSessionResponseDto incluye su SessionResultResponseDto si
+        existe. `isClosed`/`closedAt` viajan en InstanceWeekResponseDto.
       justificacion: >
-        Mismo precedente ya aceptado en EPICA-03 (D-2, D-2b): rulesCodigo
-        prohibe importar SERVICES de otro modulo, no prohibe que dos
-        services lean las mismas tablas a traves del PrismaService
-        compartido. La duplicacion CROSS-MODULO de la logica de estado
-        efectivo se mantiene intencional (no se extrae a un helper
-        compartido en `common`): es una funcion pura de pocas lineas, y
-        extraerla para dos consumidores en dos modulos distintos seria
-        sobre-ingenieria frente al costo real de mantenerla sincronizada
-        manualmente (bajo — el criterio de RN-27/D-1 de EPICA-03 es
-        estable). Si una tercera epica la necesita, ese es el momento de
-        mover la logica a `common/utils`. La duplicacion INTERNA dentro de
-        subscriptions.service.ts, en cambio, no tiene la misma
-        justificacion — ahi un solo metodo privado reutilizado es simplemente
-        no repetir codigo dentro del mismo archivo, sin relacion con la
-        regla de modulos.
+        Evita N+1 endpoints (uno por fase, semana, sesion) para reconstruir
+        una sola pantalla de progreso — el mismo argumento que ya uso
+        EPICA-03 para PlanDetailResponseDto. Incluir el resultado/sensacion
+        inline en vez de requerir un GET adicional por sesion/semana reduce
+        drasticamente el numero de requests del cliente movil.
 
     - decision: >
-        D-3 (resuelve el PENDIENTE del Arquitecto sobre unicidad).
-        Subscription NO lleva `@@unique([athleteId, planId])`. La
-        exclusividad de CA-012-2/CA-012-3 se implementa con un INDICE UNICO
-        PARCIAL de PostgreSQL:
-        `CREATE UNIQUE INDEX subscriptions_athlete_plan_active_key ON
-        subscriptions (athlete_id, plan_id) WHERE status IN ('PENDING',
-        'APPROVED', 'ACTIVE');` — agregado a mano por el humano en la
-        migracion, exactamente el mismo workflow ya documentado y probado
-        en este schema para `exercises_name_lower_active_key` (EPICA-02):
-        `prisma migrate dev --create-only`, editar el .sql generado,
-        aplicar. El pre-check en SubscriptionsService.create() (buscar una
-        suscripcion propia en esos tres estados antes del INSERT) sigue
-        siendo necesario para devolver SUBSCRIPTION_ALREADY_EXISTS con un
-        mensaje claro en el caso comun; el indice parcial es la salvaguarda
-        de base de datos contra la ventana de carrera entre ese SELECT y el
-        INSERT (dos solicitudes concurrentes del mismo atleta al mismo
-        plan). Una fila Rechazada NUNCA colisiona con el indice —
-        exactamente lo que CA-012-3 exige.
+        D-3 (resuelve la pregunta del team lead sobre robustez de HU-023).
+        La creacion de la instancia tiene DOS caminos hacia el MISMO metodo
+        idempotente `getOrCreateInstance(athleteId, planId, subscriptionId)`:
+        (a) SubscriptionActivatedListener, camino RAPIDO, dispara
+        inmediatamente al recibir subscription.activated; (b)
+        GET /instances/:planId, camino de AUTO-REPARACION — si la
+        Subscription ya esta Activa pero la instancia todavia no existe
+        (el listener no ha corrido, fallo, o esta en curso), el propio GET
+        la crea sobre la marcha en la misma llamada, de forma sincrona,
+        antes de responder. `getOrCreateInstance` hace `findUnique({
+        subscriptionId })` primero; si no existe, ejecuta
+        `createInstanceFromSubscription` dentro de un `$transaction`
+        interactivo. Si esa transaccion falla a mitad (cualquier error),
+        Prisma revierte TODO — nunca queda una instancia parcial (sin
+        fases, o con fases pero sin todas sus semanas): el atleta esta Activo
+        sin instancia, exactamente el mismo estado que antes de llamar, y
+        el proximo GET (o el proximo intento del listener, si el fallo fue
+        transitorio) vuelve a intentar el mismo `getOrCreateInstance` desde
+        cero. No hay reintento automatico en segundo plano, cola, ni job
+        programado.
+
+        CONFIRMACION EXPLICITA — CA-023-8 (redactado por el Analista en
+        `outputs/reporte_validacion_negocio.yaml`, HU-023): "Dado que el
+        proceso de creacion de la instancia personalizada se dispara mas de
+        una vez para la misma suscripcion activada, Cuando el sistema
+        detecta que ya existe una instancia para esa suscripcion, Entonces
+        no crea una segunda instancia, la instancia original permanece sin
+        cambios, y el atleta sigue viendo una unica instancia para esa
+        suscripcion en el listado y en el detalle." Este CA queda CUBIERTO
+        TAL CUAL por el mecanismo ya descrito arriba, sin cambios
+        adicionales de diseño: el constraint unico sobre
+        `PlanInstance.subscriptionId` mas el `findUnique`-antes-de-crear (y
+        la captura de P2002 como salvaguarda ante la ventana de carrera
+        entre ambos pasos, mismo patron que `SubscriptionsService.create()`
+        de EPICA-04) garantizan exactamente "nunca una segunda instancia
+        para la misma suscripcion, la original permanece sin cambios". El
+        Documentador y el QA pueden dar CA-023-8 por cubierto por D-3 sin
+        diseño adicional — el test correspondiente ya estaba listado en
+        `criterios_de_aceptacion_tecnicos` de este plan desde la v1.0
+        ("Test unitario CRITICO de idempotencia"), ahora vinculado
+        explicitamente a CA-023-8 mas abajo.
       justificacion: >
-        El supuesto confirmado por el humano es explicito: un
-        `@@unique([athleteId, planId])` simple es incorrecto porque el par
-        puede repetirse legitimamente tras un rechazo. La alternativa de
-        "no declarar ninguna unicidad en base de datos, resolver todo en el
-        service" fue descartada: dejaria una ventana de carrera real (dos
-        POST /subscriptions concurrentes del mismo atleta al mismo plan
-        crearian dos filas Pendientes) sin ninguna proteccion mas alla de
-        la disciplina del service — un nivel de garantia inferior al que
-        EPICA-02 ya establecio como el estandar del proyecto para este
-        mismo tipo de problema (unicidad condicionada a un subconjunto de
-        estados). No se propone una libreria ni un patron nuevo: es el
-        mismo patron, reutilizado.
+        El team lead pidio decidir explicitamente entre reintentar,
+        alertar, o reparar bajo demanda. Se elige REPARAR BAJO DEMANDA
+        porque: (1) no requiere infraestructura nueva (una cola de
+        reintentos seria Saga Pattern de facto, prohibido por las rules);
+        (2) el caso comun (listener exitoso) nunca paga el costo del
+        camino B — el $transaction de la instancia ya corrio antes de que
+        el atleta llegue a pedir su GET; (3) el caso raro (listener fallido)
+        se autocorrige la primera vez que alguien (atleta o su entrenador)
+        mira la instancia, sin intervencion humana. El riesgo residual — si
+        NADIE vuelve a consultar la instancia, el hueco persiste
+        silenciosamente para siempre — se documenta como riesgo aceptado a
+        escala MVP, no se resuelve con alertamiento activo en este ciclo
+        (ver riesgos). NOTA (D-14): este mecanismo NO cambia con D-14
+        resuelto en rama (a) — HEALTH_DATA_CONSENT se captura en
+        subscriptions/acceptConsent(), ortogonal a la existencia de la
+        instancia. NOTA (D-15): la copia profunda ahora tambien copia los 5
+        campos de prescripcion, dentro de la MISMA $transaction — ver D-15.
 
     - decision: >
-        D-4. POST /subscriptions/:id/reject no recibe ningun campo en el
-        body (sin `rejectionReason`).
+        D-4 (resuelve la pregunta del team lead sobre deteccion de cierre
+        de semana). El cierre de HU-017 se calcula DENTRO de la misma
+        $transaction interactiva de POST .../results, no via un evento
+        separado ni un job: tras upsertar el SessionResult, la MISMA
+        transaccion cuenta
+        `InstanceSession.count({ where: { instanceWeekId, result: null } })`
+        y, si el conteo es cero, hace
+        `InstanceWeek.update({ where: { id, isClosed: false }, data: {
+        isClosed: true, closedAt: now() } })`. El evento week.closed se
+        emite DESPUES del commit, solo si esa actualizacion afecto una fila
+        (evita doble emision si dos requests concurrentes llegan a contar
+        cero cada una — la segunda encuentra `isClosed: false` ya falso en
+        el WHERE y actualiza cero filas).
+
+        CONFIRMACION DE EQUIVALENCIA (pedida por el team lead tras las
+        decisiones de "sesion completada", CA-015-10/CA-015-11, ya
+        incorporadas a `outputs/epica_input.yaml`): este diseño cuenta
+        `InstanceSession` SIN una fila `SessionResult` como "pendiente" —
+        es decir, trata "tiene SessionResult" como sinonimo de "esta
+        completada". El humano definio "completada" de forma mas estricta:
+        "solo cuando el atleta registro un resultado para CADA ejercicio
+        programado de esa sesion" (CA-015-10). Verificado que estos dos
+        criterios son EL MISMO, no dos criterios que coincidan por
+        casualidad: el paso (3) del endpoint POST .../results
+        (RESULT_FIELDS_INVALID, ya diseñado desde la v1.0 de este plan,
+        ANTES de que CA-015-10 existiera como CA explicito) rechaza
+        cualquier payload que no traiga EXACTAMENTE el conjunto completo de
+        ejercicios de la sesion — el upsert de SessionResult (y por tanto
+        la existencia misma de la fila que este conteo mira) SOLO ocurre
+        DESPUES de pasar esa verificacion. Por construccion, es imposible
+        que exista un `SessionResult` cuya sesion tenga menos
+        `SessionExerciseResult` hijos que ejercicios programados — la fila
+        `SessionResult` NUNCA existe en estado parcial. Por eso "cuenta
+        `InstanceSession` sin `SessionResult`" y "cuenta `InstanceSession`
+        sin un resultado para CADA ejercicio" son la MISMA cuenta, y este
+        diseño NO requiere ningun cambio ante CA-015-10/CA-015-11: ya era
+        equivalente, sin haberlo verificado formalmente hasta ahora.
+        CA-015-11 (llenar solo los campos que aplican al tipo de ejercicio
+        es valido) tampoco afecta este conteo — opera sobre el CONTENIDO de
+        cada `SessionExerciseResult`, no sobre si la fila existe.
       justificacion: >
-        A diferencia de CoachRequest.rejectionReason (EPICA-01), ninguna
-        CA de HU-013 pide capturar ni mostrar un motivo de rechazo —
-        agregarlo seria inventar alcance no pedido por el documento fuente.
-        Si el negocio lo requiere en el futuro, es un campo opcional que se
-        agrega sin romper el contrato (no bloquea evolucion).
+        Envolver conteo+condicion+escritura en UNA transaccion interactiva
+        es exactamente la ventana de carrera que preocupaba al team lead:
+        dos atletas... no, el MISMO atleta no puede registrar dos sesiones a
+        la vez desde un solo cliente, pero nada impide dos requests
+        concurrentes (doble tap, reintento de red) sobre las dos ULTIMAS
+        sesiones pendientes de la misma semana. Sin la transaccion
+        interactiva, ambos requests podrian leer "quedan 1 pendientes"
+        (contando la sesion que el OTRO request esta a punto de cerrar) y
+        ninguno marcar el cierre — semana que nunca cierra pese a estar
+        completa. Con la transaccion, Postgres serializa el conteo contra
+        la escritura del propio request (aislamiento READ COMMITTED de
+        Prisma es suficiente aqui porque el conteo lee filas ya comprometidas
+        por la propia transaccion, incluyendo el upsert que la precede en
+        la misma transaccion). El guard `isClosed: false` en el UPDATE es la
+        salvaguarda adicional contra la doble emision del evento, sin
+        necesitar SELECT FOR UPDATE explicito.
 
     - decision: >
-        D-5 (resuelve el PENDIENTE del Arquitecto/DBA sobre
-        LegalAcceptance.planId). Se agrega la relacion real:
-        `plan Plan? @relation(fields: [planId], references: [id], onDelete:
-        Restrict)` en LegalAcceptance, y el lado inverso
-        `legalAcceptances LegalAcceptance[]` en Plan. El campo sigue siendo
-        opcional (`planId String?`) porque HABEAS_DATA y TERMS_OF_SERVICE
-        de EPICA-01 se registran sin plan asociado — solo SPORT_CONSENT lo
-        usa. onDelete: Restrict, no Cascade ni SetNull: un registro legal
-        append-only jamas debe poder quedar huerfano de forma silenciosa
-        (mismo criterio que Plan.coach ya usa frente a User, y que RN-13
-        exige para todo registro con valor de trazabilidad legal — Ley
-        527/1999). En la practica esto es una salvaguarda que hoy nunca se
-        activa: no existe ningun endpoint que borre un Plan.
+        D-5. El patron Frozen Flag (skill design-patterns §5) se implementa
+        con `isClosed`/`closedAt` DIRECTAMENTE en InstanceWeek, NO en una
+        tabla `WeekClosure` separada como muestra el ejemplo ilustrativo del
+        skill (references/data-patterns.md §3). No hay una tabla `WeekClosure`
+        en este plan.
       justificacion: >
-        El propio epica_input lo senala: "sin FK, un planId invalido entra
-        sin error". Con la relacion declarada, Prisma/Postgres rechaza en
-        el INSERT cualquier planId que no exista como Plan real —
-        cerrando el hueco a nivel de base de datos en vez de confiar
-        unicamente en que el service siempre pase un planId valido (que
-        hoy es cierto porque el unico llamador es
-        accept-consent(subscription.planId), pero la garantia de esquema
-        es mas fuerte que la disciplina del codigo).
+        El ejemplo del skill es ilustrativo y fue escrito ANTES de que
+        existiera un modelo `Week`/`InstanceWeek` real con jerarquia propia
+        (EPICA-03 lo introdujo despues) — en ese ejemplo, `instanceId` +
+        `weekNumber` sueltos eran la unica forma de referenciar una semana.
+        Aqui InstanceWeek YA es una fila real con id propio: agregar una
+        tabla separada solo para dos columnas (isClosed, closedAt) que
+        pertenecen 1:1 a esa fila seria una join innecesaria en CADA lectura
+        de progreso y en CADA guard de escritura (el chequeo mas caliente de
+        toda la epica). Se documenta como discrepancia a corregir en el
+        skill tras el CHECKPOINT (mismo tratamiento que D-7/riesgo de
+        EPICA-04 para el diagrama de Subscription Lifecycle desactualizado).
 
     - decision: >
-        D-6. Se agrega UNA entry nueva a BusinessError (seccion "Planes",
-        junto a PLAN_INCOMPLETE/PLAN_HAS_SUBSCRIBERS/PLAN_IMMUTABLE):
-        `PLAN_NOT_PUBLISHED` — httpStatus 409 CONFLICT, title "El plan no
-        esta vigente" (titulo generico y estable, reutilizable en distintos
-        contextos — ver D-10). El "detail" (especifico por ocurrencia, no
-        el titulo) varia segun quien lo lanza: POST /subscriptions dice
-        "no acepta nuevas inscripciones en su estado actual" (CA-012-4);
-        POST /subscriptions/:id/accept-consent dice que el plan "ya no esta
-        vigente" y que la suscripcion permanece en Aprobada (CA-014-8).
-        SUBSCRIPTION_ALREADY_EXISTS y CONSENT_REQUIRED, ya reservados en el
-        catalogo desde su creacion, se usan sin modificacion (el primero en
-        HU-012 CA-012-2; CONSENT_REQUIRED queda reservado para EPICA-05,
-        ver decision D-9).
+        D-6 (RESUELTO — decision del humano en el segundo y tercer
+        CHECKPOINT, 2026-08-21. Ya NO es Json opaco, y la escala de
+        sensaciones ya NO es placeholder). El resultado de sesion y la
+        prescripcion de ejercicio (D-15) usan las MISMAS columnas tipadas,
+        para ser comparables uno a uno:
+
+        `SessionExercise` (plantilla, D-15) gana: `sets Int?`, `reps Int?`,
+        `loadKg Float?`, `durationSeconds Int?`, `distanceMeters Float?` —
+        TODOS nullable (el entrenador bosqueja sin volumenes en Borrador).
+        Sin campo de nota — la prescripcion no la necesita, solo el
+        resultado.
+
+        `SessionResult` deja de ser un `Json` unico: pasa a ser un
+        AGREGADO. `SessionResult` (id, instanceSessionId FK UNICO,
+        athleteId denormalizado, createdAt, updatedAt) es el registro
+        padre, casi vacio de datos propios. `SessionExerciseResult` es el
+        HIJO nuevo (id, sessionResultId FK, instanceSessionExerciseId FK
+        UNICO — un resultado por ejercicio de sesion como maximo, `sets
+        Int?`, `reps Int?`, `loadKg Float?`, `durationSeconds Int?`,
+        `distanceMeters Float?`, `notes String?` con longitud maxima
+        razonable — MISMOS 5 campos que la prescripcion, mas la nota que
+        SOLO el resultado tiene). El service upserta el padre por
+        `instanceSessionId` y, para cada item del payload, upserta el hijo
+        por `instanceSessionExerciseId` — sin `updatedAt` en el hijo:
+        cualquier edicion del hijo se refleja en el `updatedAt` del padre,
+        que ya identifica "cuando se toco por ultima vez esta sesion", sin
+        duplicar la marca de tiempo en cada fila hija.
+
+        `WeeklyFeeling.muscleSoreness`/`motivation`: escala 1 a 10, AMBOS
+        INCLUSIVE, valores ENTEROS — RESUELTA, ya NO es placeholder
+        (confirmado por el humano en el tercer CHECKPOINT). Validacion:
+        `@IsInt() @Min(1) @Max(10)` en `RegisterWeeklyFeelingDto`, atrapada
+        por el `ValidationPipe` GLOBAL — CA-016-9 (ya incorporado a
+        `outputs/epica_input.yaml`): "Cuando indica un valor... fuera del
+        rango de 1 a 10, Entonces la operacion se rechaza..., Y no se
+        guarda ningun registro de sensaciones de esa semana". Esto se
+        cumple TRIVIALMENTE con la arquitectura ya existente del proyecto:
+        el `ValidationPipe` (`main.ts`) rechaza con 400 ANTES de que el
+        request llegue al controller o al service — no hay ninguna
+        escritura parcial posible porque no hay ninguna escritura en
+        absoluto hasta que el DTO valida. Es un 400 de forma (estructura
+        del payload), no un 422 de regla de negocio — mismo criterio que
+        el resto de DTOs del proyecto, sin necesitar logica adicional en el
+        service para este caso.
+
+        RESULT_FIELDS_INVALID (422, ya reservado en el catalogo) se usa por
+        primera vez en esta epica para el UNICO caso que SI esta definido
+        por CA: el payload de resultados no trae exactamente los ejercicios
+        de la sesion referenciada (ni de mas ni de menos) — AHORA respaldado
+        por CA-015-10 explicito, no solo por inferencia del Arquitecto. NO
+        valida completitud de VALORES dentro de cada item (a diferencia de
+        la prescripcion en `publish()`, D-15): el atleta reporta lo que
+        efectivamente hizo, solo los campos de su tipo de ejercicio
+        (CA-015-11 — fuerza: series/reps/carga; resistencia:
+        duracion/distancia), y ningun CA de HU-015 pide que el resultado
+        sea "significativo" en el mismo sentido que la prescripcion.
+
+        RPE (percepcion de esfuerzo) EVALUADO Y DESCARTADO por decision del
+        humano: no se agrega ningun campo de RPE ni a `SessionExercise` ni
+        a `SessionExerciseResult`. Si se reconsiderara en el futuro,
+        arrastraria HU-015 entera al regimen de dato sensible de salud (Ley
+        1581/2012) igual que `WeeklyFeeling` — el ADDENDUM de la v1.1/v1.2
+        de este plan sobre este punto queda CERRADO, no PENDIENTE.
+
+        Unidad de `loadKg`/`distanceMeters`: ningun RN/CA especifica
+        unidades — se asume kilogramos y metros (sistema metrico, contexto
+        colombiano del proyecto) por convencion, no por una regla explicita
+        confirmada. Riesgo menor, documentado abajo.
       justificacion: >
-        409 y no 422: el propio comentario del catalogo fija el criterio
-        ("409 para CONFLICTOS DE ESTADO del recurso") y PlanStatus es
-        exactamente eso, una maquina de estados explicita (a diferencia de
-        Exercise.isActive, que es un flag simple y por eso EXERCISE_INACTIVE
-        usa 422) — INVALID_STATE_TRANSITION/PLAN_IMMUTABLE/
-        PLAN_HAS_SUBSCRIBERS, los tres errores de estado de Plan que ya
-        existen, usan 409 por el mismo motivo. Se rechazo reutilizar
-        INVALID_STATE_TRANSITION: ese codigo describe una transicion
-        fallida DEL PROPIO recurso mutado por el endpoint (el plan, en
-        publish/unpublish de EPICA-03); aqui el recurso mutado es la
-        Subscription, y el plan es solo una precondicion referenciada — la
-        misma distincion que ya separa EXERCISE_INACTIVE de
-        INVALID_STATE_TRANSITION en el catalogo actual. El titulo se
-        generaliza (en vez de fijarlo a "no acepta nuevas inscripciones")
-        porque, tras agregarse CA-014-8, el mismo error describe DOS
-        situaciones de negocio distintas (bloquear una inscripcion nueva;
-        bloquear la activacion de una ya aprobada) que comparten la MISMA
-        causa raiz (el plan dejo de estar efectivamente Publicado) — mismo
-        criterio que ya usa el catalogo para ENTITY_NOT_FOUND, reutilizado
-        con un "detail" distinto por cada entidad/contexto sin crear un
-        codigo nuevo por cada uno.
+        Columnas tipadas en vez de `Json` porque EPICA-07 (metricas) y
+        EPICA-08 (IA) van a CONSUMIR estos valores agregandolos y
+        comparandolos — un `Json` opaco habria forzado a esas epicas
+        futuras a parsear estructura no garantizada por el schema, exactamente
+        el tipo de deuda que el proyecto ya evito en otros lados
+        (`rulesCodigo § Enums`: tipado nominal sobre estructura implicita).
+        Prescripcion y resultado comparten los mismos 5 campos por decision
+        explicita del humano: sin esa simetria, EPICA-08 tendria que mapear
+        dos vocabularios distintos para la misma medida. `SessionExerciseResult`
+        como hijo separado (en vez de aplanar todo en `SessionResult`) seria
+        el patron 1:N estandar para "un resultado por ejercicio dentro de
+        una sesion con multiples ejercicios" — ya usado en el propio schema
+        para `SessionExercise` dentro de `Session`. La escala 1-10 y su
+        mecanismo de rechazo se resuelven con infraestructura YA existente
+        del proyecto (`ValidationPipe` global) — no requieren ningun diseño
+        nuevo, solo la confirmacion de que la escala es definitiva.
 
     - decision: >
-        D-7. Se agregan DOS eventos nuevos al catalogo del skill
-        design-patterns (§7), que hoy solo documenta `subscription.
-        requested`, `subscription.approved` y `subscription.cancelled`:
-        `subscription.rejected` (emisor subscriptions, listener
-        notifications → CA-013-2) y `subscription.activated` (emisor
-        subscriptions, sin listener en esta epica — punto de integracion
-        para EPICA-05). `subscription.cancelled` no se usa: ninguna HU de
-        esta epica modela una cancelacion posterior a Activa.
+        D-6b. Un solo endpoint (POST, no POST+PATCH separados) para
+        resultados de sesion y para sensaciones semanales, con semantica de
+        upsert en el service (`prisma.sessionResult.upsert(...)` /
+        `prisma.weeklyFeeling.upsert(...)`, apoyado en el `@@unique` de cada
+        modelo).
       justificacion: >
-        CA-013-2 exige notificar el rechazo al atleta, igual que CA-013-1
-        exige notificarle la aprobacion — omitir subscription.rejected
-        habria dejado la mitad del flujo de HU-013 sin evento pese a tener
-        el mismo requisito de notificacion que la mitad ya cubierta.
-        subscription.activated se emite por el mismo criterio ya aceptado
-        en D-11 de EPICA-03 (dejar un punto de integracion emitido sin
-        forzar su consumidor): es la transicion que de verdad habilita al
-        atleta a iniciar sesiones (RN-20), un hito mas preciso para que
-        EPICA-05 dispare su deep-copy que `subscription.approved` (que el
-        skill design-patterns cataloga hoy como el trigger de "execution
-        (deep copy)", pero en Aprobada el atleta TODAVIA no puede iniciar
-        nada sin el consentimiento — y con CA-014-8, ni siquiera esta
-        garantizado que llegue a poder hacerlo). Se documenta como
-        discrepancia a corregir en el skill (fuera del alcance de este
-        plan, ver riesgos).
+        A diferencia de subscriptions (D-1 de EPICA-04, donde ATHLETE y
+        COACH necesitaban formas de respuesta distintas), aqui "registrar"
+        y "editar" son la MISMA operacion de negocio con las MISMAS
+        precondiciones (Subscription Activa, ownership, semana abierta) —
+        ninguna CA de HU-015/HU-016 describe un comportamiento diferente
+        entre la primera escritura y una posterior. Separar en POST
+        (create-only, 409 si ya existe) + PATCH (update-only, 404 si no
+        existe) duplicaria la validacion de precondiciones en dos handlers
+        para una distincion que ningun CA exige. Se prefiere el patron mas
+        simple sobre el mas "REST-puro" — mismo criterio de pragmatismo que
+        ya uso D-4 de EPICA-04 para el indice parcial en vez de una
+        exclusividad mas compleja.
 
     - decision: >
-        D-8. El CONTENIDO del documento de consentimiento informado
-        deportivo (el texto que el atleta lee, incluido el disclaimer de
-        IA de CA-014-5) NO se sirve desde ningun endpoint de este modulo.
-        El backend solo persiste la ACEPTACION (documentType, documentVersion,
-        planId, ip, userAgent, acceptedAt) via LegalAcceptance — el mismo
-        alcance que ya tiene HABEAS_DATA/TERMS_OF_SERVICE en HU-003: el
-        frontend posee y versiona el texto (contenido estatico), y el
-        atleta envia la version que esta aceptando en el momento de llamar
-        al endpoint.
+        D-7. Route design: nuevo recurso top-level `/instances`, NUNCA
+        `/plans/:planId/instance` ni ningun otro prefijo que empiece con
+        `/plans`. El parametro de ruta en GET/POST es `:planId` (el id de
+        la PLANTILLA), no un id propio de PlanInstance — el atleta y el
+        entrenador siempre razonan en terminos de "la instancia del plan X",
+        nunca conocen ni necesitan el id interno de PlanInstance (D-8b).
       justificacion: >
-        EPICA-01 (HU-003) establecio este limite de alcance para habeas
-        data y terminos, y ningun CA de esta epica pide lo contrario para
-        el consentimiento deportivo — es el mismo mecanismo de
-        trazabilidad legal, aplicado al mismo patron de responsabilidad.
-        Crear un endpoint `GET /legal-documents/sport-consent` seria
-        alcance no pedido e inconsistente con lo ya construido para los
-        otros dos documentos.
+        El proyecto ya rechazo explicitamente compartir un prefijo de ruta
+        entre dos controllers de modulos distintos: PlansCatalogController
+        (EPICA-03) usa `catalog/plans`, NUNCA `plans/catalog`, precisamente
+        para evitar colision de rutas con PlansController (decision D-10 de
+        EPICA-03, confirmada en el codigo real: cada controller del proyecto
+        tiene su propio prefijo top-level unico — `plans`, `catalog/plans`,
+        `subscriptions`, `exercises`, `coach-requests`, `admin-invitations`,
+        ninguno anidado bajo el prefijo de otro). Un controller de
+        `execution` registrando rutas bajo `/plans/...` romperia ese
+        invariante aunque tecnicamente Express no colisionara por falta de
+        segmentos literales iguales — el riesgo no es tecnico sino de
+        mantenibilidad (dos modulos, dos archivos, un mismo prefijo). Usar
+        `:planId` en vez de un id de instancia evita que el cliente necesite
+        un paso previo ("primero averigua el id de tu instancia") que
+        ninguna CA pide.
 
     - decision: >
-        D-9 (resuelve el PENDIENTE del Arquitecto sobre CA-014-3). CA-014-3
-        ("el atleta no puede acceder a las sesiones del plan sin aceptar el
-        consentimiento") se REFORMULA como regla de negocio obligatoria
-        para EPICA-05, NO se implementa como endpoint ni como stub en esta
-        epica. A diferencia de hasSubscribers (que EPICA-03 dejo como un
-        metodo privado real, con un llamador real en unpublish(), solo con
-        el cuerpo incompleto), CA-014-3 no tiene ningun endpoint propio de
-        EPICA-04 al que adjuntarse: las "sesiones del plan" que menciona
-        son endpoints de EPICA-05 que todavia no existen. Fabricar un
-        metodo sin llamador seria codigo muerto, no un gap declarado
-        equivalente. En su lugar: (a) `BusinessError.CONSENT_REQUIRED`
-        (422, ya reservado en el catalogo) queda formalmente asignado a
-        este uso futuro; (b) EPICA-05 debe verificar, en el/los endpoint(s)
-        que den acceso a sesiones de un plan, que exista una Subscription
-        del atleta para ese plan con status=ACTIVE, y rechazar con
-        CONSENT_REQUIRED si no la hay.
+        D-8. GET /instances/:planId (ATHLETE) y GET
+        /instances/:planId/athletes/:athleteId (COACH) son DOS handlers
+        separados que llaman al MISMO metodo de servicio interno de mapeo
+        (`toInstanceDetailResponseDto`), no un unico handler con
+        `@Roles(ATHLETE, COACH)` y una rama de autorizacion por rol.
       justificacion: >
-        El propio PENDIENTE lo planteaba como disyuntiva entre reformular
-        o dejar un gap tipo hasSubscribers — se elige reformular porque la
-        analogia con hasSubscribers no aplica tecnicamente (ese si tenia
-        un endpoint y un llamador reales en esta misma epica). Dejar
-        constancia explicita en este plan, con el codigo de error ya
-        decidido, evita que EPICA-05 tenga que redescubrir la regla o
-        inventar un error nuevo para el mismo caso.
+        Aunque el DTO de respuesta es identico (a diferencia de
+        subscriptions/pending), los PARAMETROS de entrada no lo son: la
+        vista del COACH necesita `athleteId` y la del ATHLETE no. Mezclar
+        ambos en un solo handler obligaria a un parametro condicionalmente
+        requerido o a extraer athleteId de `@CurrentUser()` segun el rol —
+        logica de control de flujo dentro del controller que viola "los
+        controllers son THIN" (rulesCodigo). Dos handlers finos, cada uno
+        con su propia extraccion de parametros y su propia llamada al
+        service, es mas simple de leer, testear y documentar en OpenAPI
+        (cada uno con su propio conjunto de `@ApiParam`) que uno con logica
+        condicional.
 
     - decision: >
-        D-10 (enmienda — CA-014-8, agregado por el Analista de Producto y
-        confirmado por el humano tras el cierre inicial de este plan).
-        POST /subscriptions/:id/accept-consent agrega un SEGUNDO chequeo de
-        precondicion, ademas de status===APPROVED: el plan referenciado
-        debe estar EFECTIVAMENTE vigente en el momento de aceptar, es
-        decir `plan.status === PUBLISHED AND (plan.endDate === null OR
-        plan.endDate >= now())` — la MISMA condicion, calculada por el
-        MISMO helper privado `isPlanCurrentlyPublished()`, que ya usa POST
-        /subscriptions para CA-012-4 (ver D-2). Si el plan esta Archivado,
-        o su status persistido sigue en PUBLISHED pero su endDate ya paso
-        (efectivamente Finalizado por `computeEffectiveStatus` de
-        plans.service.ts:1027, sin que el write-through oportunista de
-        `applyEffectiveStatusWriteThrough` haya corrido todavia — eso solo
-        pasa cuando el COACH, no el atleta, lee su plan), rechaza con
-        PLAN_NOT_PUBLISHED (409, D-6) y la suscripcion permanece en
-        Aprobada SIN transicionar nunca a Activa: no se abre ninguna
-        $transaction, no se escribe LegalAcceptance, no se emite
-        subscription.activated. No se agrega ningun valor nuevo a
-        SubscriptionStatus para representar este bloqueo (decision
-        confirmada por el humano) — Aprobada es, a proposito, una via
-        muerta valida del enum de 4 estados. Dos decisiones cerradas por el
-        humano que este plan NO reabre: archive() sigue sin gate de
-        suscriptores (asimetrico con unpublish() a proposito: unpublish
-        devuelve el plan a Borrador editable bajo atletas inscritos,
-        archive es terminal); y CA-014-3/D-9 sigue intacta, sin relacion
-        con este cambio (CA-014-3 bloquea el ACCESO a sesiones en EPICA-05;
-        CA-014-8 bloquea el ACTO de aceptar el consentimiento, en esta
-        epica).
+        D-9. GET /instances/:planId/athletes/:athleteId responde
+        ENTITY_NOT_FOUND (404) cuando el atleta no tiene una Subscription
+        Activa para `:planId` — NO CONSENT_REQUIRED (422), pese a que la
+        causa raiz sea la misma que en el camino del atleta.
       justificacion: >
-        La sutileza que motiva el CA es tecnica, no solo funcional: un
-        chequeo ingenuo `plan.status !== PUBLISHED` sobre la columna cruda
-        NO detecta el caso que el CA busca cubrir (un plan que vencio por
-        el simple paso del tiempo, sin que nadie lo haya tocado desde que
-        goteo su endDate) — exactamente el mismo problema de fuente de
-        verdad que D-1 de EPICA-03 ya resolvio para el catalogo (HU-011),
-        ahora replicado en subscriptions porque D-2 prohibe importar
-        PlansService para reutilizar `computeEffectiveStatus` directamente.
-        Reutilizar el error PLAN_NOT_PUBLISHED (en vez de crear uno nuevo
-        tipo PLAN_EXPIRED) evita una entry redundante en el catalogo para
-        la misma causa raiz (ver D-6 actualizada); reutilizar el mismo
-        helper interno (en vez de reimplementar el calculo en
-        acceptConsent()) evita que las dos verificaciones del mismo modulo
-        diverjan con el tiempo.
+        CONSENT_REQUIRED (D-9 de EPICA-04) es un mensaje dirigido al propio
+        atleta ("se requiere una inscripcion activa con consentimiento
+        informado aceptado") — instruye una accion que solo el atleta puede
+        tomar. Devolverselo a un entrenador que consulta a un tercero no
+        tiene sentido de negocio: el entrenador no puede "aceptar el
+        consentimiento" en nombre del atleta. Desde la perspectiva del
+        entrenador, simplemente no existe ninguna instancia que mostrar para
+        ese atleta en ese plan — ENTITY_NOT_FOUND es la lectura correcta.
+
+    - decision: >
+        D-10. Ningun endpoint de esta epica usa EDIT_WINDOW_EXPIRED ni
+        WEEK_STARTED — ambos quedan reservados en el catalogo SIN USO tras
+        esta epica. Tampoco se implementan `EditWindowGuard` ni
+        `WeekStartedGuard` del skill design-patterns.
+      justificacion: >
+        RN-08 (ventana de 7 dias) fue derogada explicitamente por el humano
+        para esta epica (restriccion confirmada del epica_input) — el unico
+        gatillo de congelamiento es el cierre de semana (RN-09), cubierto
+        integramente por WEEK_FROZEN. Implementar EditWindowGuard igual
+        "por si acaso" seria codigo muerto contradiciendo una decision ya
+        cerrada por el humano. WEEK_STARTED no tiene ningun CA que lo
+        motive en esta epica (no existe ningun escenario donde el
+        ENTRENADOR intente modificar una semana ya iniciada por el atleta —
+        EPICA-06, personalizacion del entrenador, es la candidata natural
+        para activarlo, fuera de este alcance).
+
+    - decision: >
+        D-11. Las verificaciones de estado (Subscription Activa, ownership,
+        semana cerrada) se implementan como chequeos `if` + `BusinessException`
+        DENTRO de los metodos del service, NO como guards `CanActivate`
+        separados (`WeekFrozenGuard`, `ResourcePolicyGuard` del skill
+        design-patterns §3/§4).
+      justificacion: >
+        Es el patron REALMENTE implementado en el codigo del proyecto hasta
+        hoy: SubscriptionsService.approve()/reject()/acceptConsent() (EPICA-04)
+        y PlansService.publish()/unpublish() (EPICA-03) hacen sus
+        verificaciones de estado inline, con `findOwnedOrFail`/
+        `findOwnSubscriptionOrFail` como helpers privados — NINGUN guard
+        `CanActivate` de los documentados en design-patterns §3/§4 esta
+        instanciado en `src/modules/common/guards/` hoy (`ls` mental del
+        arbol de guards reales: `JwtAuthGuard`, `RolesGuard`, `LocalAuthGuard`
+        unicamente). "Coherente con el codebase" (principio del Arquitecto)
+        pesa mas que replicar literalmente el skill cuando ambos divergen —
+        se documenta como discrepancia adicional a corregir en el skill
+        junto con D-5.
+
+    - decision: >
+        D-12. Ningun endpoint de esta epica requiere `@AuditResources`.
+      justificacion: >
+        El criterio de la regla es "IDs de terceros que NO viajan en la
+        URL". GET /instances y GET /instances/:planId son siempre
+        autoconsulta del atleta (nunca datos de terceros, mismo argumento ya
+        usado para GET /subscriptions en EPICA-04). GET
+        /instances/:planId/athletes/:athleteId SI expone datos de un
+        tercero (el atleta, incluyendo sus sensaciones de salud) pero
+        `athleteId` SI viaja explicitamente en la URL — la fila de auditoria
+        ya puede responder "a quien consulto este entrenador" leyendo la
+        columna `url`, sin necesitar el mecanismo adicional. Los dos POST
+        (resultados, sensaciones) son siempre escritura propia del atleta
+        autenticado, nunca lectura de terceros.
+
+    - decision: >
+        D-13. InstanceSessionExercise.exerciseVersionId se copia TAL CUAL
+        desde SessionExercise.exerciseVersionId de la plantilla en el
+        momento de la copia profunda — el service de esta epica NO vuelve a
+        resolver "la version vigente" del ejercicio en la biblioteca global.
+      justificacion: >
+        RN-07 ya quedo resuelta por EPICA-03: el propio SessionExercise de
+        la plantilla congela la version del ejercicio en el momento en que
+        el ENTRENADOR lo agrega a la sesion (`plans.service.ts`,
+        `addSessionExercise`). Para cuando un atleta activa su suscripcion —
+        potencialmente semanas o meses despues — esa referencia YA esta
+        fija; la copia profunda de HU-023 solo necesita propagar el mismo
+        puntero, no repetir la resolucion. CA-023-2 ("cada ejercicio de la
+        instancia queda fijado a la version vigente en ESE momento") se
+        lee correctamente como "el momento en que se agrego a la plantilla",
+        no "el momento en que se activo la suscripcion" — ambos coinciden
+        en el caso normal (nadie ha reeditado el ejercicio desde entonces),
+        y cuando divergen, la plantilla ya fijo cual de los dos es la fuente
+        de verdad.
+
+    - decision: >
+        D-14 (RESUELTO — decision del humano en el segundo CHECKPOINT,
+        2026-08-21: RAMA (a)). HECHO que motivo la decision:
+        `DocumentType.HEALTH_DATA_CONSENT` existe en el schema desde
+        EPICA-01 pero ningun `legalAcceptance.create` del repo lo usa.
+        EPICA-01 lo difirio EXPLICITAMENTE a EPICA-04 (tres comentarios de
+        codigo — `register-athlete.dto.ts:24`, `auth.service.ts:46`,
+        `auth.controller.ts:50` — mas la descripcion Swagger del endpoint
+        de registro, mas un test unitario (`auth.service.spec.ts:203-224`)
+        y un test e2e (`auth.e2e-spec.ts:324`) que afirman explicitamente
+        que NO se registra alli) y el plan de implementacion de EPICA-04
+        nunca lo menciono. DICTAMEN LEGAL del Analista (texto completo en
+        `outputs/reporte_validacion_negocio.yaml`, HU-016): la autorizacion
+        unica de RN-19/HABEAS_DATA del registro inicial NO es juridicamente
+        suficiente para la captura recurrente de dolor muscular y
+        motivacion que introduce HU-016 (Art. 6 Ley 1581/2012 + Circular
+        SIC 002/2024). CA-016-8 (texto LITERAL, ya incorporado a
+        `outputs/epica_input.yaml`): "Dado que el atleta va a registrar por
+        primera vez sus sensaciones semanales (dolor muscular y motivacion)
+        sobre una suscripcion para la que aun no ha aceptado el tratamiento
+        especifico de esos datos sensibles de salud, Cuando intenta
+        registrar sus sensaciones, Entonces el sistema exige y registra su
+        aceptacion explicita de ese tratamiento — distinta de la aceptacion
+        general de la politica de datos personales del registro inicial
+        (RN-19/HABEAS_DATA) — antes de guardar el primer registro de
+        sensaciones de esa suscripcion, Y esa aceptacion cubre todas las
+        semanas subsiguientes de la misma suscripcion sin volver a
+        solicitarse."
+
+        RAMA ELEGIDA (a) — Reabre EPICA-04. Archivos que toca:
+        `src/modules/subscriptions/dto/accept-consent.dto.ts` (el campo
+        `documentVersion` existente se renombra
+        `sportConsentDocumentVersion`, se agrega
+        `healthDataConsentDocumentVersion` — ambos obligatorios: CAMBIO DE
+        CONTRATO sobre un DTO ya aprobado en un CHECKPOINT anterior y
+        taggeado `EPICA-04/checkpoint-2`, exige un nuevo checkpoint/tag y
+        un nuevo export de OpenAPI); `subscriptions.service.ts:
+        acceptConsent()` (linea ~420, agrega un segundo
+        `legalAcceptance.create` (HEALTH_DATA_CONSENT) DENTRO de la MISMA
+        $transaction que ya crea SPORT_CONSENT y actualiza la Subscription
+        — un solo acto, un solo momento); `subscriptions.controller.ts`
+        (Swagger); nuevo test en `subscriptions.service.spec.ts`/e2e que
+        verifique que se crean AMBOS LegalAcceptance en la misma
+        transaccion — este es el gap que ningun test del repo verificaba
+        hasta ahora. `test/auth.e2e-spec.ts:324` y
+        `auth.service.spec.ts:203-224` NO se tocan: verifican que
+        HEALTH_DATA_CONSENT no se registra EN EL REGISTRO, afirmacion que
+        sigue siendo cierta (se registra en accept-consent, no en
+        auth.service.ts). CERO cambio de schema: el `documentType` ya
+        existe en el enum. SOBRE DECLINAR el consentimiento de salud por
+        separado del deportivo: NO existe esa opcion — accept-consent es
+        binario (llamarlo es aceptar) desde su diseño original en EPICA-04,
+        y el nuevo campo se suma al mismo acto: el atleta acepta AMBOS
+        documentos en una sola llamada, sin poder aceptar el deportivo y
+        declinar el de salud. Declinar el de salud dejaria una suscripcion
+        Activa que no puede usar HU-016 — un estado que ninguna HU pide y
+        que romperia la premisa de "una aceptacion cubre todas las semanas
+        subsiguientes sin volver a solicitarse" de CA-016-8, cuya condicion
+        implicita es que la aceptacion SI ocurrio.
+
+        RAMA DESCARTADA (b) — Gate de primer uso dentro de HU-016, en esta
+        epica (sexto endpoint `POST /instances/:planId/health-data-consent`
+        + error nuevo `HEALTH_DATA_CONSENT_REQUIRED`). Descartada por el
+        humano. Motivo tecnico (el mismo que sustento mi recomendacion en
+        la version anterior de este plan, mantenido aqui por trazabilidad):
+        mayor superficie de cambio total (endpoint completamente nuevo + un
+        error nuevo en el catalogo de BusinessError + una pieza de contrato
+        que el Analista no habia terminado de definir) frente a la
+        alternativa elegida (un campo mas en un DTO existente y un `create`
+        mas dentro de una transaccion que YA existe); y peor UX (un
+        consentimiento sorpresivo la primera vez que el atleta intenta
+        registrar sensaciones, en vez de resolverse en el mismo "modo
+        firma" que ya activa la suscripcion). Consecuencia de haber sido
+        descartada: NO existe el sexto endpoint, NO se agrega
+        `HEALTH_DATA_CONSENT_REQUIRED` al catalogo — BusinessError vuelve a
+        CERO entradas nuevas en esta epica.
+
+        NOTA (D-3/D-15): ninguna de estas decisiones afecta el mecanismo de
+        auto-reparacion/idempotencia de la instancia (D-3) ni la copia de
+        prescripcion (D-15) — HEALTH_DATA_CONSENT se resuelve integramente
+        dentro de `acceptConsent()`, un paso ANTERIOR y externo a todo lo
+        que hace `execution`.
+      justificacion: >
+        Decision del humano en el segundo CHECKPOINT — no una eleccion del
+        Arquitecto. Las razones que sustentaron la eleccion de la rama (a)
+        (documentadas aqui por trazabilidad, ya expuestas como
+        recomendacion en la version anterior de este plan): mantiene el
+        invariante "un solo acto de consentimiento, un solo momento" que
+        SPORT_CONSENT ya establece como precedente; superficie total de
+        cambio menor; costo de reabrir EPICA-04 hoy minimo (cero usuarios
+        en produccion, memoria del equipo).
+
+    - decision: >
+        D-15 (NUEVO — EPICA-03 REABIERTA, decision del humano en el segundo
+        CHECKPOINT, 2026-08-21). HECHO que motivo la decision (verificado
+        por el team lead contra `prisma/schema.prisma`): la prescripcion de
+        cada ejercicio (cuanto debe hacer el atleta, no solo cual ejercicio)
+        NO existe en ningun nivel de la jerarquia — `Phase`, `Week`,
+        `Session` y `SessionExercise` guardan solo nombres/orden/relaciones;
+        `ExerciseVersion` solo `description` y `muscleGroup`. Un plan
+        publicado hoy dice QUE ejercicios hacer y nunca CUANTO. El humano
+        decidio agregarla a la PLANTILLA (`SessionExercise`), no solo a la
+        instancia, porque RN-32 de EPICA-06 ("el entrenador cambia
+        series/reps/carga del atleta") presupone un valor previo que
+        cambiar, el catalogo publico de EPICA-03 no informa nada sin ella,
+        y la IA de EPICA-08 no puede comparar lo ejecutado contra lo
+        planificado si lo planificado no existe (CA-023-9, ya incorporado a
+        `outputs/epica_input.yaml`).
+
+        ALCANCE:
+
+        1. Campos nuevos en `SessionExercise` (ver D-6 para el detalle
+        exacto de tipos): `sets Int?`, `reps Int?`, `loadKg Float?`,
+        `durationSeconds Int?`, `distanceMeters Float?` — TODOS nullable en
+        BD, sin excepcion: el entrenador puede bosquejar la estructura
+        completa del plan en Borrador sin ningun volumen (restriccion
+        confirmada del epica_input — "obligatoria para PUBLICAR, no para
+        guardar"). La validacion de completitud NO vive en el schema (no
+        hay ningun `NOT NULL` condicional posible en Prisma/Postgres para
+        esto) ni en el DTO de creacion/edicion (que acepta los 5 campos
+        siempre opcionales) — vive EXCLUSIVAMENTE en `validatePlanCompleteness()`
+        (ver punto 3). Ni `Phase` ni `Week` ni `Session` cambian.
+
+        2. REGLA DE "PRESCRIPCION SIGNIFICATIVA" para `publish()` (el
+        humano delego este detalle en el Arquitecto explicitamente porque
+        "los 5 campos llenos" no sirve — un ejercicio de fuerza llena
+        series/reps/carga y uno de resistencia duracion/distancia). Un
+        `SessionExercise` tiene prescripcion significativa si CUALQUIERA de
+        estos dos conjuntos esta completo:
+           (a) REGIMEN DE FUERZA: `sets` Y `reps` ambos no-nulos —
+               `loadKg` queda OPCIONAL dentro de este conjunto, para cubrir
+               ejercicios con peso corporal (flexiones, dominadas) donde no
+               hay una carga externa que declarar.
+           (b) REGIMEN DE RESISTENCIA: `durationSeconds` O `distanceMeters`
+               no-nulo (no se exige el PAR completo) — "trotar 20 minutos"
+               sin distancia fija es una prescripcion tan valida como
+               "correr 5 km" sin tiempo fijo; exigir ambos forzaria al
+               entrenador a inventar el dato que le falta, exactamente el
+               problema que motivo esta decision segun el ejemplo del
+               humano.
+           Un `SessionExercise` que no cumple NINGUNO de los dos conjuntos
+           NO es publicable. La regla se evalua sobre los VALORES
+           presentes, no sobre una categoria declarada — `Exercise` de
+           EPICA-02 no tiene (ni se le agrega aqui) un campo `type`
+           fuerza/resistencia; inventar esa categorizacion seria alcance no
+           pedido por ninguna HU.
+
+        3. `validatePlanCompleteness()` — MISMO metodo YA EXISTENTE en
+        `plans.service.ts:989-1021` (verificado por el Analista: ya es un
+        checklist ACUMULATIVO que reporta requisitos faltantes via
+        `PLAN_INCOMPLETE`, no un metodo nuevo a diseñar) — se extiende con
+        una SEGUNDA pasada, DESPUES de la validacion estructural ya
+        existente (RN-01: nombre, fechas, al menos una fase/semana/sesion/
+        ejercicio): recorre TODOS los `SessionExercise` del arbol completo
+        del plan y aplica la regla del punto 2 a cada uno; cada ejercicio
+        que no la cumple se agrega a `issues` de forma individual (mismo
+        criterio ya establecido: nunca un mensaje generico, ej.
+        "prescripcion de 'Sentadilla con barra' en la sesion 'Dia 1 — Tren
+        inferior'"). MISMO `BusinessError.PLAN_INCOMPLETE` (422) que ya
+        existia — es la MISMA regla de negocio, RN-01 EXTENDIDA, no una
+        regla nueva, por eso NO se agrega ningun codigo de error nuevo al
+        catalogo. Es una extension ADITIVA sobre un metodo que YA
+        acumulaba multiples motivos en un solo mensaje — no un patron
+        nuevo, el mismo que RN-01 ya usaba desde EPICA-03.
+
+        4. DTOs que cambian en `plans`: `AddSessionExerciseDto` gana los 5
+        campos, TODOS con `@IsOptional()` — el entrenador puede seguir
+        agregando un ejercicio sin ninguna prescripcion, exactamente el
+        comportamiento actual mas cinco campos nuevos aditivos.
+        `SessionExerciseResponseDto` gana los mismos 5 campos (nullable en
+        la respuesta, reflejando fielmente si ya se cargaron o no). Nuevo
+        `UpdateSessionExercisePrescriptionDto` (los mismos 5 campos, TODOS
+        opcionales — actualizacion parcial) para el endpoint nuevo del
+        punto 5.
+
+        5. NUEVO endpoint: `PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId`
+        (COACH) — edita la prescripcion de un `SessionExercise` ya
+        agregado. Es el PRIMER endpoint de edicion de `SessionExercise` que
+        existe: EPICA-03 solo exponia `POST` (agregar) y `DELETE`
+        (quitar), nunca `PATCH`. Mismos guards que sus vecinos de
+        estructura en `PlansController`: `JwtAuthGuard`, `RolesGuard(COACH)`,
+        `PlanPublishedGuard` (solo procede en Borrador, RN-31) — mismo
+        `findOwnedOrFail` de ownership que el resto del controller. En
+        `plans.service.ts`: `addSessionExercise()` persiste los 5 campos si
+        vienen en el DTO (junto con `exerciseVersionId`/`order`, sin
+        cambiar su logica actual de resolucion de version); nuevo metodo
+        `updateSessionExercisePrescription()` (mismo patron de
+        `findOwnedOrFail` + verificacion de que el `SessionExercise`
+        pertenece al plan, ya usado por `removeSessionExercise`).
+
+        6. IMPACTO EN EL CONTRATO OPENAPI YA PUBLICADO de EPICA-03:
+        `AddSessionExerciseDto` y `SessionExerciseResponseDto` cambian de
+        forma pero de manera ADITIVA (campos nuevos, ningun campo existente
+        se renombra ni se elimina — a diferencia del cambio de
+        `AcceptConsentDto` en D-14, que SI renombra un campo). El endpoint
+        `PATCH` nuevo tambien es puramente aditivo. Aun asi, el contrato
+        cambia: exige un nuevo checkpoint/tag de EPICA-03 y un nuevo export
+        de OpenAPI, igual que D-14 lo exige para EPICA-04 — ver riesgo
+        nuevo abajo sobre reabrir DOS epicas en un mismo ciclo.
+
+        7. TESTS DE `plans` A TOCAR: `plans.service.spec.ts` (`addSessionExercise`
+        persiste la prescripcion cuando viene en el DTO; nuevo test de
+        `updateSessionExercisePrescription`; `publish()` rechaza con
+        `PLAN_INCOMPLETE` cuando algun `SessionExercise` no tiene
+        prescripcion significativa, cubriendo AMBOS casos criticos —
+        fuerza incompleta (`sets` sin `reps` o viceversa) y resistencia
+        ausente (ni `durationSeconds` ni `distanceMeters`); `publish()`
+        ACEPTA una mezcla de ejercicios de fuerza y de resistencia en el
+        mismo plan, cada uno con su propia combinacion valida — este es el
+        test que demuestra que la regla NO exige "los 5 campos llenos").
+        `plans.controller.spec.ts` (nuevo endpoint `PATCH`). `test/plans.e2e-spec.ts`
+        (happy path del `PATCH`, rechazo de validacion 400, 401 sin
+        autenticar; `publish()` e2e con el nuevo requisito, ambos casos del
+        punto 2).
+
+        8. IMPACTO EN LA COPIA PROFUNDA DE HU-023 (D-3): `createInstanceFromSubscription()`
+        copia los 5 campos de prescripcion de `SessionExercise` a
+        `InstanceSessionExercise` TAL CUAL — exactamente el MISMO criterio
+        ya establecido en D-13 para `exerciseVersionId` (CA-023-9: "esa
+        prescripcion se copia tal cual a la instancia"). Es la MISMA
+        operacion de copia que D-3 ya describe, ahora con mas columnas en
+        el mismo `create` — NO cambia el mecanismo transaccional de D-3, su
+        manejo de fallos, ni su logica de idempotencia: la copia de
+        prescripcion queda protegida por la MISMA `$transaction` que ya
+        envuelve toda la copia profunda, sin ningun paso adicional.
+
+        9. OWNERSHIP DE LA VALIDACION: TODA la validacion de "prescripcion
+        significativa" vive en `plans` (dentro de `publish()`) —
+        `execution` NUNCA valida prescripcion, solo la copia sin juzgarla:
+        para cuando `execution` la recibe, el plan ya no pudo haberse
+        publicado sin que fuera significativa. Mantiene la separacion de
+        responsabilidades ya establecida por D-9 de este mismo plan
+        (`plans` valida su propio dominio, `execution` confia en lo que
+        `plans` ya garantizo, igual que `execution` confia en que
+        `exerciseVersionId` ya esta congelado por `plans` sin volver a
+        resolverlo, D-13).
+
+        10. MIGRACION DE DATOS EXISTENTES (hueco senalado explicitamente
+        por el Analista, no bloqueante pero con respuesta obligatoria para
+        el DBA). QUE PASA con los planes que HOY ya estan `PUBLISHED` sin
+        prescripcion cuando se aplica la migracion de EPICA-03: se
+        REVIERTEN a `DRAFT`, NO se les hace backfill con valores por
+        defecto inventados. La migracion (script de datos, ejecutado UNA
+        vez, DESPUES de agregar las columnas nullable) recorre los planes
+        `PUBLISHED` cuyo arbol tenga al menos un `SessionExercise` sin
+        prescripcion significativa (regla del punto 2) y les cambia
+        `status` a `DRAFT` — una operacion de datos directa, NO pasa por
+        `unpublish()` ni por su guard de `PLAN_HAS_SUBSCRIBERS` (ese guard
+        protege una llamada HTTP normal, no una migracion de datos; a esta
+        escala, con cero usuarios en produccion, tampoco hay ningun
+        suscriptor real que ese guard tuviera que proteger).
+      justificacion: >
+        Motivada por decision del humano, no por el Arquitecto — el
+        razonamiento de POR QUE agregarla a la plantilla (RN-32/EPICA-06,
+        catalogo publico, comparacion IA) ya lo dio el humano y se cita
+        arriba tal cual. La contribucion tecnica propia de esta decision es
+        LA REGLA EXACTA de "prescripcion significativa" (delegada
+        explicitamente) y LA RESPUESTA a que hacer con datos existentes
+        (señalada como hueco por el Analista, tambien delegada). Sobre la
+        regla: se elige la particion fuerza/resistencia por dos motivos.
+        (1) "los 5 campos llenos" es IMPOSIBLE de cumplir para un ejercicio
+        de resistencia sin inventar datos falsos — exactamente el problema
+        que el humano senalo con el ejemplo del trote de 5 km, que se
+        volveria imposible de publicar si `sets`/`reps`/`loadKg` fueran
+        obligatorios. (2) la combinacion elegida es la particion MINIMA que
+        garantiza que CA-023-9 siempre tenga algo real y comparable que
+        copiar a la instancia, sin inventar un campo de categorizacion
+        (`type` fuerza/resistencia) que ninguna HU pide. Sobre la
+        migracion: backfill con valores inventados (p.ej. `sets=1, reps=1`
+        por defecto) fue descartado porque produciria datos FALSOS que
+        aparentarian ser la prescripcion real del entrenador — un atleta
+        que llegara a activar una instancia sobre ese plan veria numeros
+        que nadie prescribio realmente, contradiciendo el proposito mismo
+        de esta decision (que la instancia nunca nazca vacia NI con datos
+        inventados). Revertir a Borrador es honesto: señala explicitamente
+        que el plan necesita atencion del entrenador, y a costo CERO real
+        porque no hay usuarios en produccion — ningun atleta pierde acceso
+        a nada porque no hay ningun atleta suscrito activo hoy que dependa
+        de que ese plan siga Publicado.
 
   criterios_de_aceptacion_tecnicos:
-    - "Cobertura de dominio (SubscriptionsService) >= 80% lineas/funciones/statements, >= 75% branches — medido por archivo (perFile: true)"
-    - "Cobertura de adaptadores (SubscriptionsController) >= 70%"
-    - "SubscriptionsService usa unicamente BusinessException/BusinessError y TechnicalException/TechnicalError — nunca excepciones HTTP nativas de NestJS"
-    - "subscriptions NO importa PlansService, PlansModule, AuthService ni AuthModule — solo PrismaService (compartido) y EventEmitter2"
+    - "Cobertura de dominio (InstancesService) >= 80% lineas/funciones/statements, >= 75% branches — medido por archivo (perFile: true)"
+    - "Cobertura de adaptadores (InstancesController) >= 70%"
+    - "InstancesService usa unicamente BusinessException/BusinessError y TechnicalException/TechnicalError — nunca excepciones HTTP nativas"
+    - "execution NO importa PlansService, PlansModule, SubscriptionsService, SubscriptionsModule, ExercisesService ni ExercisesModule — solo PrismaService (compartido) y EventEmitter2"
     - "Todos los endpoints documentan sus respuestas de error con @ApiProblemResponse"
-    - "Test unitario que verifica que hasSubscribers(planId) en PlansService consulta Subscription con status IN [APPROVED, ACTIVE] y excluye PENDING — cierra el gap declarado de CA-009-7 de EPICA-03"
-    - "Test e2e nuevo sobre unpublish(): publicar un plan, aprobar una suscripcion (status APPROVED) y verificar que POST /plans/:id/unpublish responde 409 PLAN_HAS_SUBSCRIBERS — CA-009-7 pasa de gap declarado a verificable end-to-end"
-    - "Test unitario/e2e que verifica que una suscripcion Rechazada NO bloquea una nueva solicitud al mismo plan (CA-012-3), y que una Pendiente/Aprobada/Activa SI la bloquea (CA-012-2)"
-    - "Test unitario de accept-consent que verifica la $transaction atomica: si el update de Subscription falla, el create de LegalAcceptance tambien se revierte (o viceversa) — ninguna escritura parcial"
-    - "Test e2e que verifica que POST /subscriptions con un planId de un plan en Borrador responde 409 PLAN_NOT_PUBLISHED, sin crear ninguna fila"
-    - "Test unitario/e2e de accept-consent con una suscripcion Aprobada cuyo plan esta Archivado (status persistido ARCHIVED): responde 409 PLAN_NOT_PUBLISHED; la suscripcion permanece en Aprobada; no se crea LegalAcceptance (CA-014-8, caso 1 de 2)"
-    - "Test unitario CRITICO de accept-consent (CA-014-8, caso 2 de 2 — el que un chequeo ingenuo dejaria pasar): plan con status PERSISTIDO todavia en PUBLISHED pero endDate en el pasado, SIN que ningun GET de coach haya disparado el write-through de applyEffectiveStatusWriteThrough. Debe responder 409 PLAN_NOT_PUBLISHED igual que el caso Archivado — demuestra que isPlanCurrentlyPublished() evalua el estado EFECTIVO (status + endDate), nunca la columna status en crudo"
-    - "Test unitario que verifica que POST /subscriptions con un plan PUBLISHED persistido pero con endDate vencida (mismo caso critico que el anterior) tambien responde 409 PLAN_NOT_PUBLISHED — confirma que isPlanCurrentlyPublished() se aplica igual en create() y en acceptConsent(), sin divergencia entre los dos call-sites"
-    - "Test que verifica que el email de notificacion de subscription.requested/approved/rejected no incluye datos sensibles de salud ni el body completo del request en el log del listener (Ley 1273/2009)"
+    - "Test unitario de createInstanceFromSubscription(): dado un plan con 2 fases, 2 semanas y 2 sesiones cada una, y 2 ejercicios por sesion (con prescripcion distinta cada uno, D-15), la instancia resultante tiene exactamente esa cantidad en cada nivel, cada InstanceSessionExercise.exerciseVersionId coincide EXACTAMENTE con el de la plantilla, y los 5 campos de prescripcion coinciden EXACTAMENTE con los de la plantilla (CA-023-2/CA-023-3/CA-023-9)"
+    - "Test unitario CRITICO de idempotencia (CA-023-8, ver confirmacion en D-3): invocar getOrCreateInstance() DOS VECES con el mismo subscriptionId no crea una segunda PlanInstance — la segunda llamada retorna la fila ya existente, capturando el P2002 del indice unico sobre subscriptionId igual que el precedente de SubscriptionsService.create() con el indice parcial (D-3 de EPICA-04). Este test es la verificacion end-to-end de CA-023-8"
+    - "Test e2e de auto-reparacion (D-3): activar una suscripcion SIN que el listener llegue a ejecutar (mock/spy que lo desactiva), luego llamar GET /instances/:planId — debe responder 200 con la instancia recien creada sobre la marcha, no 404 ni 422"
+    - "Test unitario que verifica que dos atletas con suscripcion Activa al MISMO plan obtienen instancias con datos identicos en estructura (incluida prescripcion) pero PlanInstance.id distintos, y que mutar (registrar resultado en) la instancia de uno no afecta la del otro (CA-023-4)"
+    - "Test unitario CRITICO de cierre de semana (D-4): registrar resultados de todas las sesiones menos una de una semana no la cierra; registrar la ULTIMA sesion pendiente SI la cierra (isClosed=true, closedAt seteado) y emite week.closed exactamente una vez"
+    - "Test unitario que simula la condicion de carrera de D-4: dos llamadas concurrentes (Promise.all) registrando las DOS ULTIMAS sesiones pendientes de la misma semana — al final la semana debe quedar cerrada UNA sola vez (verificar que el listener/spy de week.closed se invoco exactamente una vez, no cero ni dos)"
+    - "Test unitario/e2e que verifica que, tras cerrar una semana, un intento de editar un resultado O una sensacion de esa semana responde 409 WEEK_FROZEN — incluyendo el caso CA-015-5 (resultado registrado hace segundos, semana cerrada inmediatamente despues)"
+    - "Test unitario CRITICO (CA-015-10) que verifica que POST .../results con un payload que omite un ejercicio de la sesion, o incluye uno que no pertenece a ella, responde 422 RESULT_FIELDS_INVALID sin escribir NADA (ni SessionResult ni ningun SessionExerciseResult), Y que esa sesion NO se cuenta como completada para efectos del cierre de semana (D-4) — verificar explicitamente que el conteo de sesiones pendientes de la semana no cambia tras el intento rechazado"
+    - "Test unitario (CA-015-11) que verifica que un payload con el conjunto correcto de ejercicios pero VALORES parciales por tipo (un ejercicio con solo reps+sets, otro con solo distanceMeters) SI se acepta — el resultado no exige completitud de los 5 campos, solo el conjunto de ejercicios (D-4/D-6)"
+    - "Test unitario/e2e CRITICO (CA-016-9) que verifica que POST .../feelings con muscleSoreness o motivation fuera de [1,10] responde 400 (no 422) y NO crea ni actualiza ningun WeeklyFeeling — verificar explicitamente que una semana con un WeeklyFeeling previo NO se modifica ante un intento invalido posterior"
+    - "Test unitario/e2e que verifica CONSENT_REQUIRED (422) en los tres endpoints que lo exigen (GET /instances/:planId, POST .../results, POST .../feelings) cuando la suscripcion del atleta esta en Pendiente, Aprobada o Rechazada — nunca Activa"
+    - "Test e2e que verifica que GET /instances/:planId/athletes/:athleteId responde 403 RESOURCE_OWNERSHIP_DENIED cuando :planId no pertenece al entrenador autenticado (CA-017-4), y 404 ENTITY_NOT_FOUND cuando el atleta no tiene instancia en ese plan"
+    - "Test que verifica que ninguna asercion de log (listener, service) incluye los valores de muscleSoreness/motivation ni el body completo del request — solo IDs (Ley 1273/2009, Ley 1581/2012)"
+    - "Test unitario que verifica que WeeklyFeelingResponseDto NUNCA se serializa fuera de GET /instances/:planId(/athletes/:athleteId) — ningun otro DTO de la epica incluye estos dos campos"
+    - "Test unitario/e2e (D-14, EPICA-04 reabierta) que verifica que POST /subscriptions/:id/accept-consent crea AMBOS LegalAcceptance (SPORT_CONSENT Y HEALTH_DATA_CONSENT) en la misma $transaction — el gap que ningun test del repo verificaba hasta ahora. Los tests existentes en auth (auth.service.spec.ts:203, auth.e2e-spec.ts:324) NO se tocan — siguen siendo correctos, verifican unicamente que no se registra EN EL REGISTRO"
+    - "Test unitario (D-15) de plans.service.ts: publish() rechaza con PLAN_INCOMPLETE cuando un SessionExercise tiene sets sin reps (o viceversa) Y ni durationSeconds ni distanceMeters — caso de prescripcion NO significativa por ninguno de los dos conjuntos"
+    - "Test unitario (D-15) de plans.service.ts: publish() ACEPTA un plan con un SessionExercise de regimen de fuerza (sets+reps, sin loadKg) y otro de regimen de resistencia (solo distanceMeters, sin durationSeconds) en la MISMA sesion — demuestra que la regla no exige los 5 campos ni el par completo de cada regimen"
+    - "Test e2e (D-15) de PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId: happy path (edita prescripcion parcial), 400 (validacion), 401 (sin autenticar), 409 (plan ya no en Borrador via PlanPublishedGuard)"
+    - "Test/verificacion manual del DBA (D-15, punto 10): tras aplicar la migracion 1, ningun plan queda en status PUBLISHED con al menos un SessionExercise sin prescripcion significativa — query de verificacion post-migracion, no un test automatizado (es una migracion de datos, no codigo de aplicacion)"
 
   riesgos_identificados:
     - >
-        El indice unico parcial de D-3 depende de un paso manual del humano
-        en la migracion (editar el .sql generado por `prisma migrate dev
-        --create-only`), igual que el de Exercise.name en EPICA-02. Si se
-        omite, el pre-check del service sigue funcionando para el caso
-        comun pero la ventana de carrera entre dos solicitudes concurrentes
-        del mismo atleta al mismo plan queda abierta — el QA no puede
-        detectar esto con un test secuencial, debe verificarse revisando
-        el archivo de migracion generado, no solo el comportamiento
-        funcional.
+        El listener de subscription.activated puede fallar silenciosamente
+        (try/catch obligatorio por rules) dejando a un atleta Activo sin
+        instancia hasta que alguien (el o su entrenador) vuelva a consultarla
+        — el self-heal de D-3 corrige el dato en cuanto eso pasa, pero si
+        NADIE vuelve a consultar la instancia, el hueco persiste
+        indefinidamente sin alertar a nadie. Aceptado explicitamente a
+        escala MVP (~23 usuarios); si se observa en produccion, la siguiente
+        iteracion razonable es un job de reconciliacion, NO agregado en este
+        ciclo por ser infraestructura no solicitada por ninguna HU.
     - >
-        El skill design-patterns (SKILL.md §2) documenta un Subscription
-        Lifecycle de CINCO estados (PENDING → APPROVED → CONSENT_PENDING →
-        ACTIVE, mas REJECTED), con un estado intermedio `CONSENT_PENDING`
-        que NO existe en el enum `SubscriptionStatus` del schema real
-        (PENDING/APPROVED/REJECTED/ACTIVE, cuatro valores) ni en la
-        decision confirmada por el humano (2026-08-20: "no se agrega
-        ningun valor al enum"). Este plan sigue el schema real y la
-        decision confirmada, NO el diagrama del skill — el diagrama queda
-        desactualizado y debe corregirse (fuera del alcance de este plan,
-        recomendado para `actualizar-docs` tras el CHECKPOINT).
+        La copia profunda (createInstanceFromSubscription) ejecuta un
+        `$transaction` interactivo con un `create` por cada fase, semana,
+        sesion y ejercicio de sesion (secuencial, no `createMany` por
+        nivel). A la escala MVP y con la estructura minima que RN-01 exige
+        (una fase, una semana, una sesion, un ejercicio) esto es
+        instantaneo; si los planes reales crecen a docenas de sesiones, el
+        numero de round-trips dentro de una sola transaccion podria volverse
+        una fuente de locks prolongados. Optimizar a `createMany` por nivel
+        exige generar los UUID de cada fila en el cliente ANTES del insert
+        (Prisma no retorna ids de `createMany` en Postgres) — cambio de
+        implementacion razonable si el rendimiento real lo justifica, no
+        antes (evitar sobre-ingenieria para un tamaño de plan que hoy no
+        existe).
     - >
-        subscription.activated (D-7) se emite sin listener en esta epica.
-        Si EPICA-05 finalmente decide disparar su deep-copy desde
-        subscription.approved en vez de subscription.activated (revirtiendo
-        la recomendacion de D-7), un atleta Aprobado-pero-sin-consentimiento
-        tendria una instancia de ejecucion creada sin poder usarla todavia
-        — no es un bug de esta epica, pero es una decision que EPICA-05
-        debe tomar con conocimiento de esta secuencia, no heredar el
-        listener del catalogo del skill sin revisarla.
+        El skill design-patterns queda con DOS discrepancias nuevas
+        introducidas por este plan, ademas de la ya documentada por
+        EPICA-04 (Subscription Lifecycle de 5 estados): (1) §5 documenta un
+        modelo `WeekClosure` separado que este plan NO usa (D-5); (2) §3/§4
+        documentan `ResourcePolicyGuard`/`WeekFrozenGuard`/etc. como clases
+        `CanActivate`, mientras que esta epica (siguiendo el patron
+        REALMENTE implementado por EPICA-03/04) hace las verificaciones
+        inline en el service (D-11). Ambas quedan fuera del alcance de este
+        plan, recomendadas para `actualizar-docs` tras el CHECKPOINT.
     - >
-        CA-014-3 (decision D-9) no es verificable end-to-end en esta epica
-        porque no existe ningun endpoint de sesiones contra el cual
-        probarlo — a diferencia de CA-009-7 (que esta epica SI cierra), este
-        gap se traslada integramente a EPICA-05. El QA debe declararlo
-        explicitamente en su reporte como alcance diferido, no como
-        pendiente de esta epica.
+        HU-023 CA-023-1 promete que el atleta "puede consultar su instancia
+        inmediatamente despues" de la activacion. El self-heal de D-3
+        garantiza esto FUNCIONALMENTE (nunca ve un error por instancia
+        faltante mientras su suscripcion siga Activa) pero no es
+        estrictamente "automatico sin que nadie note el retraso": si el
+        listener aun no corrio, el PRIMER GET del atleta paga el costo
+        completo de la copia profunda de forma sincrona (latencia mayor en
+        ese request especifico, no en los siguientes). Aceptado como
+        consecuencia directa de rechazar infraestructura de colas — el QA
+        debe verificar que ese primer GET responde dentro de un tiempo
+        razonable con el tamaño de plan minimo de RN-01, no que sea
+        instantaneo bajo cualquier tamaño.
     - >
-        CA-014-8 (D-10) es EXACTAMENTE el tipo de caso que un desarrollo
-        apurado implementa mal sin que ningun test lo note: un chequeo
-        `plan.status !== PUBLISHED` compila, pasa lint, y pasa un test que
-        solo prueba el plan Archivado — pero deja pasar el caso del plan
-        vencido-por-tiempo mientras nadie (ningun coach) haya vuelto a leer
-        ese plan desde que goteo su endDate, que es precisamente el
-        escenario que motivo el CA. El QA debe verificar EXPLICITAMENTE
-        que existan los DOS casos de test listados en
-        criterios_de_aceptacion_tecnicos (Archivado y PUBLISHED-vencido-sin
-        -write-through) — uno solo no es suficiente evidencia de que
-        CA-014-8 esta bien resuelto.
+        ESTA EPICA REABRE DOS EPICAS CERRADAS Y TAGGEADAS EN EL MISMO CICLO
+        — EPICA-03 (D-15, prescripcion) y EPICA-04 (D-14, consentimiento de
+        salud). Precision sobre el alcance real de cada reapertura (el
+        primer borrador de este riesgo, redactado por el team lead,
+        hablaba de "dos migraciones" — verificado contra el diseño de
+        ambas decisiones, es MAS PRECISO decir lo siguiente): EPICA-03
+        exige UNA migracion real (5 columnas nullable en SessionExercise
+        MAS un backfill de datos que revierte planes Publicados
+        incompletos a Borrador, D-15 punto 10) y un cambio ADITIVO de
+        contrato (campos nuevos, nada se renombra). EPICA-04 exige CERO
+        migraciones (DocumentType.HEALTH_DATA_CONSENT ya existe en el enum
+        desde EPICA-01, D-14) pero SI un cambio DE RUPTURA de contrato
+        (AcceptConsentDto renombra `documentVersion` a
+        `sportConsentDocumentVersion`). Ambas exigen su propio checkpoint y
+        tag nuevos, y su propio export de OpenAPI — el Documentador debe
+        producir CONTRATOS SEPARADOS para `plans`/`subscriptions` (contratos
+        ya existentes, modificados) y para `execution` (contrato nuevo), y
+        el humano debe aprobar los tres explicitamente en el CHECKPOINT,
+        no asumir que aprobar el plan de EPICA-05 aprueba implicitamente
+        los cambios en los otros dos modulos.
     - >
-        GET /subscriptions/pending resuelve athleteName/planName con un
-        `include` sobre las relaciones `athlete` y `plan` en la misma
-        query paginada. A la escala MVP (~23 usuarios) no representa un
-        riesgo de rendimiento, pero si el numero de solicitudes pendientes
-        por entrenador crece de forma importante, revisar si conviene un
-        `select` explicito en vez de `include` completo del User (evitar
-        traer passwordHash u otros campos sensibles innecesarios en el
-        objeto intermedio, aunque el mapeo a
-        SubscriptionPendingSummaryResponseDto los descarte antes de
-        responder).
+        PLAN_INCOMPLETE (422) ahora cubre DOS motivos de negocio distintos
+        con el MISMO codigo de error (D-15): estructura incompleta
+        (RN-01 original) y prescripcion no significativa (RN-01 extendida).
+        No es un bug — es el mismo criterio ya usado en el catalogo para
+        ENTITY_NOT_FOUND (un codigo, `detail`/`context` distinto por
+        ocurrencia) — pero el QA debe verificar EXPLICITAMENTE los dos
+        casos por separado en sus tests e2e de `publish()`, no asumir que
+        un solo test de PLAN_INCOMPLETE cubre ambos.
     - >
-        Los tres listeners nuevos de notifications (subscription.requested/
-        approved/rejected) envian correos con el nombre del atleta y/o del
-        plan — datos personales, aunque no de salud. Revisar contra el
-        skill legal-guardrails durante la implementacion que el contenido
-        del correo y los logs del listener seleccionen solo IDs para
-        logging (mismo patron que AdminInvitationCreatedListener, que
-        loggea invitationId pero nunca email), nunca el nombre completo ni
-        el email en el log de error.
+        Unidad de `loadKg`/`distanceMeters` (D-6): ningun RN ni CA
+        especifica la unidad de medida de la carga ni de la distancia —
+        este plan asume kilogramos y metros por convencion (sistema
+        metrico, contexto colombiano del proyecto), no por una regla
+        confirmada explicitamente. Riesgo bajo (es una convencion, no una
+        ambiguedad de negocio real — nadie en Colombia va a prescribir
+        carga en libras), documentado por completitud; si se detecta
+        necesidad de soportar unidades alternativas en el futuro, es un
+        cambio de DTO (agregar un campo de unidad), no de estructura.
+    - >
+        Patron de proceso observado dos veces en esta misma epica (nota
+        explicita del team lead, 2026-08-21): una decision del humano
+        comunicada por mensaje (la escala 1-10 de sensaciones) no llego al
+        artefacto (`outputs/epica_input.yaml`) hasta que el Analista la
+        detecto al revisar el input — el mismo patron que perdio
+        HEALTH_DATA_CONSENT entre EPICA-01 y EPICA-04 (D-14). No es un
+        riesgo tecnico de este plan, pero se documenta aqui porque afecta
+        directamente la fiabilidad de las enmiendas: este Arquitecto debe
+        trabajar SIEMPRE contra `outputs/epica_input.yaml` releido, nunca
+        contra el historial de mensajes del team lead como fuente de
+        verdad — ya aplicado en esta v1.4 (epica_input releido completo
+        antes de enmendar).

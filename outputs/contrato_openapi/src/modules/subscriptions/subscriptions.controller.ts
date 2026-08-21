@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -17,6 +18,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { ApiProblemResponse } from '../common/swagger/error-responses.js';
 import { PaginationMeta } from '../common/interceptors/response.interceptor.js';
 import { SubscriptionsService } from './subscriptions.service.js';
@@ -24,6 +26,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../common/guards/roles.guard.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
+import { AuditResources } from '../common/decorators/audit-resources.decorator.js';
 import type { AuthUser } from '../common/types/auth-user.interface.js';
 import { UserRole } from '../../../generated/prisma/index.js';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto.js';
@@ -33,7 +36,7 @@ import { SubscriptionPendingSummaryResponseDto } from './dto/subscription-pendin
 
 /**
  * SubscriptionsController — inscripcion de atletas a planes de entrenamiento
- * (EPICA-04).
+ * (EPICA-04; REABIERTA en EPICA-05, D-14 rama (a)).
  *
  * Ruta base: /subscriptions
  * A diferencia de PlansController/ExercisesController (rol fijo a nivel de
@@ -51,6 +54,9 @@ import { SubscriptionPendingSummaryResponseDto } from './dto/subscription-pendin
  * HU-013: POST /subscriptions/:id/approve        — aprobar solicitud (COACH)
  * HU-013: POST /subscriptions/:id/reject         — rechazar solicitud (COACH)
  * HU-014: POST /subscriptions/:id/accept-consent — aceptar consentimiento informado (ATHLETE)
+ *   MODIFICADO en EPICA-05 (D-14 rama (a)): ahora registra TAMBIEN el
+ *   consentimiento de datos sensibles de salud (HEALTH_DATA_CONSENT) en el
+ *   mismo acto, precondicion de HU-016.
  *
  * El servicio asociado es SubscriptionsService (src/modules/subscriptions/subscriptions.service.ts).
  */
@@ -94,7 +100,10 @@ export class SubscriptionsController {
     description: 'Suscripcion creada exitosamente en estado Pendiente',
     type: SubscriptionResponseDto,
   })
-  @ApiProblemResponse(400, 'Error de validacion en los datos de la solicitud (planId invalido)')
+  @ApiProblemResponse(
+    400,
+    'Error de validacion en los datos de la solicitud (planId invalido)',
+  )
   @ApiProblemResponse(401, 'No autenticado — se requiere token JWT valido')
   @ApiProblemResponse(403, 'Acceso denegado — se requiere rol Atleta')
   @ApiProblemResponse(404, 'El plan referenciado por planId no existe')
@@ -176,6 +185,11 @@ export class SubscriptionsController {
   @Get('pending')
   @Roles(UserRole.COACH)
   @HttpCode(HttpStatus.OK)
+  // athleteName es de un tercero (el atleta) y ningun id de atleta viaja en
+  // la URL — solo el coachId via JWT. Sin esto la fila de auditoria diria que
+  // el coach consulto, pero no sobre los datos de que atletas (mismo criterio
+  // que CoachRequestsController.search, hallazgo #9).
+  @AuditResources('Subscription')
   @ApiOperation({
     summary: 'Listar las solicitudes pendientes de los planes del entrenador',
     description:
@@ -202,7 +216,8 @@ export class SubscriptionsController {
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Lista paginada de solicitudes pendientes sobre planes propios',
+    description:
+      'Lista paginada de solicitudes pendientes sobre planes propios',
     type: SubscriptionPendingSummaryResponseDto,
     isArray: true,
   })
@@ -212,7 +227,10 @@ export class SubscriptionsController {
     @CurrentUser() user: AuthUser,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
-  ): Promise<{ data: SubscriptionPendingSummaryResponseDto[]; meta: PaginationMeta }> {
+  ): Promise<{
+    data: SubscriptionPendingSummaryResponseDto[];
+    meta: PaginationMeta;
+  }> {
     return this.subscriptionsService.findPending(user.id, page, limit);
   }
 
@@ -310,7 +328,7 @@ export class SubscriptionsController {
     return this.subscriptionsService.reject(user.id, id);
   }
 
-  // ── HU-014: Consentimiento informado deportivo ────────────────────────────
+  // ── HU-014: Consentimiento informado deportivo + datos sensibles de salud ──
 
   /**
    * POST /subscriptions/:id/accept-consent
@@ -321,15 +339,28 @@ export class SubscriptionsController {
    * APPROVED pero el plan referenciado ya no esta efectivamente vigente
    * (CA-014-8: archivado, o su endDate ya paso), rechaza con
    * PLAN_NOT_PUBLISHED (409) SIN escribir nada — la suscripcion permanece en
-   * Aprobada (D-10). Si ambos checks pasan, crea LegalAcceptance
-   * (documentType=SPORT_CONSENT) y actualiza la suscripcion a Activa en una
+   * Aprobada (D-10). Si ambos checks pasan, crea DOS LegalAcceptance
+   * (documentType=SPORT_CONSENT y documentType=HEALTH_DATA_CONSENT — D-14,
+   * EPICA-05 rama (a)) y actualiza la suscripcion a Activa, todo en una
    * unica $transaction. Emite subscription.activated.
+   *
+   * MODIFICADO en EPICA-05 (D-14, EPICA-04 REABIERTA): antes solo registraba
+   * SPORT_CONSENT; ahora registra TAMBIEN HEALTH_DATA_CONSENT en el mismo
+   * acto — precondicion de HU-016 (CA-016-8), un solo consentimiento binario
+   * sin opcion de aceptar uno y declinar el otro.
+   *
+   * ip/userAgent se extraen del request (mismo patron que
+   * AuthController.registerAthlete) — LegalAcceptance los exige para su
+   * registro de trazabilidad legal (Ley 527/1999); AcceptConsentDto no los
+   * recibe en el body porque no son datos que el cliente declare, son
+   * metadatos de la peticion misma.
    */
   @Post(':id/accept-consent')
   @Roles(UserRole.ATHLETE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Aceptar el consentimiento informado deportivo (Aprobada -> Activa)',
+    summary:
+      'Aceptar el consentimiento informado deportivo y de datos sensibles de salud (Aprobada -> Activa)',
     description:
       'Transiciona la suscripcion de Aprobada a Activa (CA-014-2). Verifica que la ' +
       'suscripcion pertenece al atleta autenticado, si no rechaza con ' +
@@ -338,17 +369,27 @@ export class SubscriptionsController {
       'no esta efectivamente vigente (esta Archivado, o su endDate ya paso aunque la ' +
       'columna status siga en PUBLISHED — CA-014-8, D-10), rechaza con ' +
       'PLAN_NOT_PUBLISHED (409) SIN escribir nada: la suscripcion permanece en Aprobada, ' +
-      'ninguna transaccion se abre. Si ambos checks de estado pasan, crea un ' +
-      'LegalAcceptance (documentType=SPORT_CONSENT, documentVersion del body, ip, ' +
-      'userAgent) y actualiza la suscripcion a Activa en una unica transaccion atomica. ' +
-      'Emite subscription.activated. Solo accesible para ATHLETE.',
+      'ninguna transaccion se abre. Si ambos checks de estado pasan, crea DOS ' +
+      'LegalAcceptance dentro de una unica transaccion atomica — SPORT_CONSENT ' +
+      '(sportConsentDocumentVersion del body) y, desde EPICA-05, tambien ' +
+      'HEALTH_DATA_CONSENT (healthDataConsentDocumentVersion del body, D-14 rama (a), ' +
+      'CA-016-8, precondicion de HU-016) — ambos con ip y userAgent de la peticion, y ' +
+      'actualiza la suscripcion a Activa en el mismo acto. AMBOS campos del body son ' +
+      'obligatorios: no existe la opcion de aceptar el consentimiento deportivo y ' +
+      'declinar el de datos sensibles de salud. Emite subscription.activated. Solo ' +
+      'accesible para ATHLETE.',
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Consentimiento aceptado exitosamente — suscripcion activada',
+    description:
+      'Consentimiento(s) aceptado(s) exitosamente — suscripcion activada',
     type: SubscriptionResponseDto,
   })
-  @ApiProblemResponse(400, 'Error de validacion en los datos del consentimiento')
+  @ApiProblemResponse(
+    400,
+    'Error de validacion en los datos del consentimiento (sportConsentDocumentVersion o ' +
+      'healthDataConsentDocumentVersion faltantes o invalidos)',
+  )
   @ApiProblemResponse(401, 'No autenticado — se requiere token JWT valido')
   @ApiProblemResponse(
     403,
@@ -366,7 +407,16 @@ export class SubscriptionsController {
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AcceptConsentDto,
+    @Req() req: Request,
   ): Promise<SubscriptionResponseDto> {
-    return this.subscriptionsService.acceptConsent(user.id, id, dto);
+    const ip = req.ip ?? '0.0.0.0';
+    const userAgent = req.headers['user-agent'] ?? 'unknown';
+    return this.subscriptionsService.acceptConsent(
+      user.id,
+      id,
+      dto,
+      ip,
+      userAgent,
+    );
   }
 }

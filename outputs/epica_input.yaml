@@ -1,149 +1,175 @@
 epica:
-  id: "EPICA-04"
-  titulo: "Inscripcion de Atletas a Planes"
+  id: "EPICA-05"
+  titulo: "Ejecucion del Plan — Instancia Personalizada"
   objetivo_de_negocio: >
-    Gestionar el flujo completo de suscripcion de un atleta a un plan de entrenamiento
-    publicado: la solicitud del atleta, la aprobacion o rechazo del entrenador, y la
-    aceptacion del consentimiento informado deportivo, cumpliendo los requisitos legales
-    de cada inscripcion de forma independiente por plan. Criterio de exito: ningun
-    atleta puede iniciar sesiones de un plan sin haber completado las tres etapas del
-    flujo (solicitud, aprobacion, consentimiento).
+    Permitir que cada atleta ejecute su propia version personalizada de un plan de
+    entrenamiento, generada automaticamente al activarse su suscripcion, registre los
+    resultados de cada sesion y sus sensaciones semanales dentro de una ventana de
+    edicion controlada, con cierre automatico de la semana al completar todas las
+    sesiones programadas para congelar esos datos y alimentar el analisis de la IA.
+    Criterio de exito: ningun atleta ejecuta sesiones de un plan sin tener antes su
+    propia instancia personalizada activa, y cada semana completada genera un conjunto
+    de datos cerrado e inmutable, listo para el analisis de la IA.
   contexto_de_aplicacion: >
     Plataforma de entrenamiento deportivo personalizado (fitmess-api). EPICA-01,
-    EPICA-09, EPICA-02 y EPICA-03 ya estan implementadas en main: existen los roles
-    ATHLETE, COACH y ADMIN en el enum UserRole; los guards JwtAuthGuard + RolesGuard
-    viven en src/modules/common/; el modelo Plan (con su jerarquia Fase -> Semana ->
-    Sesion -> SessionExercise) esta implementado con los cuatro estados de RN-27
-    (Borrador, Publicado, Finalizado, Archivado); y el modelo LegalAcceptance
-    (append-only, con documentType, documentVersion, ip, userAgent y momento de
-    aceptacion) ya registra la aceptacion de documentos legales del atleta en su
-    registro inicial (EPICA-01, HU-003).
+    EPICA-02, EPICA-03, EPICA-04 y EPICA-09 ya estan implementadas en main. El modelo
+    Subscription (EPICA-04) ya existe con su maquina de estados de cuatro valores
+    (Pendiente, Aprobada, Rechazada, Activa): una suscripcion solo llega a Activa
+    cuando el atleta acepta el consentimiento informado deportivo (HU-014). Al ocurrir
+    esa transicion, EPICA-04 emite un evento de activacion de suscripcion de forma
+    deliberada SIN ningun proceso que lo escuche todavia — es el punto de enganche
+    declarado explicitamente para esta epica (decision D-7 del plan de implementacion
+    de EPICA-04). Ninguna de las historias de usuario originalmente previstas para
+    esta epica creaba esa instancia; esta version del analisis incorpora una historia
+    nueva, HU-023, para cerrar ese vacio.
 
-    El schema de Prisma ya anticipa esta epica en dos puntos concretos, verificados
-    contra prisma/schema.prisma:
+    La plantilla base del plan (EPICA-03) tiene la jerarquia Plan -> Fase -> Semana ->
+    Sesion -> Ejercicio de sesion, y cada ejercicio de sesion queda siempre atado a una
+    version especifica del ejercicio de la biblioteca global (EPICA-02), nunca al
+    ejercicio "vigente" en cada momento — asi es como la plantilla ya congela la
+    version del ejercicio al agregarlo (RN-07). Esta epica reutiliza exactamente el
+    mismo criterio: la instancia personalizada del atleta debe congelar la version del
+    ejercicio vigente al momento en que la instancia se crea.
 
-    1. El enum SubscriptionStatus (PENDING, APPROVED, REJECTED, ACTIVE) ya existe,
-    definido junto a PlanStatus desde el diseno base, aunque el modelo Subscription (la
-    tabla en si, con sus relaciones a User y Plan) todavia no existe: crearlo es
-    responsabilidad de esta epica. Sus cuatro valores encajan exactamente con las tres
-    HUs de esta epica: PENDING es el resultado de la solicitud del atleta (HU-012),
-    APPROVED/REJECTED son la decision del entrenador (HU-013), y ACTIVE es el resultado
-    de que el atleta acepte el consentimiento informado deportivo (HU-014). El
-    comentario del modelo Plan en el schema lo confirma explicitamente: "EPICA-04/05
-    referenciaran desde Subscription/SessionResult".
-
-    2. El enum DocumentType ya incluye el valor SPORT_CONSENT (junto a HABEAS_DATA,
-    TERMS_OF_SERVICE y HEALTH_DATA_CONSENT, usados en EPICA-01), y LegalAcceptance ya
-    tiene un campo planId opcional sin uso hasta ahora. Esto indica que el
-    consentimiento informado deportivo de HU-014 se registra con el mismo mecanismo de
-    trazabilidad legal que el habeas data del registro inicial: un registro append-only
-    con documentType = SPORT_CONSENT y planId apuntando al plan especifico, uno por cada
-    par (atleta, plan), lo que cumple RN-20 (el consentimiento se acepta de forma
-    independiente en cada inscripcion).
-
-    Esta epica tambien resuelve el punto de integracion que EPICA-03 dejo
-    deliberadamente abierto: el metodo privado hasSubscribers(planId) en
-    src/modules/plans/plans.service.ts hoy siempre retorna false porque no existia
-    tabla de suscripciones. El comentario del propio metodo indica que EPICA-04 debe
-    reemplazar unicamente su cuerpo por una consulta real contra Subscription, sin
-    tocar el resto de unpublish(). Mientras eso no ocurra, CA-009-7 de EPICA-03
-    (bloqueo de despublicacion de un plan con atletas suscritos) no es verificable
-    end-to-end, solo por test unitario — ese gap fue documentado y aceptado en EPICA-03
-    con la condicion explicita de resolverse aqui.
+    EPICA-04 tambien dejo pendiente, a proposito, un criterio de aceptacion completo:
+    CA-014-3 ("el atleta no puede acceder a las sesiones del plan sin haber aceptado
+    el consentimiento informado") describe un comportamiento sobre endpoints de
+    sesiones que no existian todavia. Esta epica hereda esa obligacion: todo endpoint
+    que de acceso a las sesiones de un plan debe verificar que exista una suscripcion
+    del atleta en estado Activa para ese plan antes de exponer cualquier dato.
   restricciones_conocidas:
-    - "Solo el rol ATHLETE puede solicitar inscripcion a un plan y aceptar el consentimiento informado correspondiente (RN-18)"
-    - "Solo el rol COACH propietario del plan puede aprobar o rechazar una solicitud de inscripcion a ESE plan (RN-18); ni ADMIN ni otro entrenador tienen esa facultad"
-    - "Un atleta solo puede solicitar inscripcion a planes en estado Publicado (RN-27, heredado de EPICA-03); planes en Borrador, Finalizado o Archivado no aceptan nuevas solicitudes"
-    - "El consentimiento informado deportivo se solicita de forma independiente en cada inscripcion: un registro de aceptacion por cada par (atleta, plan), nunca reutilizado entre planes distintos aunque sea el mismo atleta (RN-20)"
-    - "El consentimiento debe incluir explicitamente que las recomendaciones de la IA no sustituyen asesoria medica profesional (CA-014-5)"
-    - "Ningun atleta puede iniciar sesiones de un plan sin haber completado el flujo completo: solicitud, aprobacion del entrenador y aceptacion del consentimiento informado (criterio de exito de la epica)"
-    - "Las suscripciones no se eliminan bajo ninguna circunstancia, incluidas las Rechazadas: se conservan como parte del historial, extendiendo a suscripciones el mismo criterio de inmutabilidad historica que RN-13 ya aplica a planes y resultados"
+    - "Solo el atleta titular de una instancia personalizada puede registrar sus resultados de sesion y sus sensaciones semanales sobre esa instancia; nadie mas puede hacerlo en su nombre"
+    - "El atleta puede editar los resultados de una sesion mientras la semana a la que pertenece siga abierta, sin limite de tiempo desde el registro; el cierre de semana es la UNICA condicion que congela los resultados (RN-09). RN-08 (ventana de 7 dias) queda derogada para esta epica por decision del humano del 2026-08-21"
+    - "El cierre de semana ocurre UNICAMENTE cuando el atleta completa el registro de resultados de todas las sesiones programadas de esa semana; no existe cierre por calendario ni cierre manual"
+    - "Ningun atleta puede acceder a las sesiones de un plan sin tener una suscripcion propia en estado Activa para ese plan (obligacion heredada de EPICA-04, decision D-9, CA-014-3 diferido a esta epica)"
+    - "La instancia personalizada de un atleta congela la version del ejercicio vigente al momento de su creacion (RN-07); cambios posteriores en la biblioteca global de ejercicios no la afectan"
+    - "Solo la duracion total y las fases de la instancia son inmutables una vez creada (RN-31); la personalizacion del contenido por el entrenador es alcance de EPICA-06, fuera de esta epica"
+    - "El entrenador solo consulta el progreso, las sensaciones y las semanas cerradas de atletas suscritos o que hayan estado suscritos a SUS planes (RI-03, heredada)"
+    - "Dolor muscular y motivacion son datos sensibles de salud bajo la Ley 1581 de 2012: solo el atleta titular y el entrenador del plan correspondiente pueden consultarlos; no pueden registrarse en bitacoras del sistema ni exponerse a ningun otro rol"
   supuestos:
-    - "[CONFIRMADO por el humano — 2026-08-20] Una suscripcion existente en estado Pendiente, Aprobada o Activa para el mismo par (atleta, plan) bloquea una nueva solicitud de inscripcion a ese plan (CA-012-2). Si la suscripcion previa quedo Rechazada, el atleta SI puede volver a solicitar inscripcion al mismo plan, creando una nueva suscripcion (CA-012-3). CONSECUENCIA PARA EL DBA: el par (atleta, plan) puede repetirse legitimamente en la tabla, por lo que un @@unique([athleteId, planId]) simple es INCORRECTO — la unicidad debe ser parcial (solo sobre los estados que bloquean: Pendiente, Aprobada, Activa) o no existir, resolviendose la exclusividad en el service"
-    - "[CONFIRMADO por el humano — 2026-08-20] Para efectos de hasSubscribers(planId) (el gap dejado por EPICA-03, CA-009-7), 'atleta suscrito' significa una suscripcion en estado Aprobada o Activa. Una suscripcion en Pendiente NO cuenta como 'suscrito', porque el entrenador todavia podria rechazarla en el mismo momento en que intenta despublicar el plan"
-    - "[CONFIRMADO por el humano — 2026-08-20] El consentimiento informado deportivo es un documento unico y versionado a nivel de plataforma (mismo patron que habeas data y terminos de EPICA-01), no un texto redactado individualmente por cada entrenador para su plan. RN-20 exige una ACEPTACION independiente por cada plan (un registro por cada par atleta-plan), no un CONTENIDO distinto por plan. La personalizacion del texto por entrenador queda FUERA del alcance de esta epica"
-    - "[CONFIRMADO por el humano — 2026-08-20] No existe una accion explicita de 'rechazar' o 'declinar' el consentimiento informado. El atleta solo tiene dos posibilidades frente al consentimiento: aceptarlo o dejarlo pendiente indefinidamente, sin poder iniciar sesiones mientras tanto. NO se modela un estado adicional de 'consentimiento rechazado' ni se agrega ningun valor al enum SubscriptionStatus, que se mantiene con los cuatro valores ya definidos en el schema"
-    - "[PENDIENTE — decision del Arquitecto/DBA] LegalAcceptance.planId existe hoy como columna suelta (String? sin relacion a Plan, prisma/schema.prisma:116). Al usarla para el consentimiento de HU-014 debe decidirse si se le agrega la FK a Plan o se deja como esta; sin FK, un planId invalido entra sin error"
-    - "[PENDIENTE — decision del Arquitecto] CA-014-3 ('el atleta no puede acceder a las sesiones del plan sin aceptar el consentimiento') describe un comportamiento sobre endpoints de sesiones que son alcance de EPICA-05 y todavia no existen. Debe decidirse si se reformula como regla que EPICA-05 esta obligada a respetar, o si queda como gap declarado y verificable solo por test unitario — mismo patron que hasSubscribers en EPICA-03"
+    - "[CONFIRMADO por el humano — 2026-08-21] Esta epica incorpora una historia de usuario nueva, HU-023, que cubre la creacion de la instancia personalizada del plan al activarse la suscripcion del atleta. El documento fuente original no la incluia pese a que la epica se titula 'Instancia Personalizada'; sin ella, HU-015 no tiene sobre que registrar resultados. HU-023 es el punto de enganche del evento de activacion de suscripcion que EPICA-04 dejo deliberadamente sin proceso que lo escuche (decision D-7 de su plan de implementacion)"
+    - "[CONFIRMADO por el humano — 2026-08-21] PEN-01 del documento fuente queda resuelto: el cierre de semana ocurre UNICAMENTE por completitud de todas las sesiones programadas (RN-30). Si el atleta no completa todas las sesiones, la semana no cierra nunca: no hay cierre por calendario ni cierre manual. La semana incompleta queda abierta indefinidamente y fuera del alcance del analisis de la IA. Es una via muerta aceptada explicitamente por el humano, no un vacio pendiente — ver HU-017"
+    - "[CONFIRMADO por el humano — 2026-08-21] Todo endpoint de esta epica que de acceso a las sesiones de un plan debe verificar que exista una suscripcion del atleta para ese plan en estado Activa, y rechazar el acceso si no la hay (obligacion heredada de EPICA-04, decision D-9 de su plan de implementacion; CA-014-3 fue diferido explicitamente a esta epica). Reflejado como criterio de aceptacion explicito en HU-023, HU-015 y HU-016"
+    - "[CONFIRMADO por el humano — 2026-08-21] SUP-05 queda cerrado: los indicadores de sensaciones semanales son EXACTAMENTE DOS, dolor muscular y motivacion. No se modelan indicadores adicionales ni un esquema extensible; agregar un tercer indicador en el futuro implicara migracion y cambio de contrato, y es un costo aceptado explicitamente"
+    - "[RESUELTO — 2026-08-21] Dolor muscular y motivacion son datos sensibles de salud bajo la Ley 1581 de 2012. La pregunta de si la autorizacion unica de HABEAS_DATA del registro inicial (RN-19) bastaba para su captura recurrente quedo RESUELTA: NO basta. El Analista de Producto dictamino (art. 6 Ley 1581/2012 + Circular SIC 002/2024) que el consentimiento para dato sensible exige finalidad especifica declarada, y la finalidad de HU-016 no existe en el momento del registro general. Se captura HEALTH_DATA_CONSENT por suscripcion, en el mismo acto y transaccion que SPORT_CONSENT — ver el supuesto de la reapertura de EPICA-04 y CA-016-8"
+    - "[CONFIRMADO por el humano — 2026-08-21] Precedencia entre RN-08 (ventana de edicion de 7 dias) y RN-09 (congelamiento por cierre de semana): manda la semana. Mientras la semana siga abierta el atleta puede editar los resultados de sus sesiones sin limite de tiempo desde el registro; cuando la semana cierra por completitud, los datos se congelan de inmediato sin importar cuanto tiempo haya pasado. RN-08 queda DEROGADA para esta epica: la ventana de 7 dias no aplica como condicion independiente. Consecuencia aceptada, coherente con la resolucion de PEN-01: los resultados de una semana que nunca se completa quedan editables indefinidamente, y esa semana queda igualmente fuera del analisis de la IA"
+    - "[CONFIRMADO por el humano — 2026-08-21] La prescripcion de cada ejercicio (series, repeticiones, carga, duracion, distancia segun el tipo) NO existe hoy en el modelo de datos: ni Phase, ni Week, ni Session, ni SessionExercise, ni ExerciseVersion la guardan — verificado contra prisma/schema.prisma. Un plan publicado hoy dice QUE ejercicios hacer pero nunca CUANTO. Se reabre EPICA-03 para agregarla a la PLANTILLA (SessionExercise), no solo a la instancia, porque RN-32 (EPICA-06, cambiar series/reps/carga del atleta) presupone un valor previo que cambiar, el catalogo publico de planes no informa nada sin ella, y la IA de EPICA-08 no puede comparar lo ejecutado contra lo planificado si no existe lo planificado. La copia profunda de HU-023 la arrastra a la instancia (CA-023-9)"
+    - "[CONFIRMADO por el humano — 2026-08-21] La prescripcion es OBLIGATORIA PARA PUBLICAR, no para guardar: el entrenador puede bosquejar la estructura del plan en borrador sin volumenes, pero publish() exige que cada ejercicio de cada sesion tenga una prescripcion significativa. Es una condicion nueva de publicacion que extiende RN-01 (que define plan valido como nombre + fechas + al menos una sesion + cada sesion al menos un ejercicio, sin mencionar volumenes). Garantiza que ninguna instancia nazca vacia"
+    - "[CONFIRMADO por el humano — 2026-08-21] El resultado que registra el atleta guarda, por ejercicio: series realizadas, repeticiones, carga, duracion, distancia y una nota libre opcional — como columnas tipadas, NO como un Json opaco, porque son los datos que EPICA-07 (metricas) y EPICA-08 (IA) van a consumir. Se descarto incluir RPE (percepcion de esfuerzo) por ejercicio: arrastraria HU-015 entera al regimen de dato sensible de salud y ningun CA de esta epica lo cubre. Prescripcion y resultado llevan los MISMOS campos para que sean comparables uno a uno"
+    - "[CONFIRMADO por el humano — 2026-08-21] HEALTH_DATA_CONSENT se captura reabriendo EPICA-04 (rama (a) de la decision D-14 del plan): un segundo legalAcceptance.create dentro de la misma transaccion de acceptConsent() que hoy registra SPORT_CONSENT. DocumentType.HEALTH_DATA_CONSENT existe en el schema desde EPICA-01 pero ningun punto del codigo lo escribe: EPICA-01 lo difirio explicitamente a EPICA-04 en tres comentarios de codigo, en el Swagger del endpoint de registro y en un test e2e, y el plan de EPICA-04 lo menciono cero veces. La obligacion se perdio entre epicas y se cierra aqui"
+    - "[CONFIRMADO por el humano — 2026-08-21] La escala de dolor muscular y de motivacion es de 1 a 10, ambos inclusive, con valores enteros. Ya no es un placeholder del plan tecnico: es la escala definitiva. Cambiarla despues implicaria migracion de datos ya capturados (ver CA-016-9)"
+    - "[CONFIRMADO por el humano — 2026-08-21] Una sesion cuenta como COMPLETADA solo cuando el atleta registro un resultado para CADA ejercicio programado de esa sesion. Un registro parcial no la completa y por tanto no acerca la semana a su cierre (HU-017). Dentro de cada ejercicio si es valido llenar solo los campos que apliquen a su tipo. El motivo de exigir todos los ejercicios es que el cierre de semana congela los datos de forma irreversible y alimenta a la IA de EPICA-08: una semana cerrada con sesiones a medias seria indistinguible de una completa. Se evaluo y descarto permitir marcar un ejercicio como no realizado — no lo pide ninguna HU de esta epica"
   glosario:
-    suscripcion: "Relacion entre un atleta y un plan de entrenamiento especifico, con estado propio (Pendiente, Aprobada, Rechazada, Activa) que refleja en que punto del flujo de inscripcion se encuentra. Es la entidad que resuelve la relacion N:N de RN-17 entre atletas y entrenadores"
-    solicitud_de_inscripcion: "Accion inicial del atleta que crea una suscripcion en estado Pendiente para un plan Publicado especifico"
-    consentimiento_informado_deportivo: "Documento legal versionado que el atleta debe aceptar explicitamente por cada plan al que fue aprobado, dejando constancia de que comprende los riesgos del entrenamiento y de que las recomendaciones de la IA no sustituyen asesoria medica profesional. Es independiente del habeas data aceptado en el registro inicial (EPICA-01, HU-003)"
-    suscripcion_activa: "Estado final del flujo de inscripcion: el entrenador aprobo la solicitud Y el atleta acepto el consentimiento informado. Solo una suscripcion Activa habilita al atleta a iniciar las sesiones de ese plan (implementacion de ese inicio es alcance de EPICA-05)"
+    instancia_personalizada: "Copia propia de un atleta de la plantilla base de un plan, generada automaticamente al activarse su suscripcion (HU-023). Reproduce la estructura de fases, semanas, sesiones y ejercicios de la plantilla publicada en ese momento, con la version de cada ejercicio congelada. Evoluciona de forma independiente de la plantilla y de las instancias de otros atletas"
+
+    resultado_de_sesion: "Registro que el atleta hace al completar una sesion de entrenamiento de su instancia, con los datos obtenidos en cada ejercicio de esa sesion"
+    ventana_de_edicion: "Periodo durante el cual el atleta puede modificar un resultado de sesion ya registrado. Coincide exactamente con el tiempo que la semana a la que pertenece la sesion permanece abierta: se cierra en el instante en que la semana cierra por completitud (RN-09) y no tiene ningun limite temporal propio. RN-08 (7 dias) quedo derogada por decision del humano del 2026-08-21"
+    sensaciones_semanales: "Registro subjetivo que el atleta hace sobre cada semana de su instancia, con su nivel de dolor muscular y su nivel de motivacion, cada uno como un entero en escala de 1 a 10 (RN-21). Son datos sensibles de salud bajo la Ley 1581 de 2012"
+    cierre_de_semana: "Evento automatico que ocurre unicamente cuando el atleta completa el registro de resultados de todas las sesiones programadas de una semana de su instancia, entendiendo por sesion completada aquella en la que registro un resultado para cada uno de sus ejercicios programados; congela los resultados y las sensaciones de esa semana para el analisis de la IA (RN-09, RN-30). No existe cierre por calendario ni cierre manual"
+    semana_incompleta: "Semana de la instancia en la que el atleta no completo todas las sesiones programadas. Permanece abierta indefinidamente, sin cierre automatico ni manual, y queda fuera del alcance del analisis de la IA mientras no cierre"
   dependencias:
-    - desde: "HU-012"
-      hacia: "HU-003"
-      descripcion: "Solo un atleta que completo su registro inicial (EPICA-01) puede solicitar inscripcion a un plan"
-    - desde: "HU-012"
-      hacia: "HU-011"
-      descripcion: "El atleta debe poder ver el detalle de un plan en estado Publicado (EPICA-03) antes de poder solicitar su inscripcion"
-    - desde: "HU-013"
-      hacia: "HU-012"
-      descripcion: "No puede aprobarse ni rechazarse una solicitud de inscripcion que el atleta no haya creado primero"
-    - desde: "HU-014"
-      hacia: "HU-013"
-      descripcion: "El consentimiento informado solo se solicita despues de que el entrenador aprobo la suscripcion (estado Aprobada); sin aprobacion previa no hay nada que aceptar"
+    - desde: "HU-023"
+      hacia: "HU-014"
+      descripcion: "La instancia personalizada solo se crea cuando la suscripcion del atleta llega a estado Activa, resultado de aceptar el consentimiento informado deportivo (EPICA-04)"
+    - desde: "HU-015"
+      hacia: "HU-023"
+      descripcion: "El atleta no puede registrar resultados de una sesion si antes no existe su instancia personalizada con esa sesion"
+    - desde: "HU-016"
+      hacia: "HU-023"
+      descripcion: "Las sensaciones semanales se registran sobre una semana de la instancia personalizada del atleta, que debe existir primero"
+    - desde: "HU-017"
+      hacia: "HU-015"
+      descripcion: "El cierre de semana se dispara cuando el atleta completa el registro de resultados de todas las sesiones programadas de esa semana"
   historias_de_usuario:
-    - id: "HU-012"
-      titulo: "Solicitud de inscripcion a un plan de entrenamiento"
+    - id: "HU-023"
+      titulo: "Creacion de la instancia personalizada del plan al activarse la suscripcion"
       como: "atleta"
-      quiero: "solicitar mi inscripcion a un plan de entrenamiento publicado"
-      para: "iniciar el proceso de incorporacion a ese plan"
+      quiero: "que se genere automaticamente mi propia copia personalizada del plan cuando mi suscripcion se activa"
+      para: "poder ejecutar mis sesiones de entrenamiento sin depender de un paso manual adicional ni afectar la plantilla original del entrenador"
       criterios_de_aceptacion:
-        - "CA-012-1: Dado que un atleta autenticado esta viendo el detalle de un plan en estado Publicado y no tiene ninguna suscripcion Pendiente, Aprobada ni Activa a ese plan, Cuando solicita su inscripcion, Entonces la solicitud queda registrada como una suscripcion en estado Pendiente, Y el entrenador propietario del plan recibe una notificacion de nueva solicitud de inscripcion"
-        - "CA-012-2: Dado que el atleta ya tiene una suscripcion en estado Pendiente, Aprobada o Activa para un plan especifico, Cuando intenta solicitar inscripcion nuevamente a ese mismo plan, Entonces ve un mensaje indicando que ya tiene una solicitud en curso o ya esta inscrito en ese plan, Y la nueva solicitud no se registra"
-        - "CA-012-3: Dado que el atleta tiene una suscripcion Rechazada previa a un plan, Cuando solicita inscripcion nuevamente a ese mismo plan, Entonces se registra una nueva suscripcion en estado Pendiente, igual que si fuera la primera solicitud"
-        - "CA-012-4: Dado que el atleta intenta inscribirse a un plan que no esta en estado Publicado (Borrador, Finalizado o Archivado), Cuando realiza la solicitud, Entonces ve un mensaje indicando que el plan ya no acepta nuevas inscripciones, Y la solicitud no se registra"
-        - "CA-012-5: Dado que un usuario con rol COACH o ADMIN intenta solicitar inscripcion a un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos, ya que solo un atleta puede solicitar su propia inscripcion"
-        - "CA-012-6: Dado que un usuario sin autenticar intenta solicitar inscripcion a un plan, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-023-1: Dado que la suscripcion de un atleta a un plan cambia a estado Activa (tras la aceptacion del consentimiento informado deportivo, HU-014 de EPICA-04), Cuando esa transicion ocurre, Entonces se crea automaticamente, sin intervencion manual del atleta ni del entrenador, una copia personalizada del plan para ese atleta, con la misma estructura de fases, semanas, sesiones y ejercicios que tenia la plantilla publicada en ese momento, Y el atleta puede consultar su instancia inmediatamente despues"
+        - "CA-023-2: Dado que se esta generando la instancia personalizada de un atleta, Cuando el proceso copia cada ejercicio de cada sesion de la plantilla, Entonces cada ejercicio de la instancia queda fijado a la version del ejercicio que estaba vigente en ese momento (RN-07), Y modificaciones posteriores de ese ejercicio en la biblioteca global no alteran la instancia ya creada"
+        - "CA-023-3: Dado que se genero la instancia personalizada de un atleta a partir de la plantilla publicada, Cuando se completa la copia, Entonces la cantidad de fases, semanas y sesiones de la instancia queda fijada segun la plantilla en ese momento, con el mismo criterio de inmutabilidad que ya aplica a la plantilla publicada (RN-31)"
+        - "CA-023-4: Dado que dos o mas atletas tienen suscripciones activas al mismo plan, Cuando cada uno consulta su propia instancia, Entonces cada atleta ve una copia independiente, Y los cambios que se hagan sobre la instancia de un atleta no afectan la instancia de ningun otro atleta"
+        - "CA-023-5: Dado que un atleta autenticado consulta sus instancias personalizadas, Cuando accede al listado o al detalle de una instancia, Entonces solo ve la o las instancias que le pertenecen, sin poder consultar la instancia de otro atleta"
+        - "CA-023-6: Dado que un atleta intenta acceder a la instancia o a las sesiones de un plan para el que no tiene una suscripcion propia en estado Activa (por ejemplo porque esta Pendiente, Aprobada o Rechazada), Cuando realiza la peticion, Entonces el acceso se rechaza indicando que se requiere una inscripcion activa con consentimiento informado aceptado, Y no se expone ninguna informacion de la instancia"
+        - "CA-023-7: Dado que un usuario sin autenticar intenta consultar una instancia personalizada, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-023-8: Dado que el proceso de creacion de la instancia personalizada se dispara mas de una vez para la misma suscripcion activada, Cuando el sistema detecta que ya existe una instancia para esa suscripcion, Entonces no crea una segunda instancia, la instancia original permanece sin cambios, y el atleta sigue viendo una unica instancia para esa suscripcion en el listado y en el detalle"
+        - "CA-023-9: Dado que la plantilla del plan publicado indica para cada ejercicio de cada sesion cuanto debe hacer el atleta (series, repeticiones, carga, duracion o distancia, segun el tipo de ejercicio), Cuando se genera la instancia personalizada, Entonces esa prescripcion se copia tal cual a la instancia, Y el atleta ve desde el primer dia que debe hacer en cada ejercicio, sin depender de que el entrenador la complete despues"
       reglas_de_negocio:
-        - "RN-17: Relacion N:N entre atletas y entrenadores mediante suscripcion a planes"
-        - "RN-18: El entrenador publica planes; el atleta se suscribe; el entrenador aprueba la inscripcion"
-        - "RN-27 (heredada de EPICA-03): Solo los planes en estado Publicado aceptan nuevas solicitudes de inscripcion"
+        - "RN-31: El plan base actua como plantilla; cada atleta tiene su propia instancia personalizada, independiente de la plantilla y de las instancias de otros atletas. Solo la duracion total y las fases son inmutables"
+        - "RN-07 (heredada de EPICA-03): la instancia congela la version del ejercicio vigente al momento de crearse, igual que ya hace la plantilla al agregar un ejercicio a una sesion"
+        - "RN-10 (extendida): el atleta solo ve su propia instancia, igual que solo ve su propio historico"
+        - "[CONFIRMADO por el humano — 2026-08-21] Obligacion heredada de EPICA-04 (decision D-9 de su plan de implementacion, CA-014-3 diferido a esta epica): todo endpoint que de acceso a las sesiones de un plan verifica que exista una suscripcion Activa del atleta para ese plan, y rechaza con el mismo error reservado desde EPICA-04 si no la hay"
       notas:
-        - "El estado inicial de toda suscripcion es Pendiente (enum SubscriptionStatus ya definido en el schema: Pendiente, Aprobada, Rechazada, Activa, verificado en prisma/schema.prisma). Esta HU solo produce ese primer estado; HU-013 y HU-014 producen los siguientes"
-        - "[CONFIRMADO por el humano — 2026-08-20] Bloqueo de reintento mientras exista una suscripcion Pendiente/Aprobada/Activa (CA-012-2), y permiso de reintento tras un Rechazo (CA-012-3). Ver la seccion de supuestos de la epica para la consecuencia sobre la unicidad de la tabla"
-    - id: "HU-013"
-      titulo: "Aprobacion o rechazo de inscripcion de atleta a un plan"
-      como: "entrenador"
-      quiero: "revisar las solicitudes de inscripcion pendientes a mis planes y aprobarlas o rechazarlas"
-      para: "controlar quienes forman parte de mi grupo de atletas"
-      criterios_de_aceptacion:
-        - "CA-013-1: Dado que existe una suscripcion en estado Pendiente de un atleta a un plan propio del entrenador, Cuando el entrenador aprueba la solicitud, Entonces la suscripcion cambia a estado Aprobada, Y el atleta recibe una notificacion indicando que su solicitud fue aprobada y que debe aceptar el consentimiento informado del plan para poder iniciar sus sesiones"
-        - "CA-013-2: Dado que existe una suscripcion en estado Pendiente de un atleta a un plan propio del entrenador, Cuando el entrenador la rechaza, Entonces la suscripcion cambia a estado Rechazada, Y el atleta recibe una notificacion indicando que su solicitud fue rechazada, Y puede volver a solicitar inscripcion a ese u otros planes"
-        - "CA-013-3: Dado que el entrenador accede al panel de gestion de sus atletas, Cuando consulta las solicitudes pendientes, Entonces ve el listado de suscripciones en estado Pendiente para sus planes, con el nombre del atleta y el plan al que solicito inscribirse"
-        - "CA-013-4: Dado que un entrenador intenta aprobar o rechazar una suscripcion de un plan que no le pertenece, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario del plan puede decidir sobre sus solicitudes de inscripcion"
-        - "CA-013-5: Dado que un usuario con rol ATHLETE o ADMIN intenta aprobar o rechazar una solicitud de inscripcion, Cuando envia la peticion, Entonces la operacion se rechaza por falta de permisos"
-        - "CA-013-6: Dado que una suscripcion ya fue aprobada o rechazada anteriormente, Cuando el entrenador intenta aprobarla o rechazarla de nuevo, Entonces ve un mensaje indicando que esa solicitud ya fue resuelta, Y el estado de la suscripcion no cambia"
-        - "CA-013-7: Dado que un usuario sin autenticar intenta aprobar o rechazar una solicitud de inscripcion, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
-      reglas_de_negocio:
-        - "RN-18: El entrenador debe aceptar la inscripcion del atleta al plan antes de que quede confirmada"
-        - "RN-20: Una vez aprobada la solicitud, el atleta debe aceptar el consentimiento informado especifico de ese plan (ver HU-014); la aprobacion del entrenador por si sola no habilita el inicio de sesiones"
-      notas:
-        - "El estado Aprobada es intermedio: habilita el flujo de HU-014, pero no equivale por si solo a que el atleta pueda iniciar sesiones del plan (eso requiere ademas el estado Activa, resultado de aceptar el consentimiento). Por eso SubscriptionStatus define cuatro valores y no solo tres"
-        - "[CONFIRMADO por el humano — 2026-08-20] Esta HU resuelve el punto de integracion que EPICA-03 dejo abierto: el metodo hasSubscribers(planId) (hoy un stub que siempre retorna false en plans.service.ts) debe consultar si existe al menos una suscripcion en estado Aprobada o Activa para el plan. Una suscripcion en Pendiente NO cuenta como 'suscrito' para ese proposito. Con esta resolucion, CA-009-7 de EPICA-03 (bloqueo de despublicacion de un plan con atletas suscritos) deja de ser un gap y pasa a ser verificable end-to-end"
-        - "A diferencia del documento fuente original, CA-013-1 ya no incluye la presentacion del consentimiento informado como parte de este mismo criterio: esa verificacion es responsabilidad exclusiva de HU-014, que la cubre con sus propios criterios de aceptacion. Aqui solo se garantiza que la notificacion al atleta menciona el paso pendiente"
-    - id: "HU-014"
-      titulo: "Aceptacion del consentimiento informado deportivo al inscribirse a un plan"
+        - "[CONFIRMADO por el humano — 2026-08-21] Esta HU es nueva: no existia en el documento fuente original. La epica se llama 'Instancia Personalizada' pero ninguna de las HU-015/016/017 originales creaba esa instancia; EPICA-04 emite su evento de activacion de suscripcion deliberadamente sin nada que lo escuche (decision D-7 de su plan de implementacion) como punto de enganche declarado para esta epica"
+        - "La copia profunda de la plantilla (fases, semanas, sesiones, ejercicios con su version) es responsabilidad exclusiva de esta HU; HU-015, HU-016 y HU-017 operan sobre la instancia ya creada, no sobre la plantilla"
+        - "La idempotencia de la creacion de la instancia dejo de ser una nota y es ahora CA-023-8, a peticion del Analista de Producto: es observable por el atleta (veria dos instancias en CA-023-5) y verificable por QA"
+        - "El diseno detallado del mecanismo de disparo (que evento lo activa, con que temporizacion) es responsabilidad de la etapa de diseno tecnico posterior; aqui solo se define el comportamiento funcional esperado"
+    - id: "HU-015"
+      titulo: "Registro de resultados al completar una sesion de entrenamiento"
       como: "atleta"
-      quiero: "revisar y aceptar el consentimiento informado deportivo del plan al que fui aprobado"
-      para: "dejar constancia de que comprendo los riesgos y condiciones del entrenamiento, y poder iniciar mis sesiones"
+      quiero: "registrar los resultados de cada sesion de entrenamiento de mi instancia personalizada que complete"
+      para: "que el entrenador y la IA puedan analizar mi progreso y ajustar mi plan"
       criterios_de_aceptacion:
-        - "CA-014-1: Dado que el entrenador aprobo la suscripcion del atleta a un plan (estado Aprobada), Cuando el atleta accede a la plataforma, Entonces ve el consentimiento informado deportivo pendiente de aceptacion para ese plan"
-        - "CA-014-2: Dado que el atleta esta visualizando el consentimiento informado de un plan cuya suscripcion propia esta en estado Aprobada, Cuando lo acepta explicitamente, Entonces la suscripcion cambia a estado Activa, Y queda habilitado para iniciar las sesiones de ese plan, Y el sistema registra la aceptacion con el momento exacto, la version del documento y el plan al que corresponde"
-        - "CA-014-3: Dado que la suscripcion del atleta a un plan esta en estado Aprobada pero aun no acepto el consentimiento informado, Cuando intenta acceder a las sesiones de ese plan, Entonces ve el consentimiento pendiente y no puede continuar hasta aceptarlo"
-        - "CA-014-4: Dado que un atleta tiene suscripciones Aprobadas o Activas en planes de diferentes entrenadores, Cuando revisa sus consentimientos, Entonces ve un consentimiento independiente por cada plan, aunque el contenido del documento sea el mismo"
-        - "CA-014-5: Dado que la plataforma usa IA para generar recomendaciones sobre el entrenamiento, Cuando el atleta visualiza el consentimiento informado, Entonces ve incluida la advertencia de que las recomendaciones de la IA no sustituyen asesoria medica profesional"
-        - "CA-014-6: Dado que un atleta intenta aceptar el consentimiento informado de una suscripcion que no es propia (de otro atleta), Cuando envia la peticion, Entonces la operacion se rechaza porque solo el titular de la suscripcion puede aceptar su propio consentimiento"
-        - "CA-014-7: Dado que un usuario sin autenticar intenta aceptar un consentimiento informado, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
-        - "CA-014-8: Dado que la suscripcion del atleta esta en estado Aprobada pero el plan ya no esta vigente (el entrenador lo archivo, o su fecha de fin ya paso y su estado efectivo es Finalizado), Cuando el atleta intenta aceptar el consentimiento informado, Entonces la operacion se rechaza indicando que el plan ya no esta vigente, Y la suscripcion permanece en estado Aprobada sin transicionar nunca a Activa"
+        - "CA-015-1: Dado que el atleta tiene una sesion programada en su instancia personalizada de un plan con suscripcion propia en estado Activa, Cuando completa la sesion y registra los resultados de cada ejercicio, Entonces los resultados quedan guardados asociados a esa sesion y visibles para el entrenador propietario del plan"
+        - "CA-015-2: Dado que el atleta registro los resultados de una sesion y la semana a la que pertenece esa sesion aun no ha cerrado, Cuando accede a esos resultados y los modifica, Entonces la actualizacion queda guardada, sin importar cuanto tiempo haya transcurrido desde el registro original"
+        - "CA-015-3: Dado que el atleta registro los resultados de una sesion hace mas de 7 dias y la semana a la que pertenece sigue abierta porque aun no ha completado todas sus sesiones programadas, Cuando intenta modificarlos, Entonces la actualizacion queda guardada igual, porque el cierre de semana es la unica condicion que congela los resultados y la ventana de 7 dias no aplica de forma independiente"
+        - "CA-015-4: Dado que el atleta completo todas las sesiones de la semana y la semana cerro automaticamente, Cuando intenta modificar los resultados de cualquier sesion de esa semana, Entonces ve un mensaje indicando que la semana ya esta cerrada y los datos son definitivos"
+        - "CA-015-5: Dado que el atleta registro resultados de una sesion hace apenas unos minutos y la semana a la que pertenece esa sesion cerro automaticamente por completitud de sesiones justo despues, Cuando intenta modificar esos resultados, Entonces la edicion se rechaza porque la semana cerrada esta congelada, sin importar lo reciente que sea el registro"
+        - "CA-015-6: Dado que un usuario intenta registrar o modificar resultados de una sesion que pertenece a la instancia de otro atleta, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el atleta titular de esa instancia puede registrar o editar sus propios resultados"
+        - "CA-015-7: Dado que un atleta intenta registrar resultados de una sesion de un plan para el que no tiene una suscripcion propia en estado Activa, Cuando envia la peticion, Entonces la operacion se rechaza indicando que se requiere una inscripcion activa con consentimiento informado aceptado, Y no se crea ningun registro de resultados"
+        - "CA-015-8: Dado que un usuario sin autenticar intenta registrar o modificar resultados de una sesion, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-015-9: Dado que el atleta registra el resultado de un ejercicio de una sesion, Cuando ingresa lo que efectivamente hizo, Entonces el sistema guarda por separado las series realizadas, las repeticiones, la carga, la duracion y la distancia que apliquen a ese ejercicio, mas una nota libre opcional, Y esos valores quedan comparables uno a uno contra la prescripcion que la instancia trae para ese mismo ejercicio"
+        - "CA-015-10: Dado que el atleta esta registrando los resultados de una sesion de su instancia, Cuando envia el registro sin incluir todos los ejercicios que la sesion tiene programados, Entonces la operacion se rechaza indicando que faltan ejercicios por registrar, Y la sesion NO cuenta como completada para efectos del cierre de semana"
+        - "CA-015-11: Dado que el atleta registra el resultado de un ejercicio, Cuando llena unicamente los campos que aplican a ese tipo de ejercicio (series, repeticiones y carga para trabajo de fuerza; duracion y distancia para trabajo de resistencia), Entonces el registro se acepta sin exigir los campos que no aplican"
       reglas_de_negocio:
-        - "RN-20: El consentimiento informado se solicita en cada inscripcion a un plan, de forma independiente"
-        - "Cada aceptacion se registra con el momento exacto, la version del documento y el identificador del atleta, mismo mecanismo de trazabilidad legal usado en EPICA-01 para el habeas data (HU-003)"
-        - "El disclaimer de IA es obligatorio en el contenido del consentimiento (CA-014-5)"
+        - "[CONFIRMADO por el humano — 2026-08-21] RN-08 DEROGADA para esta epica: la ventana de edicion no es de 7 dias sino la vigencia de la semana. El atleta edita mientras la semana este abierta; el cierre por completitud (RN-09) es lo unico que bloquea"
+        - "RN-09: Al cerrar la semana los datos se congelan para la IA"
+        - "RN-21: El atleta registra resultados por sesion"
+        - "[CONFIRMADO por el humano — 2026-08-21] Obligacion heredada de EPICA-04 (decision D-9): verificacion de suscripcion Activa antes de registrar resultados (CA-015-7)"
       notas:
-        - "El consentimiento informado deportivo se registra con el mismo mecanismo de trazabilidad legal usado en el registro inicial del atleta (EPICA-01, HU-003): un registro append-only por aceptacion, con el tipo de documento, su version y el plan al que corresponde. Es un registro independiente por cada par (atleta, plan), aunque el contenido del documento sea el mismo salvo que cambie de version — verificado contra el schema: LegalAcceptance ya tiene un campo planId opcional y DocumentType ya incluye SPORT_CONSENT"
-        - "[CONFIRMADO por el humano — 2026-08-20] No existe una accion explicita de 'rechazar' o 'declinar' el consentimiento informado: el atleta solo puede aceptarlo o dejarlo pendiente indefinidamente, sin poder iniciar sesiones mientras tanto. No se modela un estado adicional de consentimiento rechazado ni se agrega ningun valor al enum SubscriptionStatus"
-        - "[CONFIRMADO por el humano — 2026-08-20] CA-014-8 cierra el vacio que detecto el Analista de Producto: una suscripcion Aprobada podia llegar a Activa sobre un plan que ya no estaba Publicado. La verificacion se hace UNICAMENTE en el momento de aceptar el consentimiento, no en el momento en que el plan deja de estar Publicado, y la razon es estructural: 'Finalizado' no es una transicion que alguien invoque — computeEffectiveStatus() en plans.service.ts:1027 lo deriva de endDate < now(), asi que el plan se finaliza por el paso del tiempo y no existe punto de codigo donde insertar una verificacion de suscripciones. Verificar al aceptar es el unico momento con un actor y una peticion reales. La suscripcion queda en Aprobada como via muerta: NO se agrega ningun estado al enum SubscriptionStatus, consistente con la decision de que no existe declinar el consentimiento"
-        - "[CONFIRMADO por el humano — 2026-08-20] archive() NO recibe un gate de suscriptores, a diferencia de unpublish(), que si lo tiene. Los dos casos no son simetricos: unpublish() devuelve el plan a Borrador EDITABLE, es decir mutar el contenido bajo los pies de atletas ya inscritos; archive() es terminal y no cambia el contenido del plan. Bloquear el archivado dejaria al entrenador sin poder retirar planes viejos. Queda como decision documentada, NO como gap pendiente"
-        - "El inicio efectivo de las sesiones del plan una vez la suscripcion queda Activa es alcance de EPICA-05, no de esta HU: aqui solo se garantiza que la suscripcion transiciona a Activa y que sin esa transicion el atleta no puede avanzar"
+        - "[CONFIRMADO por el humano — 2026-08-21] Manda la semana, no los 7 dias. Mientras la semana siga abierta la edicion es libre (CA-015-2, CA-015-3); cuando cierra por completitud los datos se congelan de inmediato aunque no hayan pasado 7 dias (CA-015-4, CA-015-5). RN-08 queda derogada: no existe ninguna ventana temporal independiente del estado de la semana. El humano acepto la consecuencia de que, combinado con PEN-01, los resultados de una semana que nunca se completa quedan editables indefinidamente"
+        - "Esta HU ya no depende directamente de HU-014 (EPICA-04): depende de HU-023, que a su vez depende de HU-014. El atleta necesita su instancia personalizada creada, no solo la suscripcion activa"
+    - id: "HU-016"
+      titulo: "Registro de sensaciones semanales del atleta"
+      como: "atleta"
+      quiero: "registrar mis sensaciones al finalizar cada semana de entrenamiento de mi instancia personalizada"
+      para: "que el entrenador y la IA puedan evaluar mi carga percibida y bienestar"
+      criterios_de_aceptacion:
+        - "CA-016-1: Dado que el atleta tiene una semana de su instancia personalizada en curso o recien completada, Cuando registra sus sensaciones de esa semana indicando su nivel de dolor muscular y su nivel de motivacion, Entonces las sensaciones quedan guardadas asociadas a esa semana de su instancia"
+        - "CA-016-2: Dado que la semana cerro automaticamente por completitud de sesiones, Cuando el atleta intenta modificar las sensaciones de esa semana, Entonces ve un mensaje indicando que los datos de esa semana ya son definitivos"
+        - "CA-016-3: Dado que el atleta consulta el historial de sus semanas, Cuando una semana ya tiene sensaciones registradas, Entonces puede distinguir visualmente las semanas con registro completo de las que aun no tienen sensaciones registradas"
+        - "CA-016-4: Dado que un usuario intenta registrar sensaciones semanales sobre la instancia de otro atleta, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el atleta titular de esa instancia puede registrar sus propias sensaciones"
+        - "CA-016-5: Dado que un atleta intenta registrar sensaciones semanales de un plan para el que no tiene una suscripcion propia en estado Activa, Cuando envia la peticion, Entonces la operacion se rechaza indicando que se requiere una inscripcion activa con consentimiento informado aceptado"
+        - "CA-016-6: Dado que el atleta registro sus sensaciones semanales (dolor muscular y motivacion), Cuando cualquier actor distinto del propio atleta o de su entrenador asignado intenta consultarlas, Entonces el acceso se rechaza, porque dolor muscular y motivacion son datos sensibles de salud bajo la Ley 1581 de 2012 y solo pueden ser consultados por el atleta titular y por el entrenador del plan al que pertenece esa semana"
+        - "CA-016-7: Dado que un usuario sin autenticar intenta registrar sensaciones semanales, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+        - "CA-016-8: Dado que el atleta va a registrar por primera vez sus sensaciones semanales (dolor muscular y motivacion) sobre una suscripcion para la que aun no ha aceptado el tratamiento especifico de esos datos sensibles de salud, Cuando intenta registrar sus sensaciones, Entonces el sistema exige y registra su aceptacion explicita de ese tratamiento — distinta de la aceptacion general de la politica de datos personales del registro inicial (RN-19/HABEAS_DATA) — antes de guardar el primer registro de sensaciones de esa suscripcion, Y esa aceptacion cubre todas las semanas subsiguientes de la misma suscripcion sin volver a solicitarse"
+        - "CA-016-9: Dado que el atleta registra sus sensaciones semanales, Cuando indica un valor de dolor muscular o de motivacion fuera del rango de 1 a 10, Entonces la operacion se rechaza indicando el rango valido, Y no se guarda ningun registro de sensaciones de esa semana"
+      reglas_de_negocio:
+        - "RN-21: Cada semana el atleta registra sus sensaciones: dolor muscular y motivacion"
+        - "RN-09: Al cerrar la semana los datos se congelan para la IA"
+        - "[CONFIRMADO por el humano — 2026-08-21] Obligacion heredada de EPICA-04 (decision D-9): verificacion de suscripcion Activa antes de registrar sensaciones (CA-016-5)"
+        - "Ley 1581 de 2012: dolor muscular y motivacion son datos sensibles de salud; su lectura queda restringida al atleta titular y al entrenador del plan correspondiente (CA-016-6)"
+      notas:
+        - "[CONFIRMADO por el humano — 2026-08-21] SUP-05 cerrado: los indicadores son exactamente dos, dolor muscular y motivacion. Se modelan como dos campos concretos, sin esquema extensible. Esta HU NO debe reabrirse por este motivo"
+        - "[RESUELTO — 2026-08-21] La duda sobre si RN-19 (EPICA-01, HU-003, CA-003-4) cubria la captura recurrente de datos sensibles de salud quedo cerrada: no la cubre. HEALTH_DATA_CONSENT se registra por suscripcion, en la misma transaccion que SPORT_CONSENT al activarse (rama (a) de la decision D-14 del plan). CA-016-8 queda como red de seguridad de integridad, no como mecanismo primario: su precondicion no deberia cumplirse nunca en el camino feliz"
+        - "Se corrige la dependencia respecto al documento fuente original: esta HU depende de HU-023 (debe existir la instancia y su semana), no de HU-015 (registro de resultados de sesion). Las sensaciones semanales no requieren que exista ningun resultado de sesion registrado previamente"
+    - id: "HU-017"
+      titulo: "Cierre automatico de la semana al completar las sesiones programadas"
+      como: "atleta"
+      quiero: "que la semana de mi instancia se cierre automaticamente cuando complete todas las sesiones programadas"
+      para: "que mis datos queden consolidados sin necesidad de una accion manual adicional"
+      criterios_de_aceptacion:
+        - "CA-017-1: Dado que el atleta registro los resultados de la ultima sesion programada pendiente de una semana de su instancia, Cuando ese registro se guarda exitosamente, Entonces la semana se marca como cerrada automaticamente, Y los datos de resultados y sensaciones de esa semana quedan congelados para el analisis de la IA, Y el atleta ve una indicacion de que la semana fue cerrada"
+        - "CA-017-2: Dado que la semana de la instancia de un atleta cerro automaticamente, Cuando el entrenador propietario del plan accede al panel de ese atleta, Entonces ve la semana marcada como cerrada y disponible para solicitar el analisis de la IA"
+        - "CA-017-3: Dado que ha transcurrido cualquier cantidad de tiempo y el atleta no completo todas las sesiones programadas de una semana de su instancia, Cuando se consulta el estado de esa semana, Entonces la semana permanece abierta indefinidamente, sin cierre automatico por fecha ni opcion de cierre manual por el atleta o el entrenador, Y esa semana queda excluida del analisis de la IA mientras no cierre por completitud de sesiones"
+        - "CA-017-4: Dado que un entrenador que no es propietario del plan intenta consultar el estado de cierre de la semana de un atleta, Cuando envia la peticion, Entonces la operacion se rechaza porque solo el entrenador propietario del plan puede consultar esa informacion"
+        - "CA-017-5: Dado que un usuario sin autenticar intenta consultar el estado de cierre de una semana, Cuando envia la peticion, Entonces la operacion se rechaza por falta de credenciales"
+      reglas_de_negocio:
+        - "RN-30: El cierre de semana se dispara cuando el atleta completa todas las sesiones programadas de esa semana"
+        - "RN-09: Al cerrar la semana los datos se congelan para la IA"
+        - "[CONFIRMADO por el humano — 2026-08-21] El cierre de semana ocurre UNICAMENTE por completitud de todas las sesiones programadas. No existe cierre por calendario ni cierre manual. Una semana incompleta permanece abierta indefinidamente y queda fuera del analisis de la IA (CA-017-3)"
+        - "RI-03 (heredada): el entrenador solo consulta el cierre de semana de atletas suscritos a SUS planes"
+      notas:
+        - "[CONFIRMADO por el humano — 2026-08-21] PEN-01 del documento fuente ('¿existe un cierre por tiempo, ademas del cierre por completitud?') queda resuelto: NO existe cierre por calendario ni cierre manual. Es una via muerta aceptada explicitamente por el humano, documentada aqui y en los supuestos de la epica, no un vacio pendiente"

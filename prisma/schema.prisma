@@ -93,6 +93,11 @@ model User {
   plans                        Plan[]
   subscriptions                Subscription[]    @relation("SubscriptionAthlete")
   reviewedSubscriptions        Subscription[]    @relation("SubscriptionReviewer")
+  // EPICA-05: lado inverso de PlanInstance.athlete y SessionResult.athlete.
+  // Una sola relacion hacia cada modelo — sin @relation nombrado, mismo
+  // criterio que Plan.coach.
+  planInstances                 PlanInstance[]
+  sessionResults                SessionResult[]
 
   @@map("users")
 }
@@ -133,6 +138,12 @@ model LegalAcceptance {
   // User, y que RN-13 exige para todo registro con valor de trazabilidad
   // legal). Hoy es una salvaguarda que nunca se activa: no existe ningun
   // endpoint que borre un Plan.
+  //
+  // EPICA-05/D-14 (rama a): a partir de acceptConsent() esta tabla recibe
+  // DOS filas por activacion de suscripcion (SPORT_CONSENT +
+  // HEALTH_DATA_CONSENT), mismo userId y planId, documentType distinto —
+  // sin cambio de schema: no existe ningun @@unique en este modelo que
+  // pudiera bloquearlo (solo el @@index([userId]) de abajo).
   planId          String?      @map("plan_id")
   acceptedAt      DateTime     @default(now()) @map("accepted_at")
 
@@ -252,14 +263,29 @@ model AdminInvitation {
 //      entre ambas tablas no importa, solo que "exercises" ya exista).
 //   3. pnpm prisma migrate dev   (aplica la migracion ya editada)
 //
-// Sobrevivencia ante un futuro `prisma migrate dev`: SI sobrevive. El motor
-// de diff de Prisma Migrate opera sobre su representacion interna del
-// datamodel (modelos/campos/@@index/@@unique declarados en schema.prisma),
-// reconstruida contra una shadow database que re-ejecuta el historial de
-// migraciones. Un indice parcial con WHERE no es expresable en esa
-// representacion — es literalmente invisible para el motor de diff, que
-// nunca genera un DROP INDEX para algo que no reconoce como "propio" del
-// schema. Esto se mantiene SIEMPRE que:
+// Sobrevivencia ante un futuro `prisma migrate dev`: **NO se puede dar por
+// sentada.** Este comentario razonaba que el motor de diff de Prisma Migrate
+// opera sobre su representacion interna del datamodel (modelos/campos/
+// @@index/@@unique declarados en schema.prisma), que un indice parcial con
+// WHERE no es expresable ahi, y que por lo tanto es "literalmente invisible"
+// para el diff y nunca se generaria un DROP INDEX. El razonamiento resulto
+// NO ser confiable: el 2026-08-21, la migracion
+// 20260821161654_epica_05_execution_and_prescription genero por si sola un
+// `DROP INDEX "subscriptions_athlete_plan_active_key"` — el indice parcial
+// gemelo de este, documentado con el mismo argumento en el modelo
+// Subscription mas abajo. ESTE indice sobrevivio esa misma migracion, asi
+// que el comportamiento no es uniforme y el argumento no predice cual cae.
+//
+// LO QUE HAY QUE HACER: despues de CADA `prisma migrate dev`, revisar el
+// migration.sql generado buscando un DROP INDEX que nadie pidio, y verificar
+// contra la base que los DOS indices parciales del proyecto siguen ahi:
+//   SELECT indexname FROM pg_indexes
+//    WHERE schemaname='public' AND indexname LIKE '%_active_key';
+// Si falta alguno, restaurarlo con una migracion `--create-only` que
+// contenga solo su CREATE UNIQUE INDEX (ver
+// 20260821161837_restore_subscriptions_partial_unique_index como precedente).
+//
+// Sigue siendo necesario, ademas, que:
 //   (a) el archivo de migracion con este SQL crudo permanezca en
 //       prisma/migrations/ sin editar ni borrar — se re-ejecuta en cada
 //       `prisma migrate reset` o reconstruccion de la shadow database;
@@ -328,12 +354,20 @@ model ExerciseVersion {
   // SessionExercise.exerciseVersion (onDelete: Restrict) — ver el
   // comentario de ese modelo. Postgres bloquea el borrado de un Exercise
   // en cuanto alguna de sus versiones siga referenciada por un plan.
+  // NOTA (EPICA-05): la misma tension se repite con
+  // InstanceSessionExercise.exerciseVersion (onDelete: Restrict, D-13) —
+  // ver ese modelo.
   exercise      Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
 
   // Uso desde EPICA-03: una version puede ser referenciada por multiples
   // SessionExercise (el mismo ejercicio agregado a distintas sesiones o
   // planes mientras esa version siga vigente).
   sessionExercises SessionExercise[]
+
+  // Uso desde EPICA-05: una version puede ser referenciada por multiples
+  // InstanceSessionExercise (la copia profunda de HU-023 propaga el mismo
+  // puntero congelado por la plantilla — D-13, sin volver a resolverlo).
+  instanceSessionExercises InstanceSessionExercise[]
 
   // Cubre la consulta "version vigente" (orderBy versionNumber desc, take 1
   // filtrando por exerciseId) sin indice adicional: exerciseId es la columna
@@ -383,6 +417,10 @@ model Plan {
   // requieren nombre (SubscriptionAthlete/SubscriptionReviewer).
   subscriptions     Subscription[]
   legalAcceptances  LegalAcceptance[]
+
+  // EPICA-05: lado inverso de PlanInstance.plan — un plan (plantilla) puede
+  // tener muchas instancias, una por atleta con suscripcion Activa (D-1).
+  instances         PlanInstance[]
 
   // Cubre GET /plans (listado propio del entrenador, todos los estados).
   @@index([coachId])
@@ -490,15 +528,37 @@ model Session {
 // Ejercicio dentro de una sesion del plan. Referencia SIEMPRE
 // exerciseVersionId, NUNCA un exerciseId directo — es como se cumple RN-07:
 // un plan conserva la version del ejercicio vigente al momento de agregarlo,
-// aunque la biblioteca global lo modifique o inhabilite despues. Ningun otro
-// campo de ejecucion (series, repeticiones, descanso) esta definido: ninguna
-// HU/CA de esta epica los pide — se deja para una HU/epica futura si el
-// negocio los requiere (ver riesgos del plan de implementacion).
+// aunque la biblioteca global lo modifique o inhabilite despues.
+//
+// EPICA-05/D-15 (EPICA-03 REABIERTA): 5 columnas de PRESCRIPCION, TODAS
+// nullable — el entrenador bosqueja la sesion en Borrador sin volumenes; la
+// completitud (regla de "prescripcion significativa", D-15 punto 2) se
+// exige SOLO al publicar (`validatePlanCompleteness()`,
+// plans.service.ts:989-1021), NUNCA como constraint de BD — Postgres no
+// tiene forma declarativa de expresar "obligatorio en un momento del ciclo
+// de vida, opcional en otro" sin un trigger, y este proyecto no usa SQL
+// crudo mas alla de los indices parciales ya documentados en este archivo.
+// Prescripcion y resultado (SessionExerciseResult, ver EPICA-05 abajo)
+// comparten los MISMOS 5 nombres/tipos por decision explicita del humano
+// (D-6), para que sean comparables uno a uno.
 model SessionExercise {
   id                String   @id @default(uuid())
   sessionId         String   @map("session_id")
   exerciseVersionId String   @map("exercise_version_id")
   order             Int      @map("order")
+
+  // Prescripcion (D-15). sets+reps (fuerza, loadKg opcional para peso
+  // corporal) O durationSeconds/distanceMeters (resistencia, no se exige el
+  // par) satisfacen "prescripcion significativa" — ver el detalle completo
+  // de la regla en el plan de implementacion de EPICA-05, D-15 punto 2.
+  // Unidad de loadKg/distanceMeters: kilogramos/metros por convencion, sin
+  // RN/CA que la confirme explicitamente (riesgo documentado en el plan).
+  sets              Int?     @map("sets")
+  reps              Int?     @map("reps")
+  loadKg            Float?   @map("load_kg")
+  durationSeconds   Int?     @map("duration_seconds")
+  distanceMeters    Float?   @map("distance_meters")
+
   createdAt         DateTime @default(now()) @map("created_at")
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -570,15 +630,39 @@ model SessionExercise {
 //      "subscriptions".
 //   3. pnpm prisma migrate dev   (aplica la migracion ya editada)
 //
-// Sobrevivencia ante un futuro `prisma migrate dev`: SI sobrevive, por el
-// mismo motivo ya documentado para "exercises_name_lower_active_key" — el
-// motor de diff de Prisma Migrate no reconoce indices parciales como
-// "propios" del schema declarativo, asi que nunca genera un DROP INDEX para
-// este. Se mantiene SIEMPRE que: (a) el archivo de migracion con este SQL
-// crudo permanezca en prisma/migrations/ sin editar ni borrar; (b) nadie
-// corra `prisma db pull` sobre la tabla "subscriptions"; (c) nadie agregue
-// `@@unique([athleteId, planId])` a este modelo en una migracion futura —
-// colisionaria con este indice parcial.
+// Sobrevivencia ante un futuro `prisma migrate dev`: **NO sobrevive.**
+// Esta seccion afirmaba lo contrario ("SI sobrevive, por el mismo motivo ya
+// documentado para exercises_name_lower_active_key") y quedo REFUTADO en la
+// practica el 2026-08-21: la PRIMERA migracion posterior a EPICA-04
+// (20260821161654_epica_05_execution_and_prescription) abre con un
+// `DROP INDEX "subscriptions_athlete_plan_active_key"` que Prisma genero
+// solo, sin que nadie lo pidiera. En la MISMA migracion,
+// "exercises_name_lower_active_key" SI sobrevivio — el comportamiento no es
+// uniforme entre los dos indices parciales del proyecto y no puede darse por
+// sentado para ninguno.
+//
+// Se restauro con la migracion 20260821161837_restore_subscriptions_partial_unique_index,
+// que documenta el caso completo.
+//
+// LO QUE HAY QUE HACER: despues de CADA `prisma migrate dev`, revisar el
+// migration.sql generado buscando un DROP INDEX que nadie pidio, y verificar
+// contra la base:
+//   SELECT indexname FROM pg_indexes
+//    WHERE schemaname='public' AND indexname LIKE '%_active_key';
+// Deben aparecer LOS DOS. Si falta alguno, restaurarlo con una migracion
+// `--create-only` que contenga solo su CREATE UNIQUE INDEX.
+//
+// Sigue valiendo, ademas, que: (a) el archivo de migracion con este SQL crudo
+// debe permanecer en prisma/migrations/ sin editar ni borrar; (b) nadie debe
+// correr `prisma db pull` sobre la tabla "subscriptions"; (c) nadie debe
+// agregar `@@unique([athleteId, planId])` a este modelo — colisionaria con
+// este indice parcial.
+//
+// POR QUE IMPORTA que no falte: es la salvaguarda de BD de CA-012-2. El
+// pre-check de SubscriptionsService.create() cubre el caso comun, pero no la
+// ventana de carrera entre su SELECT y el INSERT — sin el indice, dos
+// solicitudes concurrentes del mismo atleta al mismo plan pasan las dos, y el
+// catch de P2002 del service no tiene nada que atrapar.
 // ============================================================================
 model Subscription {
   id          String             @id @default(uuid())
@@ -595,7 +679,9 @@ model Subscription {
   // Escrito por acceptConsent() (HU-014, CA-014-2) en la misma
   // $transaction que crea el LegalAcceptance(SPORT_CONSENT) — momento en
   // que la suscripcion pasa a ACTIVE. null mientras status esta en
-  // PENDING/APPROVED/REJECTED.
+  // PENDING/APPROVED/REJECTED. EPICA-05/D-14 (rama a): la misma
+  // $transaction ahora ADEMAS crea un LegalAcceptance(HEALTH_DATA_CONSENT)
+  // — sin impacto de schema, DocumentType.HEALTH_DATA_CONSENT ya existe.
   activatedAt DateTime?          @map("activated_at")
 
   createdAt   DateTime           @default(now()) @map("created_at")
@@ -618,6 +704,11 @@ model Subscription {
   // se mantienen).
   reviewer User? @relation("SubscriptionReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
 
+  // EPICA-05: lado inverso de PlanInstance.subscription — 1:1, D-3. Optional
+  // porque una Subscription puede existir sin instancia todavia (ventana de
+  // carrera entre la activacion y el listener/self-heal de D-3).
+  instance PlanInstance?
+
   // Cubre GET /subscriptions (listado propio del atleta, todos los
   // estados, paginado).
   @@index([athleteId])
@@ -631,3 +722,354 @@ model Subscription {
   @@index([planId, status])
   @@map("subscriptions")
 }
+
+// --- Modelos EPICA-05 ---
+//
+// Instancia personalizada del atleta (HU-023, HU-015, HU-016, HU-017).
+// Jerarquia PlanInstance -> InstancePhase -> InstanceWeek -> InstanceSession
+// -> InstanceSessionExercise, copia profunda de Plan -> Phase -> Week ->
+// Session -> SessionExercise (D-1) — mismos nombres de campo, mismo patron
+// de FK compuesta para la unicidad de weekNumber por instancia, mismo
+// criterio de "sin updatedAt" en la estructura pura (nadie la edita despues
+// de creada — RN-31, solo duracion/fases inmutables, contenido lo modula
+// EPICA-06 fuera de este alcance).
+//
+// SessionResult/SessionExerciseResult (D-6) y WeeklyFeeling SI llevan
+// updatedAt: reciben escrituras UPDATE reales via upsert (D-6b) mientras la
+// semana este abierta. RN-09 (inmutabilidad tras cierre de semana) NO se
+// expresa en el schema — Postgres no tiene una forma declarativa de
+// bloquear un UPDATE condicionado al estado de OTRA fila (InstanceWeek.
+// isClosed) sin un trigger, y este proyecto no usa SQL procedural mas alla
+// de los indices parciales ya documentados arriba. El congelamiento es
+// EXCLUSIVAMENTE responsabilidad del service (chequeo inline WEEK_FROZEN
+// antes de cualquier upsert, D-11) — ninguna de estas tres tablas es
+// append-only en el sentido de LegalAcceptance/AuditLog.
+//
+// Control de acceso a datos sensibles de salud (WeeklyFeeling, CA-016-6,
+// Ley 1581/2012): el schema NO implementa ningun mecanismo de fila (no hay
+// Row Level Security de Postgres en este proyecto) — la restriccion "solo
+// el atleta titular y el entrenador del plan" se resuelve INTEGRAMENTE en
+// la capa de servicio, con el mismo patron de ownership ya usado en el
+// resto del proyecto (findOwnSubscriptionOrFail/findOwnedOrFail, D-11). El
+// unico aporte del schema es no crear ninguna via de acceso adicional:
+// WeeklyFeeling no se referencia desde ningun otro modelo mas que
+// InstanceWeek, y su unico indice es el `@unique` de esa FK.
+
+// Contenedor raiz de la instancia (D-1). El constraint UNICO sobre
+// subscriptionId es el mecanismo de idempotencia de CA-023-8 (D-3): el
+// listener de subscription.activated y el self-heal de GET /instances/:planId
+// llaman al mismo getOrCreateInstance(), que hace
+// `findUnique({ subscriptionId })` primero y, si no existe, crea dentro de
+// un $transaction interactivo; el service captura P2002 como salvaguarda
+// ante la ventana de carrera entre ambos pasos — mismo patron que
+// SubscriptionsService.create() con el indice parcial de Subscription.
+model PlanInstance {
+  id             String   @id @default(uuid())
+  planId         String   @map("plan_id")
+  athleteId      String   @map("athlete_id")
+  subscriptionId String   @unique @map("subscription_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // onDelete: Restrict en las tres relaciones — mismo criterio que
+  // Subscription: contenido de negocio sustantivo (el historial de
+  // ejecucion del atleta, insumo de EPICA-07/08), no un artefacto de
+  // identidad 1:1. Restrict en `subscription` ademas protege el mecanismo
+  // de idempotencia de D-3: la instancia nunca debe quedar huerfana de
+  // forma silenciosa.
+  plan         Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
+  athlete      User            @relation(fields: [athleteId], references: [id], onDelete: Restrict)
+  subscription Subscription    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  phases       InstancePhase[]
+
+  // Cubre GET /instances (listado propio del atleta, resumen liviano,
+  // CA-023-4/CA-023-5). El detalle GET /instances/:planId y el panel del
+  // entrenador resuelven la instancia via `subscriptionId` (unique, arriba)
+  // despues de validar la Subscription Activa — no necesitan este indice.
+  @@index([athleteId])
+  @@map("plan_instances")
+}
+
+// Fase de la instancia — copia estructural 1:1 de Phase (D-1, CA-023-3).
+model InstancePhase {
+  id         String   @id @default(uuid())
+  instanceId String   @map("instance_id")
+  order      Int      @map("order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  instance PlanInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  weeks    InstanceWeek[]
+
+  // Ancla para la FK compuesta de InstanceWeek -> InstancePhase, mismo
+  // patron que Phase.@@unique([id, planId]) en EPICA-03.
+  @@unique([id, instanceId])
+  // order se copia de la plantilla en la $transaction de creacion (D-1);
+  // esta unicidad por padre es la misma salvaguarda de integridad que
+  // Phase.@@unique([planId, order]), y su columna lider (instanceId) cubre
+  // "listar fases de una instancia" sin indice adicional.
+  @@unique([instanceId, order])
+  @@map("instance_phases")
+}
+
+// Semana de la instancia — copia estructural 1:1 de Week (D-1). instanceId
+// esta DENORMALIZADO desde instancePhase.instanceId, mismo criterio que
+// Week.planId: permite `@@unique([instanceId, weekNumber])` con weekNumber
+// secuencial a lo largo de TODA la instancia (no por fase), y la FK
+// compuesta `(instancePhaseId, instanceId) -> InstancePhase(id, instanceId)`
+// cierra la consistencia a nivel de base de datos, no solo por disciplina
+// del service.
+//
+// isClosed/closedAt (D-5, Frozen Flag) viven DIRECTAMENTE aqui, NO en una
+// tabla WeekClosure separada — desviacion deliberada del ejemplo ilustrativo
+// del skill design-patterns (§5), para evitar un join en el chequeo mas
+// caliente de la epica (verificar si la semana esta cerrada antes de
+// cualquier escritura de resultado/sensacion). No revertir a una tabla
+// separada sin una nueva decision explicita.
+model InstanceWeek {
+  id              String    @id @default(uuid())
+  instancePhaseId String    @map("instance_phase_id")
+  instanceId      String    @map("instance_id")
+  weekNumber      Int       @map("week_number")
+  isClosed        Boolean   @default(false) @map("is_closed")
+  closedAt        DateTime? @map("closed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  instancePhase InstancePhase     @relation(fields: [instancePhaseId, instanceId], references: [id, instanceId], onDelete: Cascade)
+  sessions      InstanceSession[]
+  feeling       WeeklyFeeling?
+
+  @@unique([instanceId, weekNumber])
+  @@index([instancePhaseId])
+  @@map("instance_weeks")
+}
+
+// Sesion de la instancia — copia estructural 1:1 de Session (D-1).
+model InstanceSession {
+  id             String   @id @default(uuid())
+  instanceWeekId String   @map("instance_week_id")
+  name           String   @map("name")
+  order          Int      @map("order")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  instanceWeek InstanceWeek              @relation(fields: [instanceWeekId], references: [id], onDelete: Cascade)
+  exercises    InstanceSessionExercise[]
+  result       SessionResult?
+
+  // order se copia de la plantilla (D-1); mismo criterio de integridad que
+  // Session.@@unique([weekId, order]). La columna lider (instanceWeekId) es
+  // ademas el indice que sostiene el conteo mas caliente de la epica (D-4):
+  // `InstanceSession.count({ where: { instanceWeekId, result: null } })`
+  // corre DENTRO de la $transaction de POST .../results en CADA registro,
+  // para decidir si la semana cierra. El filtro `result: null` se resuelve
+  // como anti-join contra SessionResult.instanceSessionId (unique, ver
+  // abajo), no necesita indice propio adicional aqui.
+  @@unique([instanceWeekId, order])
+  @@map("instance_sessions")
+}
+
+// Ejercicio dentro de una sesion de la instancia — copia estructural de
+// SessionExercise, MAS los 5 campos de prescripcion copiados TAL CUAL desde
+// la plantilla en el momento de la copia profunda (CA-023-9, D-15 punto 8):
+// mismos nombres/tipos que SessionExercise, para comparabilidad uno a uno
+// contra SessionExerciseResult.
+model InstanceSessionExercise {
+  id                String   @id @default(uuid())
+  instanceSessionId String   @map("instance_session_id")
+  // exerciseVersionId se copia TAL CUAL desde SessionExercise.exerciseVersionId
+  // de la plantilla — el service de esta epica NUNCA vuelve a resolver la
+  // version vigente del ejercicio (D-13, RN-07 ya resuelta por EPICA-03 al
+  // momento en que el entrenador agrego el ejercicio a la sesion).
+  exerciseVersionId String  @map("exercise_version_id")
+  order             Int     @map("order")
+
+  sets              Int?    @map("sets")
+  reps              Int?    @map("reps")
+  loadKg            Float?  @map("load_kg")
+  durationSeconds   Int?    @map("duration_seconds")
+  distanceMeters    Float?  @map("distance_meters")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  instanceSession InstanceSession @relation(fields: [instanceSessionId], references: [id], onDelete: Cascade)
+
+  // onDelete: Restrict — mismo criterio y misma tension deliberada que
+  // SessionExercise.exerciseVersion (prisma/schema.prisma, EPICA-03): un
+  // registro historico de ejecucion (y su resultado, si existe) NUNCA debe
+  // perder la referencia a la version exacta del ejercicio que el atleta
+  // realizo, aunque algun dia se agregue un hard-delete administrativo de
+  // Exercise/ExerciseVersion. Esto bloquea la cascada de InstanceSession
+  // hacia abajo en cuanto un ejercicio de sesion sigue referenciado.
+  exerciseVersion ExerciseVersion @relation(fields: [exerciseVersionId], references: [id], onDelete: Restrict)
+
+  result SessionExerciseResult?
+
+  // order se copia de la plantilla; mismo criterio de integridad que
+  // SessionExercise.@@unique([sessionId, order]).
+  @@unique([instanceSessionId, order])
+  // A diferencia de SessionExercise.@@index([exerciseVersionId]) (que en la
+  // plantilla cubre isUsedInPlan(), una query de `plans` que no aplica
+  // aqui), este indice se justifica por integridad referencial: sostiene el
+  // chequeo de Postgres para el onDelete: Restrict de arriba sin seq scan
+  // sobre una tabla que crece con cada suscripcion activada.
+  @@index([exerciseVersionId])
+  @@map("instance_session_exercises")
+}
+
+// Registro agregado del resultado de UNA sesion de la instancia (HU-015,
+// D-6) — casi vacio de datos propios; los valores tipados viven en su hijo
+// SessionExerciseResult. Por construccion del service (paso RESULT_FIELDS_INVALID
+// ANTES del upsert, CA-015-10), esta fila NUNCA existe en estado parcial:
+// cuando existe, ya tiene un SessionExerciseResult por cada ejercicio
+// programado de la sesion (D-4).
+//
+// athleteId esta DENORMALIZADO — insumo declarado por el plan para consultas
+// futuras de EPICA-07/EPICA-08 sobre el historico de un atleta sin atravesar
+// toda la cadena InstanceSession -> InstanceWeek -> InstancePhase ->
+// PlanInstance. NO se le agrega indice en esta epica: ningun endpoint de
+// EPICA-05 filtra SessionResult por athleteId de forma independiente (los
+// resultados siempre se leen embebidos en el arbol de la instancia, ya
+// resuelto via ownership) — se deja para cuando EPICA-07/08 declaren su
+// propia query real, siguiendo el criterio de "no sobre-indexar".
+//
+// onDelete: Restrict hacia InstanceSession (no Cascade) — tension deliberada
+// con InstanceWeek -> InstanceSession (Cascade): protege este resultado de
+// negocio (insumo de IA/metricas) de una cascada silenciosa, mismo patron
+// que ExerciseVersion/SessionExercise ya documentado arriba.
+model SessionResult {
+  id                String   @id @default(uuid())
+  instanceSessionId String   @unique @map("instance_session_id")
+  athleteId         String   @map("athlete_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  instanceSession InstanceSession         @relation(fields: [instanceSessionId], references: [id], onDelete: Restrict)
+  athlete         User                    @relation(fields: [athleteId], references: [id], onDelete: Restrict)
+  exerciseResults SessionExerciseResult[]
+
+  @@map("session_results")
+}
+
+// Hijo tipado de SessionResult (D-6): un resultado por ejercicio de sesion
+// como maximo (`instanceSessionExerciseId` unico). MISMOS 5 campos que la
+// prescripcion de InstanceSessionExercise — comparables uno a uno — mas
+// `notes`, que SOLO el resultado tiene. Sin updatedAt propio: cualquier
+// edicion de un hijo se refleja en el updatedAt del padre (SessionResult),
+// que ya identifica cuando se toco por ultima vez esta sesion — evita
+// duplicar la marca de tiempo en cada fila hija (D-6).
+model SessionExerciseResult {
+  id                        String   @id @default(uuid())
+  sessionResultId           String   @map("session_result_id")
+  instanceSessionExerciseId String   @unique @map("instance_session_exercise_id")
+
+  sets            Int?    @map("sets")
+  reps            Int?    @map("reps")
+  loadKg          Float?  @map("load_kg")
+  durationSeconds Int?    @map("duration_seconds")
+  distanceMeters  Float?  @map("distance_meters")
+  notes           String? @map("notes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // onDelete: Cascade — a diferencia de la relacion hacia
+  // InstanceSessionExercise (abajo), SessionResult+SessionExerciseResult son
+  // un unico agregado (siempre se upsertan juntos en la misma $transaction,
+  // D-4): un SessionExerciseResult no tiene sentido sin su SessionResult
+  // padre, mismo criterio que Exercise -> ExerciseVersion (EPICA-02).
+  sessionResult SessionResult @relation(fields: [sessionResultId], references: [id], onDelete: Cascade)
+
+  // onDelete: Restrict — mismo criterio que SessionResult.instanceSession:
+  // protege este resultado (insumo de IA/metricas) de una cascada silenciosa
+  // si InstanceSessionExercise fuera borrado, bloqueando a su vez la cascada
+  // de InstanceSession hacia abajo.
+  instanceSessionExercise InstanceSessionExercise @relation(fields: [instanceSessionExerciseId], references: [id], onDelete: Restrict)
+
+  // sessionResultId no es unico (1:N) — este indice sostiene el fetch de
+  // `exerciseResults` embebido en SessionResultResponseDto dentro de
+  // GET /instances/:planId(/athletes/:athleteId) (D-2), que trae TODOS los
+  // hijos de un SessionResult en una sola consulta.
+  @@index([sessionResultId])
+  @@map("session_exercise_results")
+}
+
+// Sensaciones semanales del atleta (HU-016) — dolor muscular y motivacion,
+// enteros de 1 a 10 ambos inclusive (D-6, RESUELTA). DATO SENSIBLE DE SALUD
+// bajo la Ley 1581/2012 (CA-016-6): el schema no implementa ningun control
+// de acceso por fila (no hay Row Level Security en este proyecto) — la
+// restriccion de lectura al atleta titular y al entrenador del plan se
+// resuelve INTEGRAMENTE en la capa de servicio (ver nota de cabecera de esta
+// seccion). SI lleva updatedAt: upsert real (D-6b) mientras la semana este
+// abierta; el congelamiento tras el cierre (RN-09) es un chequeo inline del
+// service (WEEK_FROZEN), no una restriccion de este schema.
+//
+// onDelete: Restrict hacia InstanceWeek — mismo patron de tension deliberada
+// que SessionResult/SessionExerciseResult: protege este dato sensible de una
+// cascada silenciosa, bloqueando la cascada de InstancePhase -> InstanceWeek
+// mientras la semana conserve sensaciones registradas.
+model WeeklyFeeling {
+  id             String   @id @default(uuid())
+  instanceWeekId String   @unique @map("instance_week_id")
+  muscleSoreness Int      @map("muscle_soreness")
+  motivation     Int      @map("motivation")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  instanceWeek InstanceWeek @relation(fields: [instanceWeekId], references: [id], onDelete: Restrict)
+
+  @@map("weekly_feelings")
+}
+
+// ============================================================================
+// MIGRACION DE DATOS REQUERIDA (D-15 punto 10, migracion 1 —
+// add_session_exercise_prescription) — el humano la agrega a mano en el
+// migration.sql, DESPUES del ALTER TABLE que agrega las 5 columnas nuevas a
+// "session_exercises":
+//
+//   UPDATE "plans"
+//   SET "status" = 'DRAFT'
+//   WHERE "status" = 'PUBLISHED'
+//     AND "id" IN (
+//       SELECT DISTINCT p."id"
+//       FROM "plans" p
+//       JOIN "phases" ph ON ph."plan_id" = p."id"
+//       JOIN "weeks" w ON w."phase_id" = ph."id"
+//       JOIN "sessions" s ON s."week_id" = w."id"
+//       JOIN "session_exercises" se ON se."session_id" = s."id"
+//       WHERE NOT (
+//         (se."sets" IS NOT NULL AND se."reps" IS NOT NULL)
+//         OR (se."duration_seconds" IS NOT NULL OR se."distance_meters" IS NOT NULL)
+//       )
+//     );
+//
+// Revierte a Borrador todo plan Publicado que tenga al menos un
+// SessionExercise sin "prescripcion significativa" (D-15 punto 2) — SIN
+// backfill con valores inventados. NO pasa por unpublish() ni por su guard
+// PLAN_HAS_SUBSCRIBERS (es una operacion de datos directa, no una llamada
+// HTTP — ver D-15 punto 10 del plan de implementacion).
+//
+// Verificacion post-migracion (no automatizada, criterio de aceptacion
+// tecnico del plan): debe devolver CERO filas.
+//
+//   SELECT p."id", p."name"
+//   FROM "plans" p
+//   JOIN "phases" ph ON ph."plan_id" = p."id"
+//   JOIN "weeks" w ON w."phase_id" = ph."id"
+//   JOIN "sessions" s ON s."week_id" = w."id"
+//   JOIN "session_exercises" se ON se."session_id" = s."id"
+//   WHERE p."status" = 'PUBLISHED'
+//     AND NOT (
+//       (se."sets" IS NOT NULL AND se."reps" IS NOT NULL)
+//       OR (se."duration_seconds" IS NOT NULL OR se."distance_meters" IS NOT NULL)
+//     );
+//
+// ADVERTENCIA (no aplica a produccion, que no tiene usuarios, pero SI puede
+// aplicar a la base de datos de desarrollo del humano): este UPDATE no
+// distingue si el plan revertido tiene Subscription APPROVED/ACTIVE. Un
+// plan con una suscripcion Activa que se revierte a Borrador queda en un
+// estado que el codigo actual nunca previo (PlansService no tiene guard
+// para "publicar de nuevo con suscriptores existentes" mas alla de
+// PLAN_HAS_SUBSCRIBERS en unpublish(), que este script no ejecuta). Antes de
+// aplicar esta migracion en una base de desarrollo con datos de prueba,
+// correr primero la consulta de verificacion de arriba, cruzarla con
+// `subscriptions` (`status IN ('APPROVED','ACTIVE')`) y decidir manualmente
+// si alguno de esos planes necesita su prescripcion completada a mano ANTES
+// de la migracion, en vez de dejarlo revertir.
+// ============================================================================

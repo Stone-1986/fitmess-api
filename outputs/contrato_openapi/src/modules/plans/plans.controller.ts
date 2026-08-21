@@ -34,6 +34,7 @@ import { UpdatePlanDto } from './dto/update-plan.dto.js';
 import { AddPhaseDto } from './dto/add-phase.dto.js';
 import { AddSessionDto } from './dto/add-session.dto.js';
 import { AddSessionExerciseDto } from './dto/add-session-exercise.dto.js';
+import { UpdateSessionExercisePrescriptionDto } from './dto/update-session-exercise-prescription.dto.js';
 import { PlanResponseDto } from './dto/plan-response.dto.js';
 import { PlanDetailResponseDto } from './dto/plan-detail-response.dto.js';
 import { PhaseResponseDto } from './dto/phase-response.dto.js';
@@ -43,7 +44,7 @@ import { SessionExerciseResponseDto } from './dto/session-exercise-response.dto.
 
 /**
  * PlansController — construccion, publicacion y ciclo de vida de planes de
- * entrenamiento del entrenador (EPICA-03).
+ * entrenamiento del entrenador (EPICA-03; REABIERTA en EPICA-05, D-15).
  *
  * Ruta base: /plans
  * Todos los endpoints requieren autenticacion JWT y rol COACH exclusivamente
@@ -57,6 +58,9 @@ import { SessionExerciseResponseDto } from './dto/session-exercise-response.dto.
  * HU-008: creacion incremental del plan (shell + fases + semanas + sesiones + ejercicios)
  * HU-009: publicacion / despublicacion
  * HU-010: archivo manual
+ * HU-023 (D-15, EPICA-05): prescripcion por ejercicio de sesion — agregar con
+ * prescripcion opcional, editar prescripcion (nuevo), y publish() exige
+ * prescripcion significativa por ejercicio.
  *
  * El servicio asociado es PlansService (src/modules/plans/plans.service.ts).
  */
@@ -259,7 +263,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan no encontrado')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async addPhase(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -302,7 +309,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan o fase no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async removePhase(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -342,7 +352,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan o fase no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async addWeek(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -384,7 +397,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan o semana no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async removeWeek(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -422,7 +438,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan o semana no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async addSession(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -464,7 +483,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan o sesion no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async removeSession(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -485,6 +507,10 @@ export class PlansController {
    * y con EXERCISE_INACTIVE (422) si esta inhabilitado — mismo precedente
    * que CA-006-6 de EPICA-02. Esta es la escritura que hace real
    * isUsedInPlan() de EPICA-02 (D-2).
+   *
+   * D-15 (EPICA-05): AddSessionExerciseDto acepta ademas los 5 campos de
+   * prescripcion, TODOS opcionales — sin validacion de "prescripcion
+   * significativa" en este punto, esa regla solo se evalua al publicar.
    */
   @Post(':id/sessions/:sessionId/exercises')
   @HttpCode(HttpStatus.CREATED)
@@ -500,6 +526,9 @@ export class PlansController {
       'si el ejercicio no existe en la biblioteca global (RN-04), y con EXERCISE_INACTIVE (422) ' +
       'si existe pero esta inhabilitado (isActive=false) — mismo precedente que CA-006-6 de ' +
       'EPICA-02. Esta operacion es la que hace real isUsedInPlan(exerciseId) de EPICA-02 (D-2). ' +
+      'Acepta ademas la prescripcion del ejercicio (sets, reps, loadKg, durationSeconds, ' +
+      'distanceMeters), TODOS opcionales — el entrenador puede agregarlo sin ninguna ' +
+      'prescripcion y completarla despues via PATCH .../exercises/:sessionExerciseId (D-15). ' +
       'Solo procede si el plan sigue en Borrador.',
   })
   @ApiResponse({
@@ -507,7 +536,10 @@ export class PlansController {
     description: 'Ejercicio agregado exitosamente a la sesion',
     type: SessionExerciseResponseDto,
   })
-  @ApiProblemResponse(400, 'Error de validacion en los datos del ejercicio de sesion')
+  @ApiProblemResponse(
+    400,
+    'Error de validacion en los datos del ejercicio de sesion',
+  )
   @ApiProblemResponse(401, 'No autenticado — se requiere token JWT valido')
   @ApiProblemResponse(
     403,
@@ -517,7 +549,10 @@ export class PlansController {
     404,
     'Plan o sesion no encontrados, o el ejercicio referenciado no existe en la biblioteca global (RN-04)',
   )
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   @ApiProblemResponse(
     422,
     'El ejercicio referenciado existe pero esta inhabilitado en la biblioteca global (EXERCISE_INACTIVE)',
@@ -529,6 +564,66 @@ export class PlansController {
     @Body() dto: AddSessionExerciseDto,
   ): Promise<SessionExerciseResponseDto> {
     return this.plansService.addSessionExercise(user.id, id, sessionId, dto);
+  }
+
+  /**
+   * PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId
+   *
+   * NUEVO (D-15, EPICA-05, EPICA-03 REABIERTA). Edita la prescripcion
+   * (sets, reps, loadKg, durationSeconds, distanceMeters — todos opcionales,
+   * actualizacion parcial) de un ejercicio de sesion ya agregado. Primer
+   * endpoint de edicion de SessionExercise del proyecto — hasta esta epica,
+   * EPICA-03 solo exponia add/remove. Mismos guards que sus vecinos de
+   * estructura en PlansController.
+   */
+  @Patch(':id/sessions/:sessionId/exercises/:sessionExerciseId')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(PlanPublishedGuard)
+  @ApiOperation({
+    summary: 'Editar la prescripcion de un ejercicio de sesion (D-15)',
+    description:
+      'Edita la prescripcion (sets, reps, loadKg, durationSeconds, distanceMeters — ' +
+      'todos opcionales, actualizacion parcial) de un SessionExercise ya agregado a la ' +
+      'sesion. Primer endpoint de edicion de SessionExercise del proyecto — hasta esta ' +
+      'epica, EPICA-03 solo exponia POST (agregar) y DELETE (quitar), nunca PATCH (D-15 ' +
+      'punto 5). Sin validacion de "prescripcion significativa" aqui — esa regla solo se ' +
+      'evalua al publicar el plan (D-15 punto 2/3). Mismo findOwnedOrFail de ownership que ' +
+      'el resto del controller. Solo procede si el plan sigue en Borrador (RN-31, ' +
+      'PlanPublishedGuard).',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Prescripcion del ejercicio de sesion actualizada exitosamente',
+    type: SessionExerciseResponseDto,
+  })
+  @ApiProblemResponse(
+    400,
+    'Error de validacion en los datos de la prescripcion',
+  )
+  @ApiProblemResponse(401, 'No autenticado — se requiere token JWT valido')
+  @ApiProblemResponse(
+    403,
+    'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
+  )
+  @ApiProblemResponse(404, 'Plan, sesion o ejercicio de sesion no encontrados')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
+  async updateSessionExercisePrescription(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+    @Param('sessionExerciseId', ParseUUIDPipe) sessionExerciseId: string,
+    @Body() dto: UpdateSessionExercisePrescriptionDto,
+  ): Promise<SessionExerciseResponseDto> {
+    return this.plansService.updateSessionExercisePrescription(
+      user.id,
+      id,
+      sessionId,
+      sessionExerciseId,
+      dto,
+    );
   }
 
   /**
@@ -565,7 +660,10 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede modificarlo',
   )
   @ApiProblemResponse(404, 'Plan, sesion o ejercicio de sesion no encontrados')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — la estructura ya es inmutable (RN-31)',
+  )
   async removeSessionExercise(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
@@ -589,6 +687,14 @@ export class PlansController {
    * estado actual no es Borrador; con PLAN_INCOMPLETE (422) si no cumple
    * RN-01 (CA-009-2). No usa PlanPublishedGuard — la transicion misma es el
    * objeto de la verificacion. findOwnedOrFail cubre CA-009-5.
+   *
+   * D-15 (EPICA-05): validatePlanCompleteness() (MISMO metodo ya existente,
+   * acumulativo) se extiende con una segunda pasada — ADEMAS de la
+   * estructura minima (RN-01 original), exige que CADA SessionExercise del
+   * arbol tenga "prescripcion significativa" (regimen de fuerza: sets+reps;
+   * regimen de resistencia: durationSeconds o distanceMeters). MISMO
+   * PLAN_INCOMPLETE (422) — es la misma regla de negocio extendida, no una
+   * nueva, listando cada ejercicio incompleto en missingRequirements.
    */
   @Post(':id/publish')
   @HttpCode(HttpStatus.OK)
@@ -598,8 +704,11 @@ export class PlansController {
       'Transiciona el plan de Borrador a Publicado. Rechaza con INVALID_STATE_TRANSITION ' +
       '(409) si el estado actual no es Borrador; con PLAN_INCOMPLETE (422) si el plan no ' +
       'cumple RN-01 (name + fechas + al menos una fase con una semana con una sesion con ' +
-      'un ejercicio — CA-009-2), listando explicitamente los requisitos faltantes. Emite ' +
-      'el evento plan.published. Solo el entrenador propietario puede publicar (CA-009-5).',
+      'un ejercicio — CA-009-2) O si algun SessionExercise del arbol no tiene prescripcion ' +
+      'significativa (D-15, EPICA-05: regimen de fuerza — sets Y reps; regimen de ' +
+      'resistencia — durationSeconds O distanceMeters), listando explicitamente los ' +
+      'requisitos faltantes por ejercicio, en el mismo checklist acumulativo de siempre. ' +
+      'Emite el evento plan.published. Solo el entrenador propietario puede publicar (CA-009-5).',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -612,10 +721,14 @@ export class PlansController {
     'No tiene acceso a este plan — solo el entrenador propietario puede publicarlo (CA-009-5)',
   )
   @ApiProblemResponse(404, 'Plan no encontrado')
-  @ApiProblemResponse(409, 'El plan no esta en Borrador — no puede publicarse desde su estado actual')
+  @ApiProblemResponse(
+    409,
+    'El plan no esta en Borrador — no puede publicarse desde su estado actual',
+  )
   @ApiProblemResponse(
     422,
-    'El plan no cumple los requisitos minimos de validez para publicarse (RN-01, CA-009-2)',
+    'El plan no cumple los requisitos minimos de validez para publicarse (RN-01, CA-009-2), ' +
+      'o al menos un ejercicio de sesion no tiene prescripcion significativa (D-15, EPICA-05)',
   )
   async publish(
     @CurrentUser() user: AuthUser,

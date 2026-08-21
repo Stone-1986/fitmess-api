@@ -1,10 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * DTO de respuesta para un ejercicio dentro de una sesion del plan.
  *
  * Usado en:
  * - POST /plans/:id/sessions/:sessionId/exercises (201) — respuesta directa
+ * - PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId (200) — respuesta directa (D-15, NUEVO)
  * - GET /plans/:id (200) — embebido en SessionDetailResponseDto.exercises
  *
  * name, description, muscleGroup y versionNumber corresponden a la
@@ -18,6 +19,13 @@ import { ApiProperty } from '@nestjs/swagger';
  * el cliente enlace al detalle del ejercicio) — el exerciseVersionId interno
  * (FK real persistida) no se expone, igual que ExerciseResponseDto no expone
  * un puntero crudo a version en vez de versionNumber.
+ *
+ * EXTENDIDO (D-15, EPICA-03 REABIERTA): gana los 5 campos de prescripcion
+ * (sets, reps, loadKg, durationSeconds, distanceMeters), TODOS nullable —
+ * reflejan fielmente si ya se cargaron o no (el entrenador puede haber
+ * agregado el ejercicio sin prescripcion, D-15 punto 1). La copia profunda
+ * de HU-023 (EPICA-05) los copia tal cual a InstanceSessionExerciseResponseDto
+ * (CA-023-9).
  *
  * NUNCA expone: exerciseVersionId (dato interno de relacion), sessionId
  * (redundante — el cliente ya lo conoce por el contexto en el que pidio o
@@ -39,7 +47,8 @@ export class SessionExerciseResponseDto {
   order: number;
 
   @ApiProperty({
-    description: 'UUID del ejercicio de la biblioteca global (Exercise) referenciado',
+    description:
+      'UUID del ejercicio de la biblioteca global (Exercise) referenciado',
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
     format: 'uuid',
   })
@@ -74,6 +83,54 @@ export class SessionExerciseResponseDto {
     example: 1,
   })
   versionNumber: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Series prescritas (D-15). null si el entrenador aun no la cargo — publish() la ' +
+      'exige junto con reps como parte del regimen de fuerza (D-15 punto 2a).',
+    example: 4,
+    type: Number,
+    nullable: true,
+  })
+  sets: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Repeticiones prescritas por serie (D-15). null si aun no se cargo.',
+    example: 10,
+    type: Number,
+    nullable: true,
+  })
+  reps: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Carga prescrita, en kilogramos (convencion, D-6). null si aun no se cargo o si el ' +
+      'ejercicio es de peso corporal (D-15 punto 2a).',
+    example: 80,
+    type: Number,
+    nullable: true,
+  })
+  loadKg: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Duracion prescrita, en segundos (D-15). null si aun no se cargo o si el ' +
+      'ejercicio usa distanceMeters en su lugar (regimen de resistencia, D-15 punto 2b).',
+    example: 1200,
+    type: Number,
+    nullable: true,
+  })
+  durationSeconds: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Distancia prescrita, en metros (convencion, D-6). null si aun no se cargo o si el ' +
+      'ejercicio usa durationSeconds en su lugar (regimen de resistencia, D-15 punto 2b).',
+    example: 5000,
+    type: Number,
+    nullable: true,
+  })
+  distanceMeters: number | null;
 
   @ApiProperty({
     description: 'Fecha en la que este ejercicio fue agregado a la sesion',

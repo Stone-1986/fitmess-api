@@ -1,237 +1,229 @@
 validacion_producto:
-  epica_id: "EPICA-04"
-  fecha: "2026-08-20"
+  epica_id: "EPICA-05"
+  fecha: "2026-08-21"
   historias_de_usuario:
-    - id: "HU-012"
+    - id: "HU-023"
       decision: "APROBADA"
       observaciones: >
-        Flujo de solicitud de inscripcion completo y verificable: cubre el camino feliz
-        (CA-012-1), el bloqueo de duplicados mientras exista una suscripcion Pendiente,
-        Aprobada o Activa (CA-012-2), el reintento permitido tras un Rechazo (CA-012-3),
-        el filtro por estado Publicado del plan (CA-012-4), la restriccion de rol
-        (CA-012-5) y la exigencia de autenticacion (CA-012-6). Los criterios son
-        verificables uno a uno y no hay contradicciones con RN-17, RN-18 ni con RN-27
-        heredada de EPICA-03. Los cuatro supuestos confirmados por el humano el
-        2026-08-20 quedan reflejados correctamente en las CA y en las notas de la HU;
-        no se reabren.
+        Los 7 CA originales cubren el flujo completo de forma verificable: creacion
+        automatica sin intervencion manual (CA-023-1), congelamiento de version de
+        ejercicio con el mismo criterio que RN-07 ya aplica en la plantilla (CA-023-2),
+        independencia entre instancias de distintos atletas (CA-023-4), aislamiento de
+        lectura por titularidad (CA-023-5), el gate de suscripcion Activa heredado de
+        EPICA-04/D-9 (CA-023-6) y autenticacion (CA-023-7). Verificado especificamente
+        que CA-023-3 fija solo la CANTIDAD de fases/semanas/sesiones, no el contenido de
+        cada sesion, y por eso no entra en conflicto con HU-018 (EPICA-06), donde el
+        entrenador modifica el CONTENIDO de una semana antes de que inicie.
 
-        Observacion no bloqueante (mejora de industria, fuera del alcance minimo de
-        esta HU): plataformas comparables (TrainingPeaks) expiran automaticamente una
-        solicitud de conexion coach-atleta no atendida (72 horas) para evitar que quede
-        en Pendiente indefinidamente y bloquee reintentos via CA-012-2. Esta epica no
-        define expiracion — es una decision de producto legitima para una iteracion
-        futura, no un defecto de esta HU. No genero condicion por esto: la mitigacion
-        natural ya existe (el atleta puede seguir viendo su solicitud Pendiente y el
-        entrenador recibe notificacion en CA-012-1).
+        CONDICION RESUELTA el 2026-08-21. `Read` de `outputs/epica_input.yaml` (linea
+        95): el texto incorporado de CA-023-8 es IDENTICO, palabra por palabra, al que
+        propuse. Sin desvirtuar. HU-023 pasa a APROBADA. Nota de limpieza no bloqueante:
+        la NOTA de la HU (linea 105, "el sistema no debe crear una segunda instancia...")
+        quedo duplicando en prosa lo que CA-023-8 ya dice como criterio formal; no
+        contradice nada, pero puede eliminarse en el proximo barrido para no repetir la
+        misma regla en dos formatos.
+
+        NUEVO CA-023-9 (prescripcion en la copia profunda) — validado. Gherkin correcto
+        (Dado/Cuando/Entonces/Y), verificable por QA (comparar los campos de prescripcion
+        de la instancia recien creada contra los de la plantilla en el mismo instante) y
+        consistente con el patron ya establecido por CA-023-1/CA-023-2: la instancia
+        copia estructura Y contenido de la plantilla en el momento de la creacion. No
+        contradice CA-023-3 (que solo protege CANTIDAD de fases/semanas/sesiones, nunca
+        dijo que el contenido de cada ejercicio fuera inmutable) ni la restriccion
+        conocida de la epica que deja el contenido mutable para EPICA-06 (RN-32) --
+        CA-023-9 es exactamente el mecanismo que le da a RN-32 un valor previo que
+        cambiar, sosteniendo en vez de socavar esa justificacion. Practica de industria
+        confirmada (ver fuentes_consultadas): comparar "planificado vs. ejecutado" campo
+        a campo (series, repeticiones, carga) es un patron estandar en plataformas de
+        entrenamiento estructurado.
+
+        HUECO no cubierto por CA-023-9, no bloqueante dado que el proyecto no tiene
+        usuarios en produccion: la reapertura de EPICA-03 hara la prescripcion
+        obligatoria para PUBLICAR de aqui en adelante, pero no dice que pasa con planes
+        que YA estan en estado Publicado sin prescripcion (publicados bajo la regla
+        vieja, antes de esta epica). Si un atleta se suscribe a uno de esos planes
+        heredados, CA-023-9 copiaria una prescripcion vacia/nula a la instancia sin que
+        ningun CA lo contemple, y CA-015-9 no tendria contra que comparar. No genero un
+        CA nuevo para esto -- es una decision de migracion/backfill de datos, no una
+        regla de negocio que se le pida al usuario -- pero lo dejo señalado para que el
+        DBA/Arquitecto decida como tratar los planes ya Publicados al reabrir EPICA-03
+        (backfill con valores por defecto, o revertirlos a Borrador).
       guardarrails_aplicables:
         - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. CA-012-5 y CA-012-6 cubren control de acceso por rol y
-            autenticacion. El registro de auditoria de recursos consultados ya es
-            transversal (commit bfd541c, "registrar los recursos consultados en la
-            auditoria") y aplica automaticamente sin requerir CA adicional en esta HU.
+            Ninguna. CA-023-5, CA-023-6, CA-023-7 y ahora CA-023-8 cubren acceso no
+            autorizado e integridad de datos (no duplicacion).
         - ley: "Ley 1581/2012 + Circular SIC 2024"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. Esta HU no recolecta datos personales nuevos: relaciona un
-            atleta ya registrado (con su Habeas Data aceptado en EPICA-01/HU-003) con
-            un plan Publicado. No se requiere un nuevo aviso de privacidad ni
-            consentimiento adicional en esta etapa.
+            Ninguna, incluyendo CA-023-9: series, repeticiones, carga, duracion y
+            distancia PRESCRITAS no son dato sensible de salud (a diferencia de dolor
+            muscular/motivacion en HU-016) -- son la meta de entrenamiento que el
+            entrenador ya definio en su plan, visible para el propio atleta.
         - ley: "Ley 527/1999"
-          aplica: true
-          cumple: true
+          aplica: false
+          cumple: "pendiente"
           accion_requerida: >
-            Ninguna. La restriccion_conocida de la epica ("las suscripciones no se
-            eliminan bajo ninguna circunstancia, incluidas las Rechazadas") extiende a
-            esta HU el mismo criterio de inmutabilidad historica que RN-13 ya aplica a
-            planes y resultados, dando integridad y disponibilidad al registro.
-    - id: "HU-013"
+            No aplica: HU-023 no genera ni exige aceptacion de un documento legal.
+    - id: "HU-015"
       decision: "APROBADA"
       observaciones: >
-        Cubre aprobacion (CA-013-1), rechazo (CA-013-2), listado de pendientes con
-        contexto suficiente para decidir (CA-013-3), validacion de propiedad del plan
-        (CA-013-4), restriccion de rol (CA-013-5), idempotencia frente a una decision ya
-        tomada (CA-013-6) y autenticacion (CA-013-7). RN-18 y RN-20 quedan correctamente
-        secuenciadas: la aprobacion del entrenador es necesaria pero no suficiente — el
-        estado Aprobada es explicitamente intermedio hasta que HU-014 produzca Activa.
-        La nota de la HU que resuelve el gap de hasSubscribers(planId) dejado por
-        EPICA-03 (CA-009-7) esta correctamente delimitada: "suscrito" = Aprobada o
-        Activa, Pendiente no cuenta, coherente con que el entrenador aun puede rechazar
-        una Pendiente en el mismo momento en que intenta despublicar.
+        Los 8 CA originales siguen verificables y coherentes: registro (CA-015-1),
+        edicion libre mientras la semana este abierta sin limite de tiempo (CA-015-2,
+        CA-015-3), congelamiento inmediato al cerrar por completitud (CA-015-4,
+        CA-015-5), titularidad (CA-015-6), gate de suscripcion Activa (CA-015-7) y
+        autenticacion (CA-015-8). La consecuencia combinada RN-08-derogada + PEN-01
+        (semana que nunca cierra queda editable indefinidamente) sigue sin contradiccion
+        en ningun CA, y el riesgo de reescribir historia ya vista por el entrenador sigue
+        cubierto por el AuditInterceptor transversal, sin necesidad de un CA nuevo.
 
-        Observacion no bloqueante, ligada a la pregunta que se eleva en HU-014: ni esta
-        HU ni la definicion de archive()/la transicion automatica a Finalizado (por
-        endDate) verifican estado de suscripciones antes de permitir el cambio de
-        estado del plan — a diferencia de unpublish(), que si bloquea con
-        PLAN_HAS_SUBSCRIBERS. Esto significa que un entrenador puede aprobar una
-        solicitud (CA-013-1) sobre un plan que luego se archiva o finaliza antes de que
-        el atleta alcance a aceptar el consentimiento de HU-014. Ver la pregunta
-        formulada en HU-014, que es donde el efecto se materializa (una suscripcion
-        podria llegar a Activa sobre un plan ya no Publicado).
+        NUEVO CA-015-9 (campos separados y comparables contra la prescripcion) --
+        validado. Gherkin correcto, verificable por QA (existencia de columnas tipadas
+        por ejercicio, no un Json opaco) y consistente con CA-015-1: especifica lo que
+        antes decia "los resultados de cada ejercicio" de forma generica. No contradice
+        ningun CA existente. Confirmo tambien que excluir RPE de estos campos, tal como
+        decidio el humano, logra su proposito: ninguno de los 5 campos (series,
+        repeticiones, carga, duracion, distancia) es dato sensible de salud bajo Ley
+        1581/2012, asi que HU-015 sigue sin necesitar el tratamiento reforzado que si
+        aplica a HU-016.
+
+        Observacion menor no bloqueante, no introducida por CA-015-9 sino preexistente:
+        ni el glosario ni ningun CA definen si "completar una sesion" (la condicion que
+        dispara CA-017-1) exige que TODOS los campos comparables de TODOS los ejercicios
+        de la sesion tengan valor, o si basta con que el atleta marque la sesion como
+        registrada aunque deje algun ejercicio sin datos. Con columnas tipadas y
+        comparables uno a uno esta ambiguedad se vuelve mas facil de probar por QA que
+        antes (con Json opaco no habria como verificarla), pero sigue sin resolverse en
+        el texto de las HU. No genero condicion porque no fue parte de lo que se me pidio
+        validar en este hallazgo y no es un vacio nuevo -- lo señalo para que quien
+        redacte el detalle tecnico de "sesion completada" lo tenga presente.
       guardarrails_aplicables:
         - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. CA-013-4 (propiedad del plan), CA-013-5 (rol) y CA-013-7
-            (autenticacion) cubren el acceso no autorizado. Auditoria heredada del
-            interceptor transversal ya existente.
+            Ninguna. CA-015-6, CA-015-7 y CA-015-8 cubren el acceso no autorizado.
         - ley: "Ley 1581/2012 + Circular SIC 2024"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. El nombre del atleta que ve el entrenador en CA-013-3 es un dato
-            ya compartido dentro de una relacion coach-atleta preexistente y consentida
-            (RN-17, formalizada desde EPICA-01 via CoachRequest). No es una nueva
-            recoleccion ni un nuevo tratamiento de datos personales.
+            Ninguna. Confirmado con CA-015-9: los 5 campos de resultado no son dato
+            sensible de salud. Se mantiene la observacion ya registrada antes: si en el
+            futuro se agrega RPE por ejercicio, debe recibir el mismo tratamiento que
+            dolor muscular/motivacion en HU-016.
         - ley: "Ley 527/1999"
-          aplica: true
-          cumple: true
-          accion_requerida: >
-            Ninguna. La decision del entrenador (aprobar/rechazar) queda registrada de
-            forma inmutable como parte del historial de la suscripcion, igual criterio
-            que HU-012.
-    - id: "HU-014"
+          aplica: false
+          cumple: "pendiente"
+          accion_requerida: "No aplica."
+    - id: "HU-016"
       decision: "APROBADA"
       observaciones: >
-        Es la HU con mayor peso legal de la epica y esta bien resuelta en su nucleo: el
-        consentimiento informado deportivo reutiliza exactamente el mecanismo de
-        trazabilidad legal ya probado en EPICA-01 (LegalAcceptance append-only, con
-        documentType = SPORT_CONSENT, documentVersion y momento de aceptacion), y las CA
-        cubren el flujo completo — visibilidad del consentimiento pendiente tras la
-        aprobacion (CA-014-1), la transicion a Activa con registro completo
-        (CA-014-2), independencia por cada par atleta-plan (CA-014-4), el disclaimer
-        obligatorio de IA (CA-014-5), la restriccion de titularidad (CA-014-6) y la
-        exigencia de autenticacion (CA-014-7). El cuarto supuesto confirmado por el
-        humano (no existe "rechazar" el consentimiento, solo aceptar o dejarlo
-        pendiente indefinidamente) queda correctamente reflejado y no se reabre.
+        Las dos condiciones que dejaba abiertas quedan RESUELTAS el 2026-08-21,
+        verificadas con `Read` explicito de `outputs/epica_input.yaml` completo (171
+        lineas) despues de la incorporacion. HU-016 pasa de APROBADA_CON_CONDICIONES a
+        APROBADA, sin reservas.
 
-        CONDICION RESUELTA el 2026-08-20 por decision del humano — la HU pasa a
-        APROBADA sin reservas. Se agrego CA-014-8 a HU-014 en epica_input.yaml:
-        aceptar el consentimiento se rechaza si el plan ya no esta vigente, y la
-        suscripcion permanece en Aprobada sin transicionar nunca a Activa. Sin estados
-        nuevos en SubscriptionStatus. Ademas se decidio explicitamente que archive() NO
-        recibe un gate de suscriptores: no es simetrico con unpublish(), porque
-        unpublish() devuelve el plan a Borrador EDITABLE (mutar el contenido bajo
-        atletas ya inscritos) mientras que archive() es terminal y no altera el
-        contenido; queda como decision documentada, no como gap.
+        (1) CA-016-8 (consentimiento especifico de datos sensibles de salud, linea 144):
+        texto identico al propuesto. Sigue siendo correcto bajo la rama (a) ya decidida
+        (HEALTH_DATA_CONSENT se captura junto con SPORT_CONSENT en la misma transaccion
+        de acceptConsent(), EPICA-04 reabierta): en el camino feliz su precondicion no se
+        cumple porque el consentimiento ya llego antes por HU-014/HU-023, y el CA queda
+        como invariante de integridad -- mismo rol que CA-023-6 -- no como mecanismo
+        primario. Sigue en pie mi recomendacion, ya trasladada y anotada por el equipo,
+        de un CA-014-9 en el artefacto de EPICA-04 para el mecanismo primario real; no
+        bloquea esta HU.
 
-        Precision del orquestador sobre el analisis original, verificada contra el
-        codigo: la transicion a Finalizado no es "un metodo que no verifica
-        suscripciones" sino que NO ES UNA TRANSICION QUE NADIE INVOQUE —
-        computeEffectiveStatus() (plans.service.ts:1027-1039) la deriva de
-        endDate < now(), de modo que el plan se finaliza por el paso del tiempo y no
-        existe punto de codigo donde insertar una verificacion. Por eso CA-014-8
-        valida en el momento de ACEPTAR, el unico con un actor y una peticion reales.
-        Corolario para la implementacion: la condicion de vigencia no puede ser
-        `status !== PUBLISHED`, porque un plan con la columna en PUBLISHED y endDate
-        pasada esta efectivamente Finalizado — justo el caso que motiva el CA.
+        (2) CA-016-9 (rango 1-10, linea 145) y el supuesto de escala (linea 60):
+        incorporados, validados como cualquier otro CA. Redaccion Gherkin correcta
+        (Dado/Cuando/Entonces/Y). Verificable por QA: rango cerrado [1,10], entero, sobre
+        dos campos concretos (SUP-05 sigue cerrado, sin tercer indicador). No contradice
+        CA-016-1 (que sigue siendo el camino feliz; CA-016-9 es su contraparte de
+        validacion, mismo patron que CA-015-1 con sus CAs de rechazo). El texto
+        incorporado NO es identico al que propuse, y la diferencia es una mejora, no un
+        desvio: yo habia escrito "no se guarda ningun valor para ese indicador" (dejando
+        abierta la duda de si el otro indicador, el que si esta en rango, se guardaria
+        suelto); el texto final dice "no se guarda ningun registro de sensaciones de esa
+        semana" -- rechazo atomico de la operacion completa. Es la lectura correcta:
+        CA-016-1 describe un unico acto de registro con AMBOS niveles a la vez, asi que
+        la version incorporada evita el estado intermedio raro de una semana con un solo
+        indicador guardado y el otro pendiente. La confirmo sin reservas.
 
-        Alcance real del vacio, tambien verificado: el catalogo filtra
-        `status=PUBLISHED AND endDate>=now()` (plans.service.ts:847 y :913), asi que un
-        atleta no puede ver ni solicitar un plan no vigente. HU-012 nunca estuvo
-        expuesta; el vacio afectaba solo a suscripciones ya creadas en Pendiente o
-        Aprobada.
+        Nota de limpieza no bloqueante, sin resolver todavia: la NOTA "[PENDIENTE —
+        confirmar con legal/producto]" de la linea 153 (sobre si RN-19 basta para la
+        captura recurrente) sigue en el archivo tal cual estaba antes de que CA-016-8 y
+        el supuesto de la linea 59 resolvieran exactamente esa pregunta. Es el mismo tipo
+        de artefacto obsoleto que dejo la nota duplicada de HU-023 (linea 105): no
+        contradice el CA vigente ni bloquea nada -- CA-016-8 manda -- pero alguien que
+        lea solo esa nota sin ver el supuesto de la linea 59 podria creer que la pregunta
+        legal sigue abierta. Recomiendo limpiarla en el mismo barrido que la nota de
+        HU-023.
 
-        Registro de la condicion original: la epica no definia que ocurre si
-        el plan subyacente cambia de estado (a Finalizado por vencimiento de endDate, o
-        a Archivado por el entrenador) entre el momento en que la suscripcion queda
-        Aprobada (HU-013) y el momento en que el atleta acepta el consentimiento
-        (HU-014). A diferencia de unpublish() (que si bloquea con PLAN_HAS_SUBSCRIBERS
-        si hay suscriptores Aprobados/Activos, verificado en
-        src/modules/plans/plans.service.ts:732-751), archive() y la transicion
-        automatica a Finalizado (por endDate, plans.service.ts:1024-1039) no verifican
-        suscripciones existentes. Esto abre la posibilidad de que una suscripcion
-        llegue a estado Activa (CA-014-2) sobre un plan que ya no esta Publicado, lo
-        cual no contradice literalmente ningun CA de esta HU (ninguno condiciona la
-        aceptacion al estado del plan) pero si tensiona el criterio de exito declarado
-        a nivel de epica ("ningun atleta puede iniciar sesiones de un plan sin haber
-        completado las tres etapas del flujo") con el objetivo implicito de que esas
-        tres etapas ocurran sobre un plan vigente. No es un vacio legal — es un vacio
-        funcional que la epica no contemplo. Se eleva como pregunta abierta al
-        Arquitecto/humano antes de cerrar esta HU sin condiciones; no bloquea el resto
-        de la epica ni entra en conflicto con las decisiones ya tomadas por el
-        Arquitecto. (Cerrada — ver el bloque CONDICION RESUELTA al inicio de esta
-        observacion.)
+        Confirmado de nuevo, sin cambios: CA-016-6 (lectura restringida a atleta y
+        entrenador del plan) sigue siendo exactamente el alcance que RI-03 y EPICA-07
+        van a necesitar.
       guardarrails_aplicables:
         - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. CA-014-6 (solo el titular de la suscripcion acepta su propio
-            consentimiento) y CA-014-7 (autenticacion) cubren el acceso no autorizado.
+            Ninguna. CA-016-4, CA-016-5, CA-016-6 y CA-016-7 cubren el acceso no
+            autorizado.
         - ley: "Ley 1581/2012 + Circular SIC 2024"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna. El consentimiento informado deportivo no es una nueva recoleccion
-            de datos personales sino un registro de aceptacion sobre un documento
-            versionado a nivel de plataforma (tercer supuesto confirmado por el
-            humano). La finalidad (dejar constancia de comprension de riesgos del
-            entrenamiento) esta declarada explicitamente en el "para" de la HU.
+            Ninguna. CA-016-8 (consentimiento especifico) y CA-016-9 (rango valido de los
+            dos indicadores) cierran las dos condiciones. Unica accion pendiente es de
+            limpieza documental, no de cumplimiento: retirar la nota obsoleta de la linea
+            153 (ver observaciones).
         - ley: "Ley 527/1999"
           aplica: true
           cumple: true
           accion_requerida: >
-            Ninguna respecto del mecanismo: CA-014-2 exige registrar momento exacto,
-            version del documento y plan — mismo patron append-only usado y validado en
-            EPICA-01 para Habeas Data y Terminos, que garantiza autenticidad,
-            integridad y disponibilidad del registro. Verificado contra el schema real
-            (prisma/schema.prisma:109-123): LegalAcceptance ya tiene documentVersion,
-            ip, userAgent y acceptedAt no nulables, y DocumentType ya incluye
-            SPORT_CONSENT.
-        - ley: "CA-014-5 — disclaimer de IA (buena practica de industria, no una ley especifica)"
+            Ninguna adicional sobre el mecanismo: la rama (a) reutiliza el mismo patron
+            append-only ya validado (documentVersion, momento exacto, usuario
+            autenticado) dentro de la misma transaccion que SPORT_CONSENT.
+      fuentes_consultadas:
+        - url: "https://help.trainingpeaks.com/hc/en-us/articles/115006049708-How-can-I-compare-my-completed-workout-to-my-planned-structured-workout"
+          resumen: >
+            TrainingPeaks compara "planificado vs. completado" campo a campo (sets,
+            reps, carga, duracion, distancia), con codigo de color por cumplimiento.
+            Confirma que el patron de CA-023-9/CA-015-9 (misma forma de datos en
+            prescripcion y resultado, comparables uno a uno) es estandar de industria en
+            plataformas de entrenamiento estructurado, no una decision aislada de este
+            proyecto.
+    - id: "HU-017"
+      decision: "APROBADA"
+      observaciones: >
+        Sin cambios desde la revision anterior: los 5 CA son verificables y consistentes
+        con RN-30 y con la resolucion explicita de PEN-01. Ningun CA nuevo de esta ronda
+        (CA-023-8/9, CA-015-9, CA-016-8/9) la afecta.
+      guardarrails_aplicables:
+        - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
-          accion_requerida: >
-            Ninguna. La investigacion de mercado confirma que el disclaimer de que las
-            recomendaciones de IA no sustituyen asesoria medica profesional es
-            practica estandar recomendada para apps de fitness/salud que usan IA
-            (ver fuentes consultadas). CA-014-5 lo exige explicitamente como parte del
-            contenido visible del consentimiento, no como texto oculto o en letra
-            pequena — consistente con la mejor practica encontrada.
-  fuentes_consultadas:
-    - url: "https://www.trainingpeaks.com/pricing/for-coaches/"
-      resumen: >
-        Plataformas de coaching deportivo comparables (TrainingPeaks) modelan la
-        conexion entrenador-atleta como una solicitud que el entrenador debe aceptar, y
-        la expiran automaticamente (72 horas) si no se atiende. Confirma que el patron
-        solicitud->aprobacion de HU-012/HU-013 es estandar de industria; la ausencia de
-        expiracion en esta epica se documenta como observacion no bloqueante en HU-012.
-    - url: "https://ensorahealth.com/blog/how-to-handle-informed-consent-for-ai/"
-      resumen: >
-        Guias de consentimiento informado para IA en salud recomiendan declarar
-        explicitamente el alcance y las limitaciones de las recomendaciones generadas
-        por IA como parte del consentimiento, no como aviso separado. Respalda CA-014-5
-        (disclaimer de IA integrado al consentimiento informado deportivo, no aparte).
-    - url: "https://aistandardofcare.com/industries/fitness-wellness/"
-      resumen: >
-        Estandares de la industria de fitness/wellness con IA recomiendan disclosures
-        explicitos de limitaciones y evitar presentar la IA como sustituto de
-        asesoria profesional — alineado con el tercer y quinto criterio de aceptacion
-        de HU-014.
+          accion_requerida: "Ninguna. CA-017-4 y CA-017-5 cubren el acceso no autorizado."
+        - ley: "Ley 1581/2012 + Circular SIC 2024"
+          aplica: true
+          cumple: true
+          accion_requerida: "Ninguna. El estado de cierre no es en si mismo un dato sensible."
+        - ley: "Ley 527/1999"
+          aplica: false
+          cumple: "pendiente"
+          accion_requerida: "No aplica."
   conflictos_con_arquitecto: []
-  # Estuvo en true por el vacio funcional de HU-014 (plan que deja de estar vigente
-  # con una suscripcion Aprobada esperando consentimiento). Resuelto por el humano el
-  # 2026-08-20 con CA-014-8; ver la observacion de HU-014. Ninguna HU queda con
-  # condiciones abiertas.
   escalamiento_requerido: false
   motivo_escalamiento: >
-    No es un conflicto con el Arquitecto (no hay contradiccion entre mi validacion y un
-    plan tecnico ya emitido). Es una pregunta funcional abierta que no estaba entre los
-    cuatro supuestos confirmados por el humano ni entre los dos puntos PENDIENTE
-    marcados como decision del Arquitecto/DBA, y que condiciona la aprobacion plena de
-    HU-014: ¿que debe ocurrir si el plan subyacente pasa a Finalizado (automatico, por
-    vencimiento de endDate) o es Archivado (accion del entrenador) mientras una
-    suscripcion esta en estado Aprobada esperando el consentimiento de HU-014, o
-    inclusive despues de que el atleta ya lo acepto? Opciones a decidir: (a) bloquear la
-    aceptacion del consentimiento si el plan ya no esta Publicado, agregando un CA
-    nuevo a HU-014; (b) permitir la aceptacion igual y dejar que EPICA-05 decida si una
-    suscripcion Activa sobre un plan no Publicado puede iniciar sesiones (mismo patron
-    de gap declarado que hasSubscribers en EPICA-03); (c) alguna otra regla que el
-    humano prefiera. Mientras no se resuelva, HU-014 queda APROBADA_CON_CONDICIONES, no
-    RECHAZADA, porque el nucleo legal y funcional de la HU esta correcto y el gap es
-    acotado a un edge case de transicion de estados, no al flujo principal.
+    Las cuatro HU de la epica quedan APROBADAS sin condiciones. Las dos condiciones de
+    HU-016 (CA-016-8 consentimiento especifico, CA-016-9 rango 1-10) se verificaron
+    incorporadas al `epica_input.yaml` con `Read` explicito del archivo completo, y la
+    unica diferencia frente a lo que propuse (CA-016-9 con rechazo atomico de la semana
+    en vez de solo el indicador invalido) es una mejora que confirmo, no un desvio. Sin
+    conflicto con el Arquitecto y sin preguntas abiertas. Quedan dos items de limpieza
+    documental no bloqueantes para el proximo barrido (notas obsoletas en HU-023 linea
+    105 y HU-016 linea 153) y el hueco de migracion de planes ya Publicados sin
+    prescripcion, ya trasladado al DBA/Arquitecto por el equipo -- ninguno condiciona la
+    aprobacion de esta epica.
