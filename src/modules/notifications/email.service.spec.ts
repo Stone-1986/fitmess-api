@@ -164,6 +164,212 @@ describe('EmailService', () => {
     });
   });
 
+  // ── sendSubscriptionRequested() (EPICA-04, HU-012/CA-012-1) ───────────────────
+
+  describe('sendSubscriptionRequested()', () => {
+    const TO = 'coach@fitmess.co';
+    const ATHLETE_NAME = 'Maria Fernanda Lopez';
+    const PLAN_NAME = 'Fuerza e hipertrofia';
+
+    it('envia el correo al entrenador con el nombre del atleta y del plan en el cuerpo', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionRequested(TO, ATHLETE_NAME, PLAN_NAME);
+
+      expect(resendSendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: TO,
+          subject: expect.stringContaining('Nueva solicitud') as unknown,
+          html: expect.stringContaining(ATHLETE_NAME) as unknown,
+        }),
+      );
+      const callArg = resendSendSpy.mock.calls[0] as [{ html: string }];
+      expect(callArg[0].html).toContain(PLAN_NAME);
+    });
+
+    it('NO lanza excepcion cuando Resend retorna error (captura internamente)', async () => {
+      resendSendSpy.mockResolvedValue({
+        error: { name: 'validation_error', message: 'Invalid email' },
+      });
+
+      await expect(
+        service.sendSubscriptionRequested(TO, ATHLETE_NAME, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('NO lanza excepcion cuando Resend lanza una excepcion de red', async () => {
+      resendSendSpy.mockRejectedValue(new Error('Network timeout'));
+
+      await expect(
+        service.sendSubscriptionRequested(TO, ATHLETE_NAME, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('el log SOLO registra el dominio del destinatario — nunca el nombre del atleta (Ley 1273/2009)', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionRequested(TO, ATHLETE_NAME, PLAN_NAME);
+
+      const allInfoArgs = JSON.stringify(loggerMock.info.mock.calls);
+      expect(allInfoArgs).toContain('fitmess.co');
+      expect(allInfoArgs).not.toContain(ATHLETE_NAME);
+      expect(allInfoArgs).not.toContain(TO);
+    });
+
+    it('sin RESEND_API_KEY configurada, no intenta enviar y loggea solo el dominio', async () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const configSinClave = {
+        get: (key: string, defaultValue?: string): string => {
+          const config: Record<string, string> = {
+            EMAIL_FROM: 'noreply@fitmess.co',
+            APP_BASE_URL: 'http://localhost:3000',
+          };
+          return config[key] ?? defaultValue ?? '';
+        },
+      } as unknown as ConfigService;
+      const sinClave = new EmailService(configSinClave, logger as never);
+
+      await expect(
+        sinClave.sendSubscriptionRequested(TO, ATHLETE_NAME, PLAN_NAME),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  // ── sendSubscriptionApproved() (EPICA-04, HU-013/CA-013-1) ─────────────────────
+
+  describe('sendSubscriptionApproved()', () => {
+    const TO = 'atleta@fitmess.co';
+    const PLAN_NAME = 'Fuerza e hipertrofia';
+
+    it('envia el correo al atleta indicando que debe aceptar el consentimiento informado', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionApproved(TO, PLAN_NAME);
+
+      expect(resendSendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: TO,
+          subject: expect.stringContaining('aprobada') as unknown,
+          html: expect.stringContaining('consentimiento informado') as unknown,
+        }),
+      );
+    });
+
+    it('NO lanza excepcion cuando Resend retorna error', async () => {
+      resendSendSpy.mockResolvedValue({
+        error: { name: 'rate_limit', message: 'Too many requests' },
+      });
+
+      await expect(
+        service.sendSubscriptionApproved(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('NO lanza excepcion cuando Resend lanza una excepcion de red', async () => {
+      resendSendSpy.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(
+        service.sendSubscriptionApproved(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('el log SOLO registra el dominio del destinatario — nunca el correo completo (Ley 1273/2009)', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionApproved(TO, PLAN_NAME);
+
+      const allInfoArgs = JSON.stringify(loggerMock.info.mock.calls);
+      expect(allInfoArgs).toContain('fitmess.co');
+      expect(allInfoArgs).not.toContain(TO);
+    });
+
+    it('sin RESEND_API_KEY configurada, no intenta enviar y retorna sin lanzar', async () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const configSinClave = {
+        get: (key: string, defaultValue?: string): string => {
+          const config: Record<string, string> = {
+            EMAIL_FROM: 'noreply@fitmess.co',
+            APP_BASE_URL: 'http://localhost:3000',
+          };
+          return config[key] ?? defaultValue ?? '';
+        },
+      } as unknown as ConfigService;
+      const sinClave = new EmailService(configSinClave, logger as never);
+
+      await expect(
+        sinClave.sendSubscriptionApproved(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  // ── sendSubscriptionRejected() (EPICA-04, HU-013/CA-013-2) ──────────────────────
+
+  describe('sendSubscriptionRejected()', () => {
+    const TO = 'atleta@fitmess.co';
+    const PLAN_NAME = 'Fuerza e hipertrofia';
+
+    it('envia el correo al atleta indicando que puede volver a solicitar inscripcion', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionRejected(TO, PLAN_NAME);
+
+      expect(resendSendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: TO,
+          subject: expect.stringContaining('rechazada') as unknown,
+          html: expect.stringContaining('volver a solicitar') as unknown,
+        }),
+      );
+    });
+
+    it('NO lanza excepcion cuando Resend retorna error', async () => {
+      resendSendSpy.mockResolvedValue({
+        error: { name: 'validation_error', message: 'Invalid email' },
+      });
+
+      await expect(
+        service.sendSubscriptionRejected(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('NO lanza excepcion cuando Resend lanza una excepcion de red', async () => {
+      resendSendSpy.mockRejectedValue(new Error('Network timeout'));
+
+      await expect(
+        service.sendSubscriptionRejected(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+
+    it('el log SOLO registra el dominio del destinatario — nunca el correo completo (Ley 1273/2009)', async () => {
+      resendSendSpy.mockResolvedValue({ error: null });
+
+      await service.sendSubscriptionRejected(TO, PLAN_NAME);
+
+      const allInfoArgs = JSON.stringify(loggerMock.info.mock.calls);
+      expect(allInfoArgs).toContain('fitmess.co');
+      expect(allInfoArgs).not.toContain(TO);
+    });
+
+    it('sin RESEND_API_KEY configurada, no intenta enviar y retorna sin lanzar', async () => {
+      const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+      const configSinClave = {
+        get: (key: string, defaultValue?: string): string => {
+          const config: Record<string, string> = {
+            EMAIL_FROM: 'noreply@fitmess.co',
+            APP_BASE_URL: 'http://localhost:3000',
+          };
+          return config[key] ?? defaultValue ?? '';
+        },
+      } as unknown as ConfigService;
+      const sinClave = new EmailService(configSinClave, logger as never);
+
+      await expect(
+        sinClave.sendSubscriptionRejected(TO, PLAN_NAME),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   // ── Sin RESEND_API_KEY ───────────────────────────────────────────────────────
   //
   // Es el estado real de los entornos de desarrollo y de CI: el .env no trae la

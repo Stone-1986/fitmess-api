@@ -56,6 +56,18 @@ export const BusinessError = {
     httpStatus: HttpStatus.CONFLICT, // 409 — conflicto de estado, no de permisos
   },
 
+  // EPICA-04/D-6: titulo generico y estable, reutilizado en dos endpoints
+  // de subscriptions con "detail" distinto por ocurrencia (D-10) — POST
+  // /subscriptions (CA-012-4) y POST /subscriptions/:id/accept-consent
+  // (CA-014-8). El recurso mutado en ambos casos es Subscription, no Plan
+  // (el plan es solo una precondicion referenciada) — por eso no reutiliza
+  // INVALID_STATE_TRANSITION.
+  PLAN_NOT_PUBLISHED: {
+    code: 'PLAN_NOT_PUBLISHED',
+    title: 'El plan no esta vigente',
+    httpStatus: HttpStatus.CONFLICT, // 409 — conflicto de estado del plan referenciado
+  },
+
   // ── Ejercicios ────────────────────────────────────────────────────
   EXERCISE_IN_USE: {
     code: 'EXERCISE_IN_USE',

@@ -7,6 +7,7 @@ import { TechnicalException } from '../common/exceptions/technical.exception.js'
 import {
   PlanStatus,
   CoachRequestStatus,
+  SubscriptionStatus,
 } from '../../../generated/prisma/index.js';
 
 /**
@@ -51,6 +52,11 @@ const mockPrisma = {
   },
   exercise: {
     findUnique: vi.fn(),
+  },
+  // EPICA-04: hasSubscribers(planId) dejo de ser un stub — consulta
+  // Subscription.count() real (plans.service.ts:1081-1091).
+  subscription: {
+    count: vi.fn(),
   },
   $transaction: vi.fn((arg: unknown) => {
     if (typeof arg === 'function') {
@@ -1218,6 +1224,7 @@ describe('PlansService', () => {
       mockPrisma.plan.findUnique.mockResolvedValue(
         buildPlan({ status: PlanStatus.PUBLISHED }),
       );
+      mockPrisma.subscription.count.mockResolvedValue(0);
       mockPrisma.plan.update.mockResolvedValue(
         buildPlan({ status: PlanStatus.DRAFT }),
       );
@@ -1231,31 +1238,50 @@ describe('PlansService', () => {
       expect(result.status).toBe(PlanStatus.DRAFT);
     });
 
+    it('lanza PLAN_HAS_SUBSCRIBERS (CA-009-7) cuando hay al menos un suscriptor Aprobado o Activo — hasSubscribers() ya NO es un stub (EPICA-04)', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(
+        buildPlan({ status: PlanStatus.PUBLISHED }),
+      );
+      mockPrisma.subscription.count.mockResolvedValue(1);
+
+      await expect(service.unpublish(COACH_ID, PLAN_ID)).rejects.toMatchObject({
+        errorEntry: BusinessError.PLAN_HAS_SUBSCRIBERS,
+      });
+      expect(mockPrisma.plan.update).not.toHaveBeenCalled();
+    });
+
     it(
-      'lanza PLAN_HAS_SUBSCRIBERS (CA-009-7) cuando hasSubscribers() retorna true — ' +
-        'gap declarado: rama NO verificable e2e en esta epica, hasSubscribers es un stub fijo en false',
+      'hasSubscribers(planId) consulta Subscription con status IN [APPROVED, ACTIVE] ' +
+        'y excluye PENDING (cierra el gap declarado de CA-009-7 de EPICA-03)',
       async () => {
         mockPrisma.plan.findUnique.mockResolvedValue(
           buildPlan({ status: PlanStatus.PUBLISHED }),
         );
-        vi.spyOn(
-          service as unknown as { hasSubscribers: () => Promise<boolean> },
-          'hasSubscribers',
-        ).mockResolvedValue(true);
+        mockPrisma.subscription.count.mockResolvedValue(0);
+        mockPrisma.plan.update.mockResolvedValue(
+          buildPlan({ status: PlanStatus.DRAFT }),
+        );
 
-        await expect(
-          service.unpublish(COACH_ID, PLAN_ID),
-        ).rejects.toMatchObject({
-          errorEntry: BusinessError.PLAN_HAS_SUBSCRIBERS,
+        await service.unpublish(COACH_ID, PLAN_ID);
+
+        expect(mockPrisma.subscription.count).toHaveBeenCalledWith({
+          where: {
+            planId: PLAN_ID,
+            status: {
+              in: [SubscriptionStatus.APPROVED, SubscriptionStatus.ACTIVE],
+            },
+          },
         });
-        expect(mockPrisma.plan.update).not.toHaveBeenCalled();
       },
     );
 
-    it('procede cuando hasSubscribers() retorna false (comportamiento real del stub hoy)', async () => {
+    it('un plan con solo suscripciones Pendientes SI se puede despublicar (Pendiente no cuenta como "suscrito")', async () => {
       mockPrisma.plan.findUnique.mockResolvedValue(
         buildPlan({ status: PlanStatus.PUBLISHED }),
       );
+      // El mock replica el filtro real: count() sobre status IN [APPROVED,
+      // ACTIVE] retorna 0 aunque existan suscripciones Pendientes en la DB.
+      mockPrisma.subscription.count.mockResolvedValue(0);
       mockPrisma.plan.update.mockResolvedValue(
         buildPlan({ status: PlanStatus.DRAFT }),
       );
@@ -1287,6 +1313,7 @@ describe('PlansService', () => {
       mockPrisma.plan.findUnique.mockResolvedValue(
         buildPlan({ status: PlanStatus.PUBLISHED }),
       );
+      mockPrisma.subscription.count.mockResolvedValue(0);
       mockPrisma.plan.update.mockRejectedValue(new Error('DB caida'));
 
       await expect(service.unpublish(COACH_ID, PLAN_ID)).rejects.toThrow(

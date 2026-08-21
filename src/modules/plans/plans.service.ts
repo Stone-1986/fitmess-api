@@ -9,6 +9,7 @@ import {
   SessionExercise,
   PlanStatus,
   CoachRequestStatus,
+  SubscriptionStatus,
   Prisma,
 } from '../../../generated/prisma/index.js';
 import { BusinessException } from '../common/exceptions/business.exception.js';
@@ -1071,15 +1072,22 @@ export class PlansService {
   }
 
   /**
-   * Punto de integracion con EPICA-04 (suscripciones). HOY siempre retorna
-   * false porque no existe tabla de suscripciones — mismo patron que
-   * isUsedInPlan de EPICA-02. EPICA-04 debe reemplazar UNICAMENTE el cuerpo
-   * de este metodo por una query real contra Subscription, sin tocar
-   * ninguna otra linea de unpublish().
+   * EPICA-04: "suscrito" = Aprobada o Activa (CA-009-7, cierra el gap
+   * declarado en EPICA-03). Pendiente NO cuenta — el entrenador todavia
+   * puede rechazarla en el mismo momento en que intenta despublicar.
+   * Aprovecha el indice compuesto `@@index([planId, status])` de
+   * Subscription (EPICA-04/D-3).
    */
-  private hasSubscribers(planId: string): Promise<boolean> {
-    void planId;
-    return Promise.resolve(false);
+  private async hasSubscribers(planId: string): Promise<boolean> {
+    const count = await this.prisma.subscription.count({
+      where: {
+        planId,
+        status: {
+          in: [SubscriptionStatus.APPROVED, SubscriptionStatus.ACTIVE],
+        },
+      },
+    });
+    return count > 0;
   }
 
   private toOwnReadPlanResponseDto(plan: Plan): PlanResponseDto {

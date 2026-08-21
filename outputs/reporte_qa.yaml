@@ -1,24 +1,23 @@
 reporte_qa:
   fecha: "2026-08-20"
-  ciclo: 2
+  ciclo: 1
   razonamiento: >
-    QUÉ: re-ejecuté los 6 gates completos (no solo openapi:validate) porque el
-    cambio toca DTOs de respuesta que atraviesa el pipeline HTTP completo
-    (ValidationPipe, ResponseInterceptor, Swagger). Confirmé que los 15 campos
-    afectados tienen `type: String` agregado en los 6 DTOs de src/ y que sus 6
-    equivalentes en outputs/contrato_openapi/ son idénticos byte a byte (diff
-    vacío). Inspeccioné outputs/openapi.json regenerado por el propio gate y
-    verifiqué campo por campo que el shape no cambió: mismos 15 campos,
-    `type: string`, `nullable: true`, mismo `example`, misma `description`,
-    mismo `format` donde aplica — solo se agregó la metadata de tipo que
-    faltaba. POR QUÉ: rulesArquitectura §Validación OpenAPI exige el gate y el
-    LT pidió confirmar explícitamente que no hubo cambio de superficie de API.
-    REFERENCIA: spectral --format json devolvió `[]` (0 errores, 0 warnings —
-    los 17 de operation-tag-defined desaparecieron); 443/443 unitarios y
-    159/159 e2e en verde, cobertura idéntica al ciclo 1 (99.59%/100%); `find
-    -newer` confirma que solo se tocaron los 6 DTOs de src/, sus 6 copias en
-    outputs/contrato_openapi/ y scripts/export-openapi.mjs — ningún test ni
-    código de producción adicional.
+    QUÉ: valide la implementacion completa de EPICA-04 (modulo subscriptions,
+    6 endpoints nuevos; hasSubscribers() real en plans.service.ts; 3
+    listeners + 3 metodos de EmailService en notifications). Escribi
+    subscriptions.service.spec.ts (37 tests), subscriptions.controller.spec.ts
+    (7 tests), 3 specs de listener (22 tests), tests nuevos para
+    EmailService (15 tests) y test/subscriptions.e2e-spec.ts (37 tests, los 6
+    endpoints + CA-009-7 end-to-end). POR QUÉ: cerrar los 14 criterios de
+    aceptacion tecnicos del plan, con enfasis en los dos casos de CA-014-8
+    (Archivado y PUBLISHED-vencido-sin-write-through) senalados como riesgo
+    explicito. REFERENCIA: en el camino encontre que el cambio de
+    hasSubscribers() (de stub a query real) rompio 3 tests preexistentes de
+    plans.service.spec.ts porque mockPrisma no tenia `subscription.count` —
+    los corregi (agregando el mock y separando la aserción de la query real)
+    porque son archivos de test, no codigo de produccion. Build, lint,
+    format, test:cov (535/535) y test:e2e (199/199, incluye los 4 suites
+    preexistentes) en verde tras esa correccion.
 
   linting:
     eslint: "PASS"
@@ -27,147 +26,205 @@ reporte_qa:
 
   cobertura:
     dominio:
-      porcentaje: 99.59
+      porcentaje: 100
       target: 80
       cumple: true
     adaptadores:
       porcentaje: 100
       target: 70
       cumple: true
+    detalle_por_archivo:
+      - archivo: "src/modules/subscriptions/subscriptions.service.ts"
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+        tipo: "dominio"
+      - archivo: "src/modules/plans/plans.service.ts"
+        statements: 99.59
+        branches: 95.34
+        functions: 100
+        lines: 99.58
+        tipo: "dominio"
+        nota: "modificado (hasSubscribers real); linea 254 sin cubrir es preexistente de EPICA-03, ajena a este cambio"
+      - archivo: "src/modules/subscriptions/subscriptions.controller.ts"
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+        tipo: "adaptador"
+      - archivo: "src/modules/notifications/listeners/subscription-requested.listener.ts"
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+        tipo: "adaptador"
+      - archivo: "src/modules/notifications/listeners/subscription-approved.listener.ts"
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+        tipo: "adaptador"
+      - archivo: "src/modules/notifications/listeners/subscription-rejected.listener.ts"
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+        tipo: "adaptador"
+      - archivo: "src/modules/notifications/email.service.ts"
+        statements: 100
+        branches: 85.71
+        functions: 100
+        lines: 100
+        tipo: "adaptador"
+        nota: "modificado (3 metodos nuevos); ramas sin cubrir (lineas 117,176,235,291) son preexistentes de sendAdminInvitation, ajenas a este cambio"
 
   tests:
     unitarios:
-      pasaron: 443
+      pasaron: 535
       fallaron: 0
     e2e:
       estado: "PASS"
-      pasaron: 159
+      pasaron: 200
       fallaron: 0
+      motivo_no_ejecutado: ""
       fallos: []
+      nota: >
+        199 al cierre del ciclo 1 = 37 tests nuevos de
+        test/subscriptions.e2e-spec.ts + 162 de los 4 suites preexistentes
+        (audit 10, auth 34, exercises 37, plans 81), todos en la misma
+        corrida (fileParallelism: false). ACTUALIZADO A 200 por el
+        orquestador tras el ciclo 2: el +1 es el test de auditoria que
+        verifica audit_logs.resourceIds en GET /subscriptions/pending,
+        agregado al corregir el unico hallazgo del Lider Tecnico. Cifra
+        confirmada contra la salida real de `pnpm run test:e2e` (exit 0)
+        despues de la correccion.
 
   criterios_de_aceptacion:
-    - id: "CA-008-1/CA-008-2"
-      descripcion: "Plan se guarda en Borrador completo o incompleto; RN-01 solo bloquea al publicar"
+    - id: "CAT-1"
+      descripcion: "Cobertura de dominio (SubscriptionsService) >= 80%/80%/75%/80% lineas/funciones/branches/statements, medido por archivo"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (create, publish/validatePlanCompleteness); plans.e2e-spec.ts POST /api/plans y PLAN_INCOMPLETE"
-    - id: "CA-008-3"
-      descripcion: "SessionExercise persiste exerciseVersionId vigente al momento de agregarse (RN-07)"
+      evidencia: "subscriptions.service.ts: 100/100/100/100 (pnpm run test:cov)"
+    - id: "CAT-2"
+      descripcion: "Cobertura de adaptadores (SubscriptionsController) >= 70%"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'CA-006-1 (EPICA-02) — PATCH de un ejercicio EN USO...' y 'POST .../exercises — 201'"
-    - id: "CA-008-4/CA-008-5"
-      descripcion: "ATHLETE y usuario sin autenticar rechazados en mutaciones de plan"
+      evidencia: "subscriptions.controller.ts: 100/100/100/100"
+    - id: "CAT-3"
+      descripcion: "SubscriptionsService usa unicamente BusinessException/BusinessError y TechnicalException/TechnicalError"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts — 401/403 en los 15 endpoints de PlansController"
-    - id: "CA-008-6"
-      descripcion: "Ownership — solo el coach propietario modifica su plan"
+      evidencia: "Lectura de subscriptions.service.ts: todos los throw son BusinessException o TechnicalException, sin excepciones HTTP nativas de Nest"
+    - id: "CAT-4"
+      descripcion: "subscriptions NO importa PlansService/PlansModule/AuthService/AuthModule — solo PrismaService y EventEmitter2"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (findOne/update RESOURCE_OWNERSHIP_DENIED); plans.e2e-spec.ts GET/PATCH 403 con otherCoachToken"
-    - id: "CA-009-1/CA-009-2"
-      descripcion: "publish() transiciona a Publicado o lista requisitos faltantes (PLAN_INCOMPLETE)"
+      evidencia: "Imports de subscriptions.service.ts/.controller.ts/.module.ts revisados: PrismaService, EventEmitter2, exceptions/common, DTOs propios y generated/prisma unicamente"
+    - id: "CAT-5"
+      descripcion: "Todos los endpoints documentan sus respuestas de error con @ApiProblemResponse"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (publish, 4 variantes de PLAN_INCOMPLETE); plans.e2e-spec.ts 200/422 con context.missingRequirements"
-    - id: "CA-009-3"
-      descripcion: "unpublish() sin suscriptores regresa el plan a Borrador"
+      evidencia: "6/6 endpoints con @ApiProblemResponse por cada codigo declarado en `errores` del plan (create: 400/401/403/404/409; findMine/findPending: 401/403; approve/reject: 401/403/404/409; acceptConsent: 400/401/403/404/409)"
+    - id: "CAT-6"
+      descripcion: "Test unitario que verifica que hasSubscribers(planId) consulta Subscription con status IN [APPROVED, ACTIVE] excluyendo PENDING"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts 'procede cuando hasSubscribers() retorna false'; plans.e2e-spec.ts 200"
-    - id: "CA-009-4"
-      descripcion: "Estructura y fechas inmutables tras publicar (RN-31) — PLAN_IMMUTABLE"
+      evidencia: "plans.service.spec.ts > unpublish() > 'hasSubscribers(planId) consulta Subscription con status IN [APPROVED, ACTIVE] y excluye PENDING'"
+    - id: "CAT-7"
+      descripcion: "Test e2e de unpublish(): plan publicado + suscripcion Aprobada -> 409 PLAN_HAS_SUBSCRIBERS; solo Pendientes SI permite despublicar"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plan-published.guard.spec.ts; plans.service.spec.ts (update); plans.e2e-spec.ts PATCH 409 y POST phases 409 post-publish"
-    - id: "CA-009-5"
-      descripcion: "Ownership en publish/unpublish"
+      evidencia: "subscriptions.e2e-spec.ts > 'POST /api/plans/:id/unpublish — CA-009-7' (3 tests: APPROVED bloquea, ACTIVE bloquea, solo PENDING no bloquea)"
+    - id: "CAT-8"
+      descripcion: "Test unitario/e2e: Rechazada NO bloquea reintento (CA-012-3); Pendiente/Aprobada/Activa SI bloquean (CA-012-2)"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts; plans.e2e-spec.ts 403 con otherCoachToken en publish y unpublish"
-    - id: "CA-009-6"
-      descripcion: "ATHLETE no puede publicar/despublicar"
+      evidencia: "unitario: it.each sobre los 3 estados bloqueantes + test dedicado de reintento tras Rechazo; e2e: 'CA-012-2/CA-012-3 — bloquea...pero permite reintentar tras un Rechazo'"
+    - id: "CAT-9"
+      descripcion: "Test unitario de atomicidad de accept-consent en la $transaction"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 403 ATHLETE en publish/unpublish"
-    - id: "CA-009-7"
-      descripcion: "unpublish() rechaza con PLAN_HAS_SUBSCRIBERS si hasSubscribers()=true"
+      evidencia: "subscriptions.service.spec.ts > acceptConsent() > 'atomicidad: si la $transaction falla...'; complementado en e2e verificando el LegalAcceptance persistido en el happy path"
+    - id: "CAT-10"
+      descripcion: "Test e2e: POST /subscriptions a un plan en Borrador -> 409 PLAN_NOT_PUBLISHED sin crear fila"
       cumple: true
-      evidencia: >
-        SIN CAMBIOS DEL CICLO 1 — GAP DECLARADO, sigue vigente y documentado
-        explícitamente en este ciclo (no se omite): solo verificable con test
-        unitario mockeando hasSubscribers() (plans.service.spec.ts).
-        hasSubscribers() es un stub fijo en false; la rama "con suscritos" NO
-        es verificable end-to-end en esta épica (aceptado por el humano,
-        mismo patrón que CA-006-1 de EPICA-02). Cobertura e2e real llega con
-        EPICA-04.
-    - id: "CA-010-1"
-      descripcion: "Evaluacion perezosa de Finalizado — cualquier consulta muestra el plan vencido como Finalizado"
+      evidencia: "subscriptions.e2e-spec.ts > 'CA-012-4 — rechaza con 409 PLAN_NOT_PUBLISHED...sin crear ninguna fila' (verificado con prisma.subscription.count)"
+    - id: "CAT-11"
+      descripcion: "Test unitario/e2e de accept-consent con plan Archivado -> 409 PLAN_NOT_PUBLISHED, suscripcion permanece Aprobada, sin LegalAcceptance (CA-014-8 caso 1)"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts computeEffectiveStatus (via findOne/findAll/archive); plans.e2e-spec.ts GET /api/plans/:id status=FINALIZED tras endDate pasada"
-    - id: "CA-010-2"
-      descripcion: "archive() transiciona Borrador/Publicado/Finalizado -> Archivado"
+      evidencia: "unitario: 'CA-014-8, caso 1 de 2 — plan Archivado'; e2e: 'CA-014-8 (caso 1 de 2)' con verificacion de subscription.status, activatedAt y ausencia de LegalAcceptance"
+    - id: "CAT-12"
+      descripcion: "Test unitario CRITICO de accept-consent: plan PUBLISHED persistido con endDate vencida, sin write-through -> 409 PLAN_NOT_PUBLISHED (CA-014-8 caso 2)"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (3 variantes de estado origen); plans.e2e-spec.ts 200 desde Borrador y desde Publicado"
-    - id: "CA-010-3"
-      descripcion: "archive() rechaza si ya esta Archivado"
+      evidencia: "unitario: 'CA-014-8, CASO CRITICO 2 de 2'; e2e: manipula endDate directamente via Prisma tras publicar/aprobar SIN volver a leer el plan como coach, y verifica ademas que plan.status sigue PUBLISHED (nadie disparo el write-through)"
+    - id: "CAT-13"
+      descripcion: "Test que verifica que POST /subscriptions con plan PUBLISHED persistido pero endDate vencida tambien responde 409 PLAN_NOT_PUBLISHED"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts INVALID_STATE_TRANSITION; plans.e2e-spec.ts 409"
-    - id: "CA-010-4/CA-010-5"
-      descripcion: "Ownership y rol en archive()"
+      evidencia: "subscriptions.service.spec.ts > create() > 'lanza PLAN_NOT_PUBLISHED (CASO CRITICO)...' — mismo helper isPlanCurrentlyPublished() que acceptConsent(), confirmando que no diverge entre los dos call-sites"
+    - id: "CAT-14"
+      descripcion: "Test que verifica que el email/log de subscription.requested/approved/rejected no incluye datos de salud ni el body completo del request"
       cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts; plans.e2e-spec.ts 403 otherCoach y 403 ATHLETE"
-    - id: "CA-011-1"
-      descripcion: "Catalogo lista planes Publicados con perfil publico reducido del entrenador"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts findPublished(); plans.e2e-spec.ts GET /api/catalog/plans — solo id/name/avatarUrl expuestos"
-    - id: "CA-011-2"
-      descripcion: "Detalle del catalogo con estructura (solo conteo de ejercicios) y perfil publico completo del entrenador"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts findPublishedOne(); plans.e2e-spec.ts GET /api/catalog/plans/:id — exerciseCount presente, exercises ausente, description/bannerUrl con y sin CoachRequest APPROVED"
-    - id: "CA-011-3"
-      descripcion: "Planes Borrador/Finalizado/Archivado no aparecen en el catalogo"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'CA-011-3 — un plan Publicado con endDate en el pasado NO aparece en el catalogo'"
-    - id: "CA-011-4"
-      descripcion: "Catalogo rechaza sin autenticacion"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 401 en GET /api/catalog/plans y GET /api/catalog/plans/:id"
-    - id: "CA-006-1 (EPICA-02)"
-      descripcion: "isUsedInPlan(exerciseId) deja de ser stub y consulta SessionExercise real; PATCH de un ejercicio en uso crea version nueva, RN-07 conservada"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — GAP CERRADO END-TO-END. exercises.service.spec.ts (2 tests nuevos con sessionExercise.count mockeado, sin spy sobre isUsedInPlan); plans.e2e-spec.ts test dedicado crea ejercicio -> lo usa en plan -> PATCH -> verifica ExerciseVersion nueva"
-    - id: "FK compuesta Week(phaseId,planId)->Phase(id,planId)"
-      descripcion: "Garantia de base de datos, no solo disciplina del service"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.e2e-spec.ts 'Postgres RECHAZA insertar una Week cuyo planId no coincide...' — INSERT directo con Prisma saltandose el service, rejects con P2003"
-    - id: "criterio_tecnico_plan — publish() lista requisitos faltantes explicitamente"
-      descripcion: "No usa mensaje generico"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts 4 tests de PLAN_INCOMPLETE con context.missingRequirements especifico por combinacion de estructura faltante"
-    - id: "criterio_tecnico_plan — AddSessionExerciseDto 404/422 sin crear SessionExercise"
-      descripcion: "Ningun caso de error crea el SessionExercise"
-      cumple: true
-      evidencia: "SIN CAMBIOS DEL CICLO 1 — plans.service.spec.ts (create no invocado en los expects); plans.e2e-spec.ts 422 verifica explicitamente que la sesion sigue con 1 solo ejercicio"
-    - id: "gate_openapi_ciclo2 — contrato pasa Spectral sin errores ni warnings"
-      descripcion: "Correccion del ciclo 1 (type: String en 15 propiedades de 6 DTOs, tags plans/plans-catalog en export-openapi.mjs) resuelve el bloqueante sin cambiar el shape del contrato"
-      cumple: true
-      evidencia: >
-        RE-VERIFICADO EN ESTE CICLO. `spectral lint --format json` retorna `[]`
-        (0 resultados: 0 errores, 0 warnings — los 15 oas3-valid-schema-example
-        y los 17 operation-tag-defined del ciclo 1 desaparecieron). Inspección
-        campo por campo de outputs/openapi.json regenerado confirma que los 15
-        campos afectados conservan exactamente {"type":"string","nullable":true,
-        "example":..., "description":..., "format":... (donde aplica)} — mismo
-        shape, solo se agregó la metadata de tipo faltante. Los 6 DTOs de
-        outputs/contrato_openapi/ son idénticos byte a byte a sus contrapartes
-        en src/ (diff vacío en los 6 archivos).
+      evidencia: "3 listener specs verifican que loggerMock.error/warn SOLO contienen subscriptionId, nunca nombre del atleta ni correo; Subscription no tiene ningun campo de salud por diseño de schema, asi que no hay superficie posible para esa fuga"
 
   vulnerabilidades: []
 
+  hallazgos_no_bloqueantes:
+    - severidad: "BAJA"
+      descripcion: >
+        El export de OpenAPI emite un aviso propio (no de Spectral): el tag
+        'subscriptions' no tiene descripcion en TAG_DESCRIPTIONS de
+        scripts/export-openapi.mjs, a diferencia de 'plans'/'exercises'/etc.
+      ubicacion: "scripts/export-openapi.mjs (TAG_DESCRIPTIONS)"
+      recomendacion: "Agregar una entrada para 'subscriptions' en TAG_DESCRIPTIONS — cosmetico, no bloquea ningun gate (Spectral no lo evalua)."
+    - severidad: "BAJA"
+      descripcion: >
+        Hallazgo de proceso, no de codigo: plans.service.spec.ts tenia 3
+        tests que dependian implicitamente del comportamiento del stub
+        (hasSubscribers() fijo en false) sin mockear prisma.subscription.count
+        — al pasar a la implementacion real (EPICA-04), esos 3 tests
+        rompieron por un TypeError, no por un assert de negocio. Indica que
+        el Desarrollador actualizo plans.service.ts sin correr test:cov antes
+        de entregar, o sin notar el fallo.
+      ubicacion: "src/modules/plans/plans.service.spec.ts (corregido por QA)"
+      recomendacion: "Confirmar con el Desarrollador que corrio pnpm run test:cov antes de reportar el checkpoint como listo, para que este tipo de rotura silenciosa se detecte antes de llegar a QA."
+
   escaneo_automatico:
-    ejecutado: false
+    ejecutado: true
+    ejecutado_por: "orquestador"
     motivo_no_ejecucion: >
-      SIN CAMBIOS DEL CICLO 1 — el toolset de este agente QA en esta sesion es
-      unicamente Read/Write/Bash/SendMessage, no incluye la capacidad de
-      invocar skills o slash-commands (/security-review). El cambio de este
-      ciclo es exclusivamente metadata de Swagger en DTOs de respuesta (agregar
-      `type: String`) y tags de documentación — no introduce superficie nueva
-      de ataque, así que no amerita una revisión manual de seguridad adicional
-      a la ya realizada en el ciclo 1 (revision_manual_de_seguridad, sin
-      cambios, sigue vigente).
+      El agente QA NO pudo ejecutarlo: no tiene disponible el tool para
+      invocar el slash command /security-review dentro de esta sesion (solo
+      cuenta con Read/Write/Bash/SendMessage) — /security-review es un
+      comando manejado por el harness interactivo, no un binario invocable
+      via Bash. El QA lo declaro como ejecutado: false y lo escalo en vez de
+      darlo por aprobado, que es el manejo correcto. En su lugar corrio el
+      checklist manual de la seccion 5 de rulesArquitectura completo
+      (guards, logs, ownership, DTOs de respuesta, comunicacion entre
+      modulos, import de Prisma, acceso directo a Supabase) — sin hallazgos.
+      RESUELTO por el orquestador, que si puede invocarlo: ver
+      `detalle_ejecucion_orquestador`.
+    detalle_ejecucion_orquestador: >
+      Ejecutado por el orquestador el 2026-08-20. El harness de
+      /security-review diffea unicamente lo commiteado y todo EPICA-04 esta
+      sin commitear, asi que el alcance se apunto a mano a los archivos del
+      working tree. Resultado: SIN hallazgos HIGH ni MEDIUM. Verificado uno
+      por uno: los 6 handlers llevan @Roles (el rol va por metodo, D-1) bajo
+      @UseGuards(JwtAuthGuard, RolesGuard) de clase; create() toma el
+      athleteId del token y nunca del body; findMine filtra por athleteId
+      (:162,164); findPending por plan.coachId (:217); approve/reject pasan
+      por findOwnedByCoachOrFail (:491); acceptConsent por
+      findOwnSubscriptionOrFail (:519). Sin mass assignment:
+      CreateSubscriptionDto solo acepta planId y AcceptConsentDto solo
+      documentVersion, con whitelist + forbidNonWhitelisted en el
+      ValidationPipe global (main.ts:81-82). El LegalAcceptance toma userId
+      del token e ip/userAgent del request, nunca del body, y se escribe en
+      la misma $transaction que el cambio a ACTIVE (:419-434). Sin
+      $queryRaw/$executeRaw en el codigo nuevo. SubscriptionResponseDto
+      expone 8 campos, ninguno interno (reviewedBy queda fuera). Los logs de
+      los 3 listeners llevan solo subscriptionId; EmailService loggea
+      recipientDomain, nunca la direccion completa.
+    observacion_no_bloqueante: >
+      documentVersion llega del cliente y se persiste como evidencia de un
+      consentimiento juridicamente vinculante sin contrastarse contra un
+      catalogo server-side de versiones validas. NO es un defecto de
+      EPICA-04: es el patron ya establecido en EPICA-01 por la decision D-8
+      (auth.service.ts:80,91,186,197 hace lo mismo con
+      personalDataDocumentVersion y termsDocumentVersion). Es sistemico y
+      preexistente; corregirlo solo en subscriptions dejaria la
+      inconsistencia al reves. Corresponde evaluarlo como decision
+      transversal, fuera del alcance de esta epica.
     hallazgos: []
     resumen:
       total: 0
@@ -176,23 +233,48 @@ reporte_qa:
       low: 0
       descartados: 0
 
-  revision_manual_de_seguridad:
-    - item: "Alcance del ciclo 2 respetado (solo DTOs + export-openapi.mjs)"
-      resultado: >
-        OK — `find src test scripts -newer outputs/revision_codigo.yaml`
-        confirma que los únicos archivos fuente modificados son los 6 DTOs de
-        src/modules/plans/dto/, sus 6 copias en
-        outputs/contrato_openapi/src/modules/plans/dto/ y
-        scripts/export-openapi.mjs. plans.service.ts, los controllers,
-        exercises.service.ts y todos los archivos de test quedaron intactos.
-    - item: "Sin cambio de superficie de API (shape del contrato)"
-      resultado: >
-        OK — los 15 campos afectados en outputs/openapi.json regenerado
-        conservan type:string, nullable:true, mismo example y mismo format;
-        solo se corrigió metadata de generación de schema, no la forma de
-        datos expuesta al cliente.
-    - item: "Resto del checklist de seguridad (guards, logs, ownership, PII, comunicacion entre modulos, Supabase)"
-      resultado: "SIN CAMBIOS DEL CICLO 1 — no aplica re-verificación porque plans.service.ts/controllers no fueron tocados en este ciclo. Ver reporte_qa ciclo 1 (git) para el detalle completo del checklist de 11 items, todos OK."
+  checklist_manual_seguridad:
+    - item: "Endpoints sin JwtAuthGuard"
+      resultado: "OK — @UseGuards(JwtAuthGuard, RolesGuard) a nivel de controller, los 6 endpoints protegidos"
+    - item: "Logs con passwords/tokens/datos de salud"
+      resultado: "OK — los 3 listeners y EmailService solo loggean subscriptionId o dominio del correo, verificado con tests dedicados"
+    - item: "Queries Prisma sin filtro de ownership"
+      resultado: "OK — findOwnedByCoachOrFail/findOwnSubscriptionOrFail verifican coachId/athleteId antes de mutar, con RESOURCE_OWNERSHIP_DENIED si no coincide"
+    - item: "originalError expuesto al cliente"
+      resultado: "OK — no se toco TechnicalException; el patron existente (loggea pero no expone) se reutiliza sin cambios"
+    - item: "DTOs de respuesta exponen archivedAt/passwords/tokens/datos de salud"
+      resultado: "OK — SubscriptionResponseDto excluye explicitamente reviewedBy; SubscriptionPendingSummaryResponseDto solo expone athleteName (sin email/telefono/identificacion); Subscription no tiene campos de salud"
+    - item: "Aceptaciones legales mutables (UPDATE/DELETE)"
+      resultado: "OK — SubscriptionsController no expone ningun endpoint que modifique o borre un LegalAcceptance"
+    - item: "Service importa otro service de otro modulo"
+      resultado: "OK — subscriptions.service.ts solo importa PrismaService (compartido, @Global) y EventEmitter2"
+    - item: "Controller con try/catch"
+      resultado: "OK — SubscriptionsController es thin, sin try/catch"
+    - item: "Controller accede a PrismaService"
+      resultado: "OK — SubscriptionsController no inyecta PrismaService"
+    - item: "Service lanza HttpException nativa"
+      resultado: "OK — unicamente BusinessException/TechnicalException"
+    - item: "Import de Prisma fuera de generated/prisma"
+      resultado: "OK — `from '../../../generated/prisma/index.js'` en subscriptions.service.ts"
+    - item: "Import de @supabase/supabase-js en el backend"
+      resultado: "OK — grep sin resultados en src/ ni package.json"
+    - item: "Tests e2e llamando a *.supabase.co directamente"
+      resultado: "OK — subscriptions.e2e-spec.ts solo llama a /api/... via supertest(http)"
+
+  alcance_diferido:
+    - id: "CA-014-3"
+      descripcion: >
+        "El atleta no puede acceder a las sesiones del plan sin aceptar el
+        consentimiento" — DIFERIDO a EPICA-05 por decision D-9 del plan de
+        implementacion: no existe ningun endpoint de sesiones en esta epica
+        al cual adjuntar la verificacion. No es un gap de esta epica, es
+        alcance explicitamente trasladado. BusinessError.CONSENT_REQUIRED
+        queda reservado para ese uso futuro.
+    - id: "subscription.activated"
+      descripcion: >
+        Evento emitido sin listener en esta epica, a proposito (decision
+        D-7) — punto de integracion declarado para EPICA-05 (deep-copy /
+        habilitacion de sesiones). No es un defecto.
 
   validacion_openapi:
     ejecutado: true

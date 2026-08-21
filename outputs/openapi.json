@@ -2653,6 +2653,487 @@
           "plans-catalog"
         ]
       }
+    },
+    "/api/subscriptions": {
+      "post": {
+        "description": "Crea una suscripcion en estado Pendiente para el atleta autenticado y el planId del body (CA-012-1). Rechaza con PLAN_NOT_PUBLISHED (409) si el plan no esta efectivamente Publicado — un plan con status persistido PUBLISHED pero endDate vencida cuenta como no-publicable (CA-012-4, D-2/D-10). Rechaza con SUBSCRIPTION_ALREADY_EXISTS (409) si ya existe una suscripcion propia a ese plan en estado Pendiente, Aprobada o Activa; una suscripcion Rechazada previa NO bloquea el reintento (CA-012-3, nueva fila). Emite subscription.requested. Solo accesible para ATHLETE.",
+        "operationId": "SubscriptionsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Suscripcion creada exitosamente en estado Pendiente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de la solicitud (planId invalido)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Atleta",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "El plan referenciado por planId no existe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya existe una suscripcion propia en estado Pendiente, Aprobada o Activa para este plan (SUBSCRIPTION_ALREADY_EXISTS, CA-012-2), o el plan no acepta nuevas inscripciones en su estado actual (PLAN_NOT_PUBLISHED, CA-012-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Solicitar inscripcion a un plan de entrenamiento",
+        "tags": [
+          "subscriptions"
+        ]
+      },
+      "get": {
+        "description": "Lista todas las suscripciones del atleta autenticado, en cualquier estado, paginado — sin filtro server-side por estado (mismo criterio D-8 de EPICA-03 aplicado a GET /plans). Cubre CA-014-1 (ver el consentimiento pendiente en el cliente sobre status=Aprobada) y CA-014-4 (un item independiente por cada plan, incluso de entrenadores distintos). No incluye el contenido del documento de consentimiento (D-8). Solo accesible para ATHLETE.",
+        "operationId": "SubscriptionsController_findMine",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de las suscripciones propias del atleta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Atleta",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar las suscripciones propias del atleta autenticado",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/api/subscriptions/pending": {
+      "get": {
+        "description": "Lista, paginada, las suscripciones en estado Pendiente de TODOS los planes propios del entrenador autenticado (CA-013-3), filtrando por relacion (plan.coachId = coach autenticado). Cada item incluye el nombre del atleta y el nombre del plan (join de solo lectura via PrismaService, D-2). Ruta separada de GET /subscriptions porque la forma de la respuesta es distinta (resumen enriquecido vs SubscriptionResponseDto propio del atleta). Solo accesible para COACH.",
+        "operationId": "SubscriptionsController_findPending",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de solicitudes pendientes sobre planes propios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionPendingSummaryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar las solicitudes pendientes de los planes del entrenador",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/api/subscriptions/{id}/approve": {
+      "post": {
+        "description": "Transiciona la suscripcion de Pendiente a Aprobada (CA-013-1). Verifica que el plan referenciado pertenece al entrenador autenticado, si no rechaza con RESOURCE_OWNERSHIP_DENIED (403, CA-013-4). Rechaza con INVALID_STATE_TRANSITION (409) si la suscripcion ya no esta Pendiente — ya fue resuelta (CA-013-6). Persiste reviewedAt y el entrenador que revisa. NO verifica la vigencia del plan — esa verificacion ocurre en accept-consent, no aqui (D-10). Emite subscription.approved. Solo accesible para COACH.",
+        "operationId": "SubscriptionsController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud aprobada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador, o el plan de la suscripcion no pertenece al entrenador autenticado (RESOURCE_OWNERSHIP_DENIED, CA-013-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Suscripcion no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La suscripcion no esta en estado Pendiente — ya fue resuelta previamente (CA-013-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Aprobar una solicitud de inscripcion (Pendiente -> Aprobada)",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/api/subscriptions/{id}/reject": {
+      "post": {
+        "description": "Transiciona la suscripcion de Pendiente a Rechazada (CA-013-2). Mismo mecanismo de ownership (RESOURCE_OWNERSHIP_DENIED, CA-013-4) y de estado (INVALID_STATE_TRANSITION si status !== PENDING) que approve. Sin motivo de rechazo en el body — ninguna CA de esta epica lo exige (D-4). La suscripcion Rechazada NUNCA se elimina y queda disponible para que el atleta vuelva a solicitar el mismo plan (CA-012-3). Emite subscription.rejected. Solo accesible para COACH.",
+        "operationId": "SubscriptionsController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Solicitud rechazada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Entrenador, o el plan de la suscripcion no pertenece al entrenador autenticado (RESOURCE_OWNERSHIP_DENIED, CA-013-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Suscripcion no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La suscripcion no esta en estado Pendiente — ya fue resuelta previamente (CA-013-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rechazar una solicitud de inscripcion (Pendiente -> Rechazada)",
+        "tags": [
+          "subscriptions"
+        ]
+      }
+    },
+    "/api/subscriptions/{id}/accept-consent": {
+      "post": {
+        "description": "Transiciona la suscripcion de Aprobada a Activa (CA-014-2). Verifica que la suscripcion pertenece al atleta autenticado, si no rechaza con RESOURCE_OWNERSHIP_DENIED (403, CA-014-6). Rechaza con INVALID_STATE_TRANSITION (409) si status !== APPROVED. Si status === APPROVED pero el plan referenciado ya no esta efectivamente vigente (esta Archivado, o su endDate ya paso aunque la columna status siga en PUBLISHED — CA-014-8, D-10), rechaza con PLAN_NOT_PUBLISHED (409) SIN escribir nada: la suscripcion permanece en Aprobada, ninguna transaccion se abre. Si ambos checks de estado pasan, crea un LegalAcceptance (documentType=SPORT_CONSENT, documentVersion del body, ip, userAgent) y actualiza la suscripcion a Activa en una unica transaccion atomica. Emite subscription.activated. Solo accesible para ATHLETE.",
+        "operationId": "SubscriptionsController_acceptConsent",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptConsentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consentimiento aceptado exitosamente — suscripcion activada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del consentimiento",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Atleta, o la suscripcion no pertenece al atleta autenticado (RESOURCE_OWNERSHIP_DENIED, CA-014-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Suscripcion no encontrada",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La suscripcion no esta en estado Aprobada — ya fue resuelta o activada (INVALID_STATE_TRANSITION), o el plan referenciado ya no esta efectivamente vigente y la suscripcion permanece en Aprobada sin activarse (PLAN_NOT_PUBLISHED, CA-014-8)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Aceptar el consentimiento informado deportivo (Aprobada -> Activa)",
+        "tags": [
+          "subscriptions"
+        ]
+      }
     }
   },
   "info": {
@@ -2689,6 +3170,10 @@
     {
       "name": "plans-catalog",
       "description": "Catalogo publico de planes publicados, para cualquier usuario autenticado"
+    },
+    {
+      "name": "subscriptions",
+      "description": "Operaciones de subscriptions"
     }
   ],
   "servers": [
@@ -4755,6 +5240,159 @@
           "name",
           "phases",
           "coach"
+        ]
+      },
+      "CreateSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "UUID del plan al que el atleta autenticado solicita inscribirse",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "planId"
+        ]
+      },
+      "SubscriptionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la suscripcion",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+            "format": "uuid"
+          },
+          "athleteId": {
+            "type": "string",
+            "description": "UUID del atleta titular de la suscripcion",
+            "example": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string",
+            "description": "UUID del plan al que corresponde la suscripcion",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado de la suscripcion. Aprobada es, a proposito, una via muerta valida del enum cuando el plan referenciado deja de estar vigente antes de que el atleta acepte el consentimiento (CA-014-8, D-10) — no existe un quinto estado para representar ese bloqueo.",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "ACTIVE"
+            ],
+            "example": "PENDING"
+          },
+          "reviewedAt": {
+            "type": "string",
+            "description": "Momento en que el entrenador aprobo o rechazo la solicitud. Solo presente cuando status ya no es Pendiente.",
+            "example": "2026-08-21T09:15:00.000Z",
+            "nullable": true
+          },
+          "activatedAt": {
+            "type": "string",
+            "description": "Momento en que el atleta acepto el consentimiento informado deportivo y la suscripcion transiciono a Activa (CA-014-2). Solo presente cuando status = ACTIVE.",
+            "example": "2026-08-22T14:30:00.000Z",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la suscripcion (momento de la solicitud)",
+            "example": "2026-08-20T10:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de ultima actualizacion de la suscripcion",
+            "example": "2026-08-22T14:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "athleteId",
+          "planId",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "SubscriptionPendingSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la suscripcion pendiente",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+            "format": "uuid"
+          },
+          "athleteId": {
+            "type": "string",
+            "description": "UUID del atleta solicitante",
+            "example": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+            "format": "uuid"
+          },
+          "athleteName": {
+            "type": "string",
+            "description": "Nombre del atleta solicitante",
+            "example": "Maria Fernanda Lopez Castro"
+          },
+          "planId": {
+            "type": "string",
+            "description": "UUID del plan al que se solicita la inscripcion",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "planName": {
+            "type": "string",
+            "description": "Nombre del plan al que se solicita la inscripcion",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado de la suscripcion — siempre Pendiente en este listado",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "ACTIVE"
+            ],
+            "example": "PENDING"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha en que el atleta solicito la inscripcion",
+            "example": "2026-08-20T10:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "athleteId",
+          "athleteName",
+          "planId",
+          "planName",
+          "status",
+          "createdAt"
+        ]
+      },
+      "AcceptConsentDto": {
+        "type": "object",
+        "properties": {
+          "documentVersion": {
+            "type": "string",
+            "description": "Version del documento de consentimiento informado deportivo que el atleta esta aceptando en este momento. El contenido de esa version lo posee y versiona el frontend (D-8) — este campo solo identifica CUAL version se acepto.",
+            "example": "1.0.0",
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "documentVersion"
         ]
       }
     }

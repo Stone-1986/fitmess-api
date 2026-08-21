@@ -1,77 +1,100 @@
 revision_codigo:
   fecha: "2026-08-20"
   ciclo: 2
-  epica_id: "EPICA-03"
+  epica_id: "EPICA-04"
   razonamiento: >
-    QUÉ: verifiqué las 3 instrucciones del ciclo 1 leyendo los 6 DTOs
-    corregidos en src/modules/plans/dto/, sus 6 copias en
-    outputs/contrato_openapi/src/modules/plans/dto/ y
-    scripts/export-openapi.mjs, campo por campo y byte por byte — no me apoyé
-    únicamente en el reporte del QA ni en la salida de gates del orquestador.
-    POR QUÉ: la condición bajo la cual dictaminé en el ciclo 1 que el fix NO
-    requería escalar al humano era que no cambiara ningún campo, tipo
-    expuesto, nulabilidad ni ejemplo — esa condición hay que confirmarla
-    contra el código, no solo contra "Spectral pasa". REFERENCIA: los 15
-    `@ApiPropertyOptional` en los 6 DTOs de src/ tienen `type: String` (líneas
-    exactas verificadas: plan-response.dto.ts:41,50,59;
-    plan-detail-response.dto.ts:35,44,53; coach-summary-response.dto.ts:33;
-    coach-profile-response.dto.ts:46,58,68;
-    plan-catalog-summary-response.dto.ts:32,41;
-    plan-catalog-detail-response.dto.ts:36,45,54); las 6 copias en
-    outputs/contrato_openapi/ son idénticas carácter por carácter a sus
-    contrapartes en src/ (comparación directa, no diff de herramienta); y
-    export-openapi.mjs:50-57 agrega exactamente `.addTag('plans', ...)` y
-    `.addTag('plans-catalog', ...)`, en el mismo lugar y con el mismo patrón
-    que los 5 tags preexistentes.
+    QUÉ: verifiqué que la corrección del ciclo 1 (agregar
+    @AuditResources('Subscription') a findPending) está aplicada donde
+    corresponde y en ningún otro lugar, leyendo subscriptions.controller.ts
+    directamente en vez de confiar en el resumen del orquestador, y leí el
+    test e2e nuevo completo (líneas 579-604 de
+    test/subscriptions.e2e-spec.ts) para confirmar que ejercita el camino
+    real (HTTP -> interceptor -> middleware -> audit_logs), no un mock del
+    interceptor. Recontrasté los 6 gates contra la salida cruda del
+    orquestador. POR QUÉ: mi propio hallazgo del ciclo 1 exigía verificación
+    de disco, no de reporte — el mismo criterio que le exigí implícitamente
+    al Desarrollador aplica a mí mismo al cerrar el ciclo. REFERENCIA:
+    subscriptions.controller.ts:29 (import), :182-189 (decorador en
+    findPending, con comentario que cita el hallazgo del ciclo 1),
+    ausencia confirmada en findMine (grep: una sola ocurrencia de
+    @AuditResources en todo el archivo); test e2e :583-604.
 
   linting:
     eslint: "PASS"
     prettier: "PASS"
     errores: []
-
-  compilacion:
-    build: "PASS"
+    nota: >
+      299 warnings (+1 sobre el ciclo 1, coherente con el test nuevo),
+      todos @typescript-eslint/no-unsafe-argument en archivos de test, regla
+      en `warn`. El orquestador reporta que la primera pasada de gates falló
+      en lint/format:check por un único error de `prettier/prettier` en
+      test/subscriptions.e2e-spec.ts:593, y que aplicó `pnpm run format`
+      directamente (Paso 4.5, categoría "Errores de Prettier / formato") en
+      vez de devolverlo al Desarrollador, re-ejecutando los 6 gates después.
+      Es la ruta correcta: la lista blanca de esa categoría cubre
+      exactamente reformateo sin cambio de lógica, y lo confirmo — el test
+      que leí (líneas 583-604) no tiene ninguna marca de un fix a medias, es
+      una prueba completa y coherente con el resto del archivo.
 
   cobertura:
     dominio:
-      porcentaje: 99.59
+      porcentaje: 100
       target: 80
       cumple: true
-      detalle: "Idéntica al ciclo 1 — plans.service.ts no fue tocado en este ciclo."
     adaptadores:
       porcentaje: 100
       target: 70
       cumple: true
-      detalle: "Idéntica al ciclo 1 — los controllers no fueron tocados en este ciclo."
+    nota: >
+      Sin cambios respecto al ciclo 1: subscriptions.controller.ts y
+      subscriptions.service.ts siguen en 100/100/100/100, 99.78% global,
+      535/535 unitarios. La corrección no tocó ningún archivo de dominio ni
+      de servicio — solo el controller (un decorador) y el e2e (un test) —
+      así que no había superficie nueva que arriesgara el gate de cobertura.
 
   suite_e2e:
     estado: "PASS"
-    detalle: >
-      159/159 en 4 archivos, mismo conteo exacto que el ciclo 1 — esperado,
-      porque el cambio es metadata de Swagger sobre DTOs de respuesta
-      construidos manualmente en el service (mapPlanResponseDto y análogos,
-      sin class-validator ni class-transformer de por medio), no afecta el
-      comportamiento HTTP en ningún endpoint.
+    pasaron: 200
+    fallaron: 0
+    nota: >
+      199 -> 200: el +1 es exactamente el test de auditoría nuevo, ningún
+      otro test se agregó ni se quitó. Leí el test completo: crea un plan
+      publicado y una suscripción real (buildPublishedPlan +
+      requestSubscription), llama GET /subscriptions/pending como el coach,
+      confirma que el id de la suscripción viene en la respuesta, y luego
+      espera la fila de auditoría por url+userId y afirma
+      resourceType==='Subscription' y resourceIds===[los ids devueltos] —
+      ejercita el camino real end-to-end (interceptor -> middleware ->
+      persistencia), no un mock. Cierra el hallazgo del ciclo 1 con
+      evidencia de comportamiento, no solo de presencia del decorador.
 
   patrones:
     violaciones: []
-    notas: >
-      Sin cambios respecto al ciclo 1: plans.service.ts (primeras 20 líneas
-      verificadas idénticas a la lectura del ciclo 1), plans.controller.ts,
-      plans-catalog.controller.ts, plans.module.ts,
-      common/guards/plan-published.guard.ts y exercises.service.ts no fueron
-      tocados en este ciclo. El alcance del ciclo 2 se respetó: únicamente
-      los 6 DTOs de src/, sus 6 copias de referencia y el script de export.
+    nota: >
+      El hallazgo del ciclo 1 (GET /subscriptions/pending sin
+      @AuditResources) queda CERRADO: decorador presente en findPending
+      (:189), ausente en findMine (correcto — ahí el atleta consulta sus
+      propios datos, no los de un tercero, y no aplica el criterio del
+      decorador). No reviso de nuevo el resto de subscriptions/notifications
+      /plans.service.ts/business-error.enum.ts: ya aprobado en el ciclo 1 y
+      el diff de este ciclo no los toca.
 
   consistencia_contrato: "OK"
   consistencia_contrato_detalle: >
-    Sin cambios respecto al ciclo 1 en el shape del contrato — confirmado
-    independientemente: los 15 campos afectados conservan `type: string`,
-    `nullable: true`, mismo `example`, `description` y `format` donde aplica.
-    El único cambio observable en outputs/openapi.json es la aparición de la
-    metadata de tipo que faltaba y de los 2 tags nuevos en la raíz del
-    documento — ninguno de los dos altera lo que un cliente ya generado
-    contra el contrato del ciclo 1 esperaría recibir.
+    @AuditResources es metadata interna (SetMetadata), no genera ni altera
+    ningún schema de OpenAPI ni código de respuesta — Spectral sigue en
+    verde (0 errores) y no había razón para que cambiara. Sin impacto en el
+    contrato, consistente con lo que instruí en el ciclo 1.
+
+  validacion_openapi_spectral:
+    revisado: true
+    errores_confirmados: 0
+    warnings_documentados: 1
+    notas: >
+      Mismo aviso cosmético del tag 'subscriptions' sin descripción en
+      TAG_DESCRIPTIONS, ya evaluado y cerrado como no bloqueante en el ciclo
+      1 (comportamiento esperado del mecanismo de reconcileTags). Sin
+      cambios.
 
   escaneo_automatico:
     revisado: true
@@ -79,49 +102,21 @@ revision_codigo:
     hallazgos_descartados_validados: 0
     hallazgos_descartados_rechazados: 0
     notas: >
-      Valido el razonamiento del QA para no ejecutar una revisión manual de
-      seguridad adicional en este ciclo: el cambio se limita a opciones
-      pasadas a `@ApiPropertyOptional()` (metadata de generación de schema,
-      leída solo por SwaggerModule.createDocument en build-time) y a
-      `.addTag()` en un script de exportación de documentación — ninguno de
-      los dos participa del pipeline de request en runtime (no son
-      decoradores de class-validator, no envuelven lógica de negocio, no
-      tocan Prisma ni logging). No hay superficie de ataque nueva que
-      auditar; el checklist de 11 ítems del ciclo 1 (guards, ownership,
-      logging, PII, originalError, comunicación entre módulos) sigue vigente
-      sin re-verificación porque los archivos que audita no cambiaron.
+      Sin cambios de superficie de seguridad respecto al ciclo 1 — el único
+      diff es un decorador de metadata + un test. No amerita re-escaneo
+      completo; el propio decorador reduce superficie de riesgo de
+      cumplimiento (Ley 1581/2012), no la aumenta.
 
-  validacion_openapi_spectral:
-    revisado: true
-    errores_confirmados: 0
-    warnings_documentados: 0
-    notas: >
-      pnpm run openapi:validate pasa limpio: 0 errores, 0 warnings (los 15
-      oas3-valid-schema-example y los 17 operation-tag-defined del ciclo 1
-      desaparecieron). Verificado en outputs/openapi.json regenerado que 5 de
-      los 15 campos conservan exactamente su forma anterior más `type:
-      "string"` (PlanResponseDto.description, PlanResponseDto.startDate,
-      CoachProfileResponseDto.bannerUrl, CoachSummaryResponseDto.avatarUrl,
-      PlanCatalogDetailResponseDto.endDate) y que los 7 tags están presentes,
-      incluidos `plans` y `plans-catalog`. La corrección hace exactamente lo
-      que se instruyó, sin efectos secundarios sobre la superficie de API.
-
-  observaciones_no_bloqueantes:
-    - >
-      Propuesta del Desarrollador para un futuro no bloqueante: derivar los
-      tags de scripts/export-openapi.mjs automáticamente desde los
-      `@ApiTags()` de cada controller en vez de mantener la lista hardcodeada
-      — eliminaría de raíz el patrón que causó los hallazgos #4/#8 y el
-      warning de este ciclo, en vez de corregirlo cada vez que se agrega un
-      módulo. No se implementa en esta épica por estar fuera de alcance;
-      queda registrada para que el humano decida si vale la pena antes de
-      EPICA-04.
+  decisiones_no_reabiertas:
+    - "CA-014-3 / D-9 — diferido a EPICA-05."
+    - "subscription.activated sin listener / D-7 — punto de integración de EPICA-05."
+    - "archive() sin gate de suscriptores — asimetría deliberada con unpublish()."
+    - "Duplicación cross-módulo de isPlanCurrentlyPublished() / D-2 — intencional."
+    - "documentVersion sin validación server-side / D-8 — sistémico, preexistente de EPICA-01."
 
   instrucciones_desarrollador: []
 
-  errores_criticos: []
-
   estado: "APROBADO"
-  motivo_rechazo: ""
   requiere_modificar_contrato: false
   requiere_modificar_plan: false
+  motivo_rechazo: ""
