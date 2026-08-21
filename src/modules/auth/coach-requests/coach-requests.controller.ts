@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { AuditResources } from '../../common/decorators/audit-resources.decorator.js';
 import type { AuthUser } from '../../common/types/auth-user.interface.js';
 import { UserRole } from '../../../../generated/prisma/index.js';
 import { SearchCoachRequestsDto } from './dto/search-coach-requests.dto.js';
@@ -64,6 +65,11 @@ export class CoachRequestsController {
    */
   @Post('search')
   @HttpCode(HttpStatus.OK)
+  // Los criterios viajan en el body y las reglas prohiben registrarlo, asi que
+  // sin esto la fila de auditoria diria que alguien busco pero no sobre los
+  // datos de quien. Registra los IDs DEVUELTOS, que si pueden guardarse
+  // (hallazgo #9, Ley 1581/2012).
+  @AuditResources('CoachRequest')
   @ApiOperation({
     summary: 'Buscar solicitudes de entrenadores con filtros opcionales',
     description:

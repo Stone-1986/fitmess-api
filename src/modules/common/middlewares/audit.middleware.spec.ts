@@ -161,6 +161,38 @@ describe('AuditMiddleware', () => {
     expect(data.error).toBeNull();
   });
 
+  it('registra los IDs que dejó AuditResourcesInterceptor (hallazgo #9)', () => {
+    const { res, finish } = buildResponse();
+
+    middleware.use(
+      buildRequest({
+        method: 'POST',
+        originalUrl: '/api/coach-requests/search',
+        auditedResourceType: 'CoachRequest',
+        auditedResourceIds: ['req-1', 'req-2'],
+      }),
+      res,
+      next,
+    );
+    finish();
+
+    const data = create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.resourceType).toBe('CoachRequest');
+    expect(data.resourceIds).toEqual(['req-1', 'req-2']);
+  });
+
+  it('deja resourceIds vacío cuando el endpoint no está marcado con @AuditResources', () => {
+    const { res, finish } = buildResponse();
+
+    middleware.use(buildRequest(), res, next);
+    finish();
+
+    const data = create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.resourceType).toBeNull();
+    // Array vacío, NUNCA null: la columna es String[] y un null rompería el insert.
+    expect(data.resourceIds).toEqual([]);
+  });
+
   it('cae al remoteAddress del socket cuando req.ip no está disponible', () => {
     const { res, finish } = buildResponse();
 

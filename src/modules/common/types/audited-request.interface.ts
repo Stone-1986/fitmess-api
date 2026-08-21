@@ -11,9 +11,15 @@ import type { AuthUser } from './auth-user.interface.js';
  * - `auditErrorCode` lo ponen los exception filters. El status HTTP por si solo
  *   no distingue un 403 por rol de un 403 por entrenador no aprobado; el codigo
  *   del catalogo si.
+ * - `auditedResourceType` y `auditedResourceIds` los pone
+ *   `AuditResourcesInterceptor` en los endpoints marcados con
+ *   `@AuditResources(...)`. Quedan `undefined` en el resto, y tambien cuando un
+ *   guard rechaza antes de llegar al handler — correcto, ahi no se divulgo nada.
  */
 export interface AuditedRequest extends Request {
   correlationId?: string;
   user?: AuthUser;
   auditErrorCode?: string;
+  auditedResourceType?: string;
+  auditedResourceIds?: string[];
 }

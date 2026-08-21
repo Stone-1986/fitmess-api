@@ -14,7 +14,12 @@ import { BadRequestException } from '@nestjs/common';
 import supertest from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/modules/prisma/prisma.service.js';
+import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '../generated/prisma/index.js';
 import { ResponseInterceptor } from '../src/modules/common/interceptors/response.interceptor.js';
+import { AuditResourcesInterceptor } from '../src/modules/common/interceptors/audit-resources.interceptor.js';
 import { ProblemDetailFilter } from '../src/modules/common/filters/problem-detail.filter.js';
 import { PrismaExceptionFilter } from '../src/modules/common/filters/prisma-exception.filter.js';
 import { ValidationExceptionFilter } from '../src/modules/common/filters/validation-exception.filter.js';
@@ -40,6 +45,7 @@ function flattenValidationErrors(
 
 let app: INestApplication;
 let prisma: PrismaService;
+let adminToken: string;
 
 /** Marca cada corrida para poder limpiar solo sus filas. */
 const RUN_ID = Date.now().toString(36);
@@ -70,7 +76,12 @@ beforeAll(async () => {
   }).compile();
 
   app = moduleFixture.createNestApplication();
-  app.useGlobalInterceptors(new ResponseInterceptor());
+  // Mismo orden que main.ts: AuditResourcesInterceptor va despues para ver la
+  // carga tal como la retorna el controller, antes del envelope.
+  app.useGlobalInterceptors(
+    new ResponseInterceptor(),
+    new AuditResourcesInterceptor(app.get(Reflector)),
+  );
   app.useGlobalFilters(
     new GlobalExceptionFilter(),
     new PrismaExceptionFilter(),
@@ -90,6 +101,17 @@ beforeAll(async () => {
   await app.init();
 
   prisma = app.get(PrismaService, { strict: false });
+
+  // JwtStrategy.validate() no consulta la DB: firmar con el mismo JWT_SECRET
+  // alcanza para ejercitar guards y llegar al handler real.
+  const configService = app.get(ConfigService, { strict: false });
+  adminToken = new JwtService({
+    secret: configService.getOrThrow<string>('JWT_SECRET'),
+  }).sign({
+    sub: `audit-e2e-admin-${RUN_ID}`,
+    email: `audit.admin.${RUN_ID}@test.com`,
+    role: UserRole.ADMIN,
+  });
 });
 
 afterAll(async () => {
@@ -199,5 +221,80 @@ describe('Rastro de auditoria — AuditMiddleware', () => {
 
     expect(fila).not.toBeNull();
     expect(JSON.stringify(fila)).not.toContain(documento);
+  });
+});
+
+/**
+ * Hallazgo #9 — el rastro de habeas data en las busquedas por body.
+ *
+ * Los criterios viajan en el body y las reglas prohiben registrarlo, asi que la
+ * fila decia que alguien busco pero no sobre los datos de quien. La salida no
+ * fue registrar los criterios, sino los IDs DEVUELTOS: responden la pregunta
+ * legal ("¿quien consulto mis datos?") sin almacenar un solo dato personal.
+ */
+describe('Rastro de recursos consultados — @AuditResources (hallazgo #9)', () => {
+  it('registra en resource_ids los IDs que devolvio la busqueda', async () => {
+    const response = await supertest(app.getHttpServer())
+      .post('/api/coach-requests/search')
+      .set('User-Agent', AGENT)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ limit: 5 })
+      .expect(200);
+
+    const devueltos = (response.body.data as { id: string }[]).map((r) => r.id);
+
+    // Se filtra por userId, no solo por url: un test anterior de este mismo
+    // archivo deja una fila para esta URL con un 401 (userId null), y
+    // `esperarFila` devuelve la primera coincidencia — retornaria esa.
+    const fila = await esperarFila({
+      url: '/api/coach-requests/search',
+      userId: `audit-e2e-admin-${RUN_ID}`,
+    });
+
+    expect(fila).not.toBeNull();
+    expect(fila!.resourceType).toBe('CoachRequest');
+    expect(fila!.resourceIds).toEqual(devueltos);
+  });
+
+  it('responde "¿quien consulto los datos de X?" con una sola query', async () => {
+    // Es la razon de ser del indice GIN: contencion sobre el array.
+    const response = await supertest(app.getHttpServer())
+      .post('/api/coach-requests/search')
+      .set('User-Agent', AGENT)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ limit: 5 })
+      .expect(200);
+
+    const devueltos = (response.body.data as { id: string }[]).map((r) => r.id);
+
+    // Si la base no tiene solicitudes, no hay titular contra el cual probar la
+    // consulta inversa — el test anterior ya cubre el caso de lista vacia.
+    if (devueltos.length === 0) return;
+
+    await esperarFila({
+      url: '/api/coach-requests/search',
+      userId: `audit-e2e-admin-${RUN_ID}`,
+    });
+
+    const consultantes = await prisma.auditLog.findMany({
+      where: { userAgent: AGENT, resourceIds: { has: devueltos[0] } },
+      select: { userId: true, url: true },
+    });
+
+    expect(consultantes.length).toBeGreaterThan(0);
+    expect(consultantes[0].userId).toBe(`audit-e2e-admin-${RUN_ID}`);
+  });
+
+  it('deja resource_ids vacio en un endpoint sin @AuditResources', async () => {
+    await supertest(app.getHttpServer())
+      .get('/api/exercises')
+      .set('User-Agent', AGENT)
+      .expect(401);
+
+    const fila = await esperarFila({ url: '/api/exercises' });
+
+    expect(fila).not.toBeNull();
+    expect(fila!.resourceType).toBeNull();
+    expect(fila!.resourceIds).toEqual([]);
   });
 });

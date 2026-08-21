@@ -134,10 +134,26 @@ model AuditLog {
   duration      Int?     @map("duration")
   correlationId String?  @map("correlation_id")
   error         String?  @map("error")
+
+  // Que recursos toco el request. Sin esto, una busqueda cuyos criterios viajan
+  // en el body (POST /coach-requests/search) deja constancia de que ALGUIEN
+  // busco, pero no sobre los datos de QUIEN — y las reglas prohiben registrar el
+  // body. Ante un reclamo de habeas data ("¿quien consulto mis datos?") el
+  // rastro era insuficiente para esas rutas (hallazgo #9).
+  //
+  // Se guardan los IDs DEVUELTOS, no los criterios buscados: la pregunta legal
+  // es quien accedio a los datos del titular, y una busqueda sin resultados no
+  // divulgo nada. Los IDs si pueden registrarse; nombres, emails y documentos no.
+  resourceType  String?  @map("resource_type")
+  resourceIds   String[] @map("resource_ids")
+
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([userId])
   @@index([correlationId])
+  // GIN: responde "¿quien consulto los datos de X?" con `resource_ids @> '{X}'`.
+  // Un btree no sirve para contencion en arrays.
+  @@index([resourceIds], type: Gin)
   @@map("audit_logs")
 }
 

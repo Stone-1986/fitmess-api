@@ -9,7 +9,9 @@ import { BadRequestException } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
+import { Reflector } from '@nestjs/core';
 import { ResponseInterceptor } from './modules/common/interceptors/response.interceptor.js';
+import { AuditResourcesInterceptor } from './modules/common/interceptors/audit-resources.interceptor.js';
 import { ProblemDetailFilter } from './modules/common/filters/problem-detail.filter.js';
 import { PrismaExceptionFilter } from './modules/common/filters/prisma-exception.filter.js';
 import { ValidationExceptionFilter } from './modules/common/filters/validation-exception.filter.js';
@@ -91,8 +93,13 @@ async function bootstrap() {
   );
 
   // Interceptors
+  // El orden importa: Nest compone los interceptores de modo que el primero
+  // ENVUELVE al segundo, así que la respuesta sale por el segundo primero.
+  // AuditResourcesInterceptor va después para ver la carga TAL COMO la retorna
+  // el controller, antes de que ResponseInterceptor la envuelva.
   app.useGlobalInterceptors(
     new ResponseInterceptor(), // Envelope de éxito { success, data, meta, timestamp }
+    new AuditResourcesInterceptor(app.get(Reflector)), // IDs devueltos → audit_logs (hallazgo #9)
   );
 
   // Exception Filters
