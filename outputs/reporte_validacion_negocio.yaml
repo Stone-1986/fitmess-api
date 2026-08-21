@@ -1,481 +1,237 @@
 validacion_producto:
-  epica_id: "EPICA-03"
+  epica_id: "EPICA-04"
   fecha: "2026-08-20"
-  analista: "Analista de Producto — fitmess-api"
-
-  resumen_ejecutivo: >
-    EPICA-03 "Creacion y Publicacion de Planes de Entrenamiento" define cuatro historias de
-    usuario que cubren el ciclo de vida completo del plan como plantilla base: construccion
-    (HU-008), publicacion (HU-009), cierre/archivo (HU-010) y descubrimiento por el atleta
-    (HU-011). El objetivo de negocio es claro y la cadena de dependencias declarada
-    (HU-009->HU-008, HU-010->HU-009, HU-011->HU-009, HU-011->HU-003) es correcta y no presenta
-    contradicciones internas.
-
-    Las tres decisiones confirmadas por el humano el 2026-08-20 se verificaron incorporadas de
-    forma consistente en las 22 CA y se dan por cerradas, sin reabrirlas: (1) la jerarquia
-    Plan -> Fase -> Semana -> Sesion -> SessionExercise, con la semana como entidad propia; (2)
-    el perfil publico del entrenador limitado a id/name/avatarUrl (User) + description/bannerUrl
-    (CoachRequest.planDescription/bannerUrl), verificado contra `prisma/schema.prisma` — User no
-    tiene campos `centro` ni `descripcion`; (3) `hasSubscribers(planId)` como stub aislado que
-    hoy retorna `false`, mismo patron que `isUsedInPlan` de EPICA-02, con el gap de CA-009-7
-    declarado explicitamente y no verificable end-to-end en esta epica.
-
-    Sobre los cuatro puntos donde se pidio mi juicio explicito:
-
-    1. Ley 1581/2012 sobre el perfil publico (HU-011): ES el hallazgo real de esta epica. La
-    lista de campos ya decidida es correcta, pero verifique que `planDescription` se recoge en
-    el registro del entrenador (`register-coach.dto.ts:142`) bajo una finalidad textual explicita
-    y mas estrecha: "Texto libre que el administrador revisara". Exhibirlo publicamente a atletas
-    en el catalogo es una finalidad distinta de la declarada al momento de la captura. Bajo el
-    principio de finalidad de la Ley 1581/2012 (art. 4 lit. b) un cambio de finalidad exige
-    informar al titular y, en general, nueva autorizacion — ver guardarrail detallado en HU-011.
-    CERRADO POR DECISION DEL HUMANO (2026-08-20): este analisis fue DESCARTADO. `planDescription`
-    es informacion publica del programa —la oferta comercial del entrenador, para que el atleta
-    sepa de que va el plan— y no un dato personal del titular, que es lo que la Ley 1581/2012
-    protege. El analisis confundio "texto escrito por una persona" con "dato personal de esa
-    persona". Se corrige tambien la premisa factual: NO hay usuarios en produccion, el proyecto
-    esta en construccion. La epica NO tiene condiciones legales bloqueantes.
-
-    2. Efecto de borde "COACH sin CoachRequest": verificado contra `auth.service.ts` (metodo
-    `login()`, lineas 476-495) que un usuario con role=COACH tiene el login bloqueado
-    (`COACH_NOT_APPROVED`) mientras su `CoachRequest` no este en estado APPROVED, y que el unico
-    camino de creacion de un usuario COACH (`registerCoach()`) crea User + CoachRequest en la
-    misma `$transaction`. En consecuencia, ningun COACH puede autenticarse — y por tanto ninguno
-    puede publicar un plan — sin tener una `CoachRequest` aprobada. El efecto de borde senalado
-    no es alcanzable con el codigo actual: no rompe ningun criterio de HU-011.
-
-    3. "Fase 1" en CA-011-1: verificado que `registerAthlete()` crea User + LegalAcceptance
-    (HABEAS_DATA + TERMS_OF_SERVICE) en una unica `$transaction` atomica — no existe un estado de
-    "registro parcial" en el modelo actual. Por tanto RN-25/RN-26 ("atleta en Fase 1") no
-    requieren ningun campo o flag nuevo: se verifican integramente con "usuario autenticado con
-    role=ATHLETE", que ya cubren `JwtAuthGuard` + `RolesGuard`. CA-011-1 es completamente
-    verificable con lo que existe hoy en el codigo.
-
-    4. CA-010-1 como resultado observable: correcto tal como esta redactado. No pido que se
-    especifique el mecanismo (job, evaluacion perezosa u otro) — es decision de arquitectura. El
-    comportamiento funcional es completo y sin ambiguedad: a partir de la fecha de fin, cualquier
-    consulta debe mostrar Finalizado.
-
-    5. Alcance declarado fuera de esta epica (bloqueo de inscripciones en Finalizado, bloqueo de
-    resultados en Archivado, vista de suscripciones del atleta): revisadas las cuatro HU una por
-    una, ninguna queda funcionalmente incompleta ni sin valor entregable por este deslinde. Cada
-    HU entrega valor por si sola sin depender de EPICA-04/05 (ver detalle por HU abajo).
-
-    Investigacion de industria: la jerarquia Plan->Fase->Semana->Sesion confirmada por el humano
-    corresponde de forma directa al patron de periodizacion deportiva estandar documentado por la
-    NSCA (National Strength and Conditioning Association) — macrociclo (temporada/plan),
-    mesociclo (fase, 3-8 semanas con un enfasis de entrenamiento), microciclo (semana individual)
-    y sesion. Esto valida que tratar la semana como entidad propia (y no como campo calculado) es
-    consistente con como el dominio del entrenamiento deportivo realmente se organiza, no una
-    sobre-ingenieria del modelo.
-
-    Con la unica condicion legal de HU-011 y las dos condiciones funcionales de completitud en
-    HU-008 (ver detalle), la epica esta lista para que el Arquitecto planifique, siempre que las
-    condiciones se resuelvan antes del CHECKPOINT 1 o queden explicitamente aceptadas por el
-    humano como riesgo asumido.
-
   historias_de_usuario:
-
-    - id: "HU-008"
-      titulo: "Creacion de la plantilla base de un plan de entrenamiento"
-      decision: "APROBADA_CON_CONDICIONES"
-      observaciones: >
-        Los seis criterios son claros y en su mayoria verificables. CA-008-1 fija correctamente
-        el estado inicial completo; CA-008-2 evita el error comun de bloquear el guardado
-        incompleto (solo bloquea PUBLICAR, correctamente delegado a HU-009); CA-008-3 conecta de
-        forma explicita con el gap declarado de EPICA-02 (`isUsedInPlan`); CA-008-4/5/6 cubren
-        control de acceso por rol, autenticacion y propiedad del recurso de forma completa y
-        consistente con RN-18.
-
-        CONDICION 1 (completitud, no bloqueante para arquitectura pero si para el Documentador):
-        no existe un criterio que verifique el rechazo al intentar agregar a una sesion un
-        `exerciseId` que NO existe en la biblioteca global. La dependencia HU-008->HU-005
-        declarada en el YAML ("No se puede agregar un ejercicio a una sesion del plan si el
-        ejercicio no existe en la biblioteca global de EPICA-02") describe la regla, pero ningun
-        CA la hace verificable ni define el codigo de error esperado — a diferencia de CA-008-4,
-        CA-008-5 y CA-008-6, que si verifican sus rechazos respectivos. Sin este CA, RN-04 no es
-        testeable de forma explicita en esta HU.
-
-        CONDICION 2 (completitud): tampoco existe un criterio que cubra el intento de referenciar
-        directamente por id un ejercicio que existe pero esta inhabilitado (`isActive=false`).
-        `restricciones_conocidas` describe esto como un filtro de listado ("un ejercicio
-        inhabilitado no aparece como opcion para planes nuevos"), lo cual es un comportamiento de
-        UI/consulta, no una regla de validacion de la API. Si un cliente referencia igual el id
-        de un ejercicio inhabilitado (bypaseando el filtro del listado), el documento no dice si
-        el sistema debe rechazarlo o permitirlo. El precedente directo de este mismo proyecto es
-        CA-006-6 de EPICA-02, que blindeo exactamente este tipo de vacio (edicion de un ejercicio
-        inhabilitado) con un CA explicito y un codigo de error dedicado (EXERCISE_INACTIVE, 422).
-        Recomiendo el mismo tratamiento aqui: un CA nuevo que declare si agregar un ejercicio
-        inhabilitado a una sesion se rechaza (recomendado, por consistencia con RN-04 y con el
-        catalogo filtrado de EPICA-02) o se permite explicitamente.
-
-        Ninguna de las dos condiciones es de naturaleza legal ni bloquea que el Arquitecto
-        empiece a planificar la estructura general del modulo; si bloquean que el Documentador
-        pueda escribir con precision las respuestas de error del endpoint de agregar ejercicio a
-        una sesion.
-
-      guardarrails_aplicables:
-        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: false
-          cumple: true
-          accion_requerida: >
-            No aplica. Un plan (nombre, fechas, fases, semanas, sesiones, referencias a
-            versiones de ejercicio) es contenido estructural del entrenador, no un dato personal
-            de un tercero. El entrenador ya autorizo el tratamiento de sus propios datos en su
-            registro (EPICA-01); crear un plan no introduce un nuevo titular de datos.
-
-        - ley: "Ley 1273/2009 — Seguridad de la informacion"
-          aplica: true
-          cumple: true
-          accion_requerida: >
-            Cubierto. CA-008-4/CA-008-5/CA-008-6 verifican control de acceso completo: rol
-            (ATHLETE rechazado), autenticacion (401) y propiedad del recurso (un entrenador no
-            puede modificar el plan de otro). La trazabilidad de auditoria ya no es un hallazgo
-            abierto en este proyecto: el middleware global (`common/middlewares/audit.middleware.ts`,
-            cerrado el 2026-08-19) audita toda mutacion HTTP salvo el health check, sin que cada
-            modulo nuevo tenga que implementarlo — cubrira los endpoints de esta HU sin trabajo
-            adicional del Desarrollador, siempre que no se excluyan del middleware global.
-
-        - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: false
-          cumple: true
-          accion_requerida: >
-            No aplica. Construir la estructura de un plan no involucra la firma de un contrato
-            ni un consentimiento que deba quedar registrado de forma inmutable.
-
-      fuentes_consultadas:
-        - url: "https://www.nsca.com/education/articles/kinetic-select/hierarchical-structure-of-periodization-cycles/"
-          resumen: >
-            La NSCA (National Strength and Conditioning Association) describe la periodizacion
-            deportiva estandar en tres niveles: macrociclo (temporada completa), mesociclo (fase
-            de 3-8 semanas con un enfasis de entrenamiento) y microciclo (semana individual que
-            organiza las sesiones). Valida que la jerarquia Plan->Fase->Semana->Sesion confirmada
-            por el humano corresponde al modelo real con el que se disena entrenamiento deportivo,
-            y no es una entidad agregada de forma artificial.
-        - url: "https://www.trainingpeaks.com/blog/macrocycles-mesocycles-and-microcycles-understanding-the-3-cycles-of-periodization/"
-          resumen: >
-            TrainingPeaks, plataforma de referencia de la industria para entrenadores, organiza
-            sus planes anuales (ATP) exactamente en ese mismo esquema de fases y semanas. Refuerza
-            que tratar la semana como nivel propio (no como campo calculado desde `startDate`) es
-            consistente con como una plataforma de entrenamiento comparable estructura sus datos.
-
-    - id: "HU-009"
-      titulo: "Publicacion de un plan de entrenamiento"
+    - id: "HU-012"
       decision: "APROBADA"
       observaciones: >
-        Los siete criterios son claros, atomicos y verificables, y cubren de forma completa el
-        ciclo publicar/despublicar: CA-009-1 y CA-009-2 verifican ambas ramas de la validacion de
-        RN-01 al publicar; CA-009-3 y CA-009-7 verifican ambas ramas de la regla de suscritos al
-        despublicar; CA-009-4 protege correctamente la inmutabilidad de fechas y estructura tras
-        publicar (RN-31); CA-009-5/CA-009-6 cubren propiedad del recurso y rol. No encuentro
-        contradicciones entre estas CA y las de HU-008 o HU-010.
+        Flujo de solicitud de inscripcion completo y verificable: cubre el camino feliz
+        (CA-012-1), el bloqueo de duplicados mientras exista una suscripcion Pendiente,
+        Aprobada o Activa (CA-012-2), el reintento permitido tras un Rechazo (CA-012-3),
+        el filtro por estado Publicado del plan (CA-012-4), la restriccion de rol
+        (CA-012-5) y la exigencia de autenticacion (CA-012-6). Los criterios son
+        verificables uno a uno y no hay contradicciones con RN-17, RN-18 ni con RN-27
+        heredada de EPICA-03. Los cuatro supuestos confirmados por el humano el
+        2026-08-20 quedan reflejados correctamente en las CA y en las notas de la HU;
+        no se reabren.
 
-        CA-009-7 depende de `hasSubscribers(planId)`, stub aislado que hoy siempre retorna
-        `false` — esto es una DECISION CONFIRMADA del humano que no reabro. Ratifico como
-        condicion de aprobacion (no de esta HU en particular, sino del proceso de QA de la epica
-        completa) lo que las notas de la propia HU ya exigen: el reporte de QA debe declarar
-        explicitamente que CA-009-7 esta verificado solo a nivel unitario (mock de
-        `hasSubscribers`) y no de forma end-to-end, con su cobertura e2e real pendiente hasta
-        EPICA-04 — mismo patron que CA-006-1 en EPICA-02. Ver condicion no bloqueante al final
-        del reporte.
-
-        CA-009-4 deja fuera de alcance, de forma explicita y correcta en las notas de la HU, si
-        otros cambios a la plantilla base (por ejemplo, cambiar un ejercicio dentro de una sesion
-        existente) siguen permitidos tras publicar. No lo considero un vacio: el documento no
-        asume ninguna respuesta y la declara fuera de alcance de forma consciente, que es
-        preferible a una ambiguedad silenciosa.
-
+        Observacion no bloqueante (mejora de industria, fuera del alcance minimo de
+        esta HU): plataformas comparables (TrainingPeaks) expiran automaticamente una
+        solicitud de conexion coach-atleta no atendida (72 horas) para evitar que quede
+        en Pendiente indefinidamente y bloquee reintentos via CA-012-2. Esta epica no
+        define expiracion — es una decision de producto legitima para una iteracion
+        futura, no un defecto de esta HU. No genero condicion por esto: la mitigacion
+        natural ya existe (el atleta puede seguir viendo su solicitud Pendiente y el
+        entrenador recibe notificacion en CA-012-1).
       guardarrails_aplicables:
-        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: false
-          cumple: true
-          accion_requerida: >
-            No aplica. Publicar o despublicar un plan es un cambio de estado sobre contenido del
-            entrenador, no involucra un nuevo titular de datos personales.
-
-        - ley: "Ley 1273/2009 — Seguridad de la informacion"
+        - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Cubierto. CA-009-5/CA-009-6 verifican propiedad del recurso y rechazo por rol.
-            Auditoria cubierta por el middleware global existente (ver HU-008); un cambio de
-            estado de plan (publicar/despublicar) es exactamente el tipo de mutacion que
-            `audit.middleware.ts` ya captura sin trabajo adicional.
-
-        - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: false
+            Ninguna. CA-012-5 y CA-012-6 cubren control de acceso por rol y
+            autenticacion. El registro de auditoria de recursos consultados ya es
+            transversal (commit bfd541c, "registrar los recursos consultados en la
+            auditoria") y aplica automaticamente sin requerir CA adicional en esta HU.
+        - ley: "Ley 1581/2012 + Circular SIC 2024"
+          aplica: true
           cumple: true
           accion_requerida: >
-            No aplica. No hay firma ni consentimiento de por medio en un cambio de estado de plan.
-
-      fuentes_consultadas: []
-
-    - id: "HU-010"
-      titulo: "Finalizacion y archivo de un plan de entrenamiento"
+            Ninguna. Esta HU no recolecta datos personales nuevos: relaciona un
+            atleta ya registrado (con su Habeas Data aceptado en EPICA-01/HU-003) con
+            un plan Publicado. No se requiere un nuevo aviso de privacidad ni
+            consentimiento adicional en esta etapa.
+        - ley: "Ley 527/1999"
+          aplica: true
+          cumple: true
+          accion_requerida: >
+            Ninguna. La restriccion_conocida de la epica ("las suscripciones no se
+            eliminan bajo ninguna circunstancia, incluidas las Rechazadas") extiende a
+            esta HU el mismo criterio de inmutabilidad historica que RN-13 ya aplica a
+            planes y resultados, dando integridad y disponibilidad al registro.
+    - id: "HU-013"
       decision: "APROBADA"
       observaciones: >
-        Los cinco criterios son claros y completos. CA-010-1 esta correctamente redactado como
-        resultado observable ("a partir de la fecha de fin, cualquier consulta del plan debe
-        mostrarlo en estado Finalizado") sin prescribir mecanismo tecnico — validado como
-        adecuado, no pido que se especifique un job/evaluacion perezosa/endpoint, es decision de
-        arquitectura. CA-010-2 cubre correctamente el archivo manual desde cualquiera de los tres
-        estados previos (Borrador, Publicado, Finalizado); CA-010-3 evita una doble transicion
-        silenciosa; CA-010-4/CA-010-5 cubren propiedad del recurso y rol.
+        Cubre aprobacion (CA-013-1), rechazo (CA-013-2), listado de pendientes con
+        contexto suficiente para decidir (CA-013-3), validacion de propiedad del plan
+        (CA-013-4), restriccion de rol (CA-013-5), idempotencia frente a una decision ya
+        tomada (CA-013-6) y autenticacion (CA-013-7). RN-18 y RN-20 quedan correctamente
+        secuenciadas: la aprobacion del entrenador es necesaria pero no suficiente — el
+        estado Aprobada es explicitamente intermedio hasta que HU-014 produzca Activa.
+        La nota de la HU que resuelve el gap de hasSubscribers(planId) dejado por
+        EPICA-03 (CA-009-7) esta correctamente delimitada: "suscrito" = Aprobada o
+        Activa, Pendiente no cuenta, coherente con que el entrenador aun puede rechazar
+        una Pendiente en el mismo momento en que intenta despublicar.
 
-        Sobre el deslinde de alcance con RN-28/RN-29 (bloqueo de inscripciones en Finalizado,
-        bloqueo de resultados en Archivado, ambos declarados fuera de esta epica): revisado y no
-        deja a HU-010 incompleta. El valor entregable de esta HU es exclusivamente que el ESTADO
-        del plan quede correctamente reflejado y que HU-011 lo respete al filtrar el catalogo
-        (CA-011-3) — eso es exactamente lo que las cinco CA verifican, sin depender de que exista
-        todavia el modelo de suscripciones o de ejecucion de sesiones (EPICA-04/05). No hay
-        ninguna CA de esta HU que dependa de una capacidad que no exista hoy o que esta epica no
-        vaya a construir.
-
-        La nota de la propia HU que distingue "cierre de semana" (RN-30, EPICA-05) de
-        "finalizacion del plan" (esta HU) es correcta y util: son dos conceptos distintos que no
-        deben confundirse, y el deslinde esta explicito.
-
+        Observacion no bloqueante, ligada a la pregunta que se eleva en HU-014: ni esta
+        HU ni la definicion de archive()/la transicion automatica a Finalizado (por
+        endDate) verifican estado de suscripciones antes de permitir el cambio de
+        estado del plan — a diferencia de unpublish(), que si bloquea con
+        PLAN_HAS_SUBSCRIBERS. Esto significa que un entrenador puede aprobar una
+        solicitud (CA-013-1) sobre un plan que luego se archiva o finaliza antes de que
+        el atleta alcance a aceptar el consentimiento de HU-014. Ver la pregunta
+        formulada en HU-014, que es donde el efecto se materializa (una suscripcion
+        podria llegar a Activa sobre un plan ya no Publicado).
       guardarrails_aplicables:
-        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: false
-          cumple: true
-          accion_requerida: >
-            No aplica. Cambiar el estado de un plan a Finalizado o Archivado no involucra datos
-            personales de un tercero.
-
-        - ley: "Ley 1273/2009 — Seguridad de la informacion"
+        - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Cubierto. CA-010-4/CA-010-5 verifican propiedad y rol. El archivo manual es una
-            mutacion explicita del entrenador y queda cubierta por el middleware de auditoria
-            global. La transicion automatica a Finalizado (CA-010-1) es un cambio derivado, no
-            una accion HTTP directa de un usuario — no genera una entrada de auditoria por si
-            misma, lo cual es correcto: `audit_logs` registra acciones de usuarios autenticados
-            sobre la API, no transiciones de estado derivadas de tiempo. No es un vacio: nadie
-            "hizo" nada que deba auditarse en ese instante.
-
-        - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: false
+            Ninguna. CA-013-4 (propiedad del plan), CA-013-5 (rol) y CA-013-7
+            (autenticacion) cubren el acceso no autorizado. Auditoria heredada del
+            interceptor transversal ya existente.
+        - ley: "Ley 1581/2012 + Circular SIC 2024"
+          aplica: true
           cumple: true
           accion_requerida: >
-            No aplica.
-
-      fuentes_consultadas: []
-
-    - id: "HU-011"
-      titulo: "Exploracion del catalogo de entrenadores y planes publicados"
-      decision: "APROBADA_CON_CONDICIONES"
+            Ninguna. El nombre del atleta que ve el entrenador en CA-013-3 es un dato
+            ya compartido dentro de una relacion coach-atleta preexistente y consentida
+            (RN-17, formalizada desde EPICA-01 via CoachRequest). No es una nueva
+            recoleccion ni un nuevo tratamiento de datos personales.
+        - ley: "Ley 527/1999"
+          aplica: true
+          cumple: true
+          accion_requerida: >
+            Ninguna. La decision del entrenador (aprobar/rechazar) queda registrada de
+            forma inmutable como parte del historial de la suscripcion, igual criterio
+            que HU-012.
+    - id: "HU-014"
+      decision: "APROBADA"
       observaciones: >
-        Los cuatro criterios son claros y verificables en su forma. CA-011-1 es completamente
-        verificable con lo que existe hoy: "Fase 1" (RN-25/RN-26) no requiere ningun campo nuevo,
-        se satisface con "atleta autenticado" porque el registro es atomico (ver hallazgo #3 del
-        resumen ejecutivo). CA-011-2 y CA-011-3 son coherentes entre si y con HU-009/HU-010.
-        CA-011-4 cubre la falta de autenticacion.
+        Es la HU con mayor peso legal de la epica y esta bien resuelta en su nucleo: el
+        consentimiento informado deportivo reutiliza exactamente el mecanismo de
+        trazabilidad legal ya probado en EPICA-01 (LegalAcceptance append-only, con
+        documentType = SPORT_CONSENT, documentVersion y momento de aceptacion), y las CA
+        cubren el flujo completo — visibilidad del consentimiento pendiente tras la
+        aprobacion (CA-014-1), la transicion a Activa con registro completo
+        (CA-014-2), independencia por cada par atleta-plan (CA-014-4), el disclaimer
+        obligatorio de IA (CA-014-5), la restriccion de titularidad (CA-014-6) y la
+        exigencia de autenticacion (CA-014-7). El cuarto supuesto confirmado por el
+        humano (no existe "rechazar" el consentimiento, solo aceptar o dejarlo
+        pendiente indefinidamente) queda correctamente reflejado y no se reabre.
 
-        Nota funcional no bloqueante: a diferencia de HU-008/HU-009/HU-010, ningun CA de HU-011
-        verifica el rechazo de un usuario con rol COACH o ADMIN al consultar el catalogo. Lo
-        interpreto como una omision deliberada y razonable (cualquier usuario autenticado,
-        incluido un entrenador viendo como luce el catalogo, puede explorarlo) y no como un vacio
-        — restringirlo por rol seria agregar una regla que ningun documento fuente pide. No lo
-        elevo a condicion.
+        CONDICION RESUELTA el 2026-08-20 por decision del humano — la HU pasa a
+        APROBADA sin reservas. Se agrego CA-014-8 a HU-014 en epica_input.yaml:
+        aceptar el consentimiento se rechaza si el plan ya no esta vigente, y la
+        suscripcion permanece en Aprobada sin transicionar nunca a Activa. Sin estados
+        nuevos en SubscriptionStatus. Ademas se decidio explicitamente que archive() NO
+        recibe un gate de suscriptores: no es simetrico con unpublish(), porque
+        unpublish() devuelve el plan a Borrador EDITABLE (mutar el contenido bajo
+        atletas ya inscritos) mientras que archive() es terminal y no altera el
+        contenido; queda como decision documentada, no como gap.
 
-        Nota funcional no bloqueante sobre RN-24: el texto de la regla ("Datos obligatorios del
-        entrenador: nombre/centro, email, telefono, numero de identificacion, descripcion") es un
-        residual del documento fuente original que menciona un campo "centro" inexistente en
-        `User` — ya corregido en la practica por la propia nota de esta HU y por la decision
-        confirmada del humano, que listan los campos reales correctamente. Recomiendo limpiar el
-        texto de RN-24 en una proxima revision para que no induzca al Arquitecto o al DBA a
-        buscar un campo que no existe, pero no bloquea nada porque la fuente de verdad (la
-        decision confirmada y el glosario) ya esta correcta.
+        Precision del orquestador sobre el analisis original, verificada contra el
+        codigo: la transicion a Finalizado no es "un metodo que no verifica
+        suscripciones" sino que NO ES UNA TRANSICION QUE NADIE INVOQUE —
+        computeEffectiveStatus() (plans.service.ts:1027-1039) la deriva de
+        endDate < now(), de modo que el plan se finaliza por el paso del tiempo y no
+        existe punto de codigo donde insertar una verificacion. Por eso CA-014-8
+        valida en el momento de ACEPTAR, el unico con un actor y una peticion reales.
+        Corolario para la implementacion: la condicion de vigencia no puede ser
+        `status !== PUBLISHED`, porque un plan con la columna en PUBLISHED y endDate
+        pasada esta efectivamente Finalizado — justo el caso que motiva el CA.
 
-        CONDICION LEGAL — CERRADA POR DECISION DEL HUMANO (2026-08-20): esta HU planteo como
-        bloqueante que publicar `CoachRequest.planDescription` y `bannerUrl` en el catalogo era
-        un cambio de finalidad bajo Ley 1581/2012. El humano lo resolvio como NO APLICABLE:
-        `planDescription` es informacion publica del programa (la oferta comercial del
-        entrenador, para que el atleta sepa de que va el plan al que se inscribe), no un dato
-        personal del titular. La ley protege datos personales; la descripcion de un servicio
-        ofrecido no lo es. Ademas NO hay usuarios en produccion — el proyecto esta en fase de
-        construccion. HU-011 queda sin condiciones legales; conserva unicamente la nota
-        documental no bloqueante sobre RN-24. Ver detalle en guardarrails_ley_1581 abajo.
+        Alcance real del vacio, tambien verificado: el catalogo filtra
+        `status=PUBLISHED AND endDate>=now()` (plans.service.ts:847 y :913), asi que un
+        atleta no puede ver ni solicitar un plan no vigente. HU-012 nunca estuvo
+        expuesta; el vacio afectaba solo a suscripciones ya creadas en Pendiente o
+        Aprobada.
 
+        Registro de la condicion original: la epica no definia que ocurre si
+        el plan subyacente cambia de estado (a Finalizado por vencimiento de endDate, o
+        a Archivado por el entrenador) entre el momento en que la suscripcion queda
+        Aprobada (HU-013) y el momento en que el atleta acepta el consentimiento
+        (HU-014). A diferencia de unpublish() (que si bloquea con PLAN_HAS_SUBSCRIBERS
+        si hay suscriptores Aprobados/Activos, verificado en
+        src/modules/plans/plans.service.ts:732-751), archive() y la transicion
+        automatica a Finalizado (por endDate, plans.service.ts:1024-1039) no verifican
+        suscripciones existentes. Esto abre la posibilidad de que una suscripcion
+        llegue a estado Activa (CA-014-2) sobre un plan que ya no esta Publicado, lo
+        cual no contradice literalmente ningun CA de esta HU (ninguno condiciona la
+        aceptacion al estado del plan) pero si tensiona el criterio de exito declarado
+        a nivel de epica ("ningun atleta puede iniciar sesiones de un plan sin haber
+        completado las tres etapas del flujo") con el objetivo implicito de que esas
+        tres etapas ocurran sobre un plan vigente. No es un vacio legal — es un vacio
+        funcional que la epica no contemplo. Se eleva como pregunta abierta al
+        Arquitecto/humano antes de cerrar esta HU sin condiciones; no bloquea el resto
+        de la epica ni entra en conflicto con las decisiones ya tomadas por el
+        Arquitecto. (Cerrada — ver el bloque CONDICION RESUELTA al inicio de esta
+        observacion.)
       guardarrails_aplicables:
-        - ley: "Ley 1581/2012 + Circular SIC No. 2/2024 — Consentimiento y datos personales"
-          aplica: true
-          cumple: "pendiente"
-          accion_requerida: >
-            NO se cumple hoy sin una accion adicional. Verificado contra el codigo:
-            `register-coach.dto.ts:142` describe `planDescription` con la finalidad textual
-            "Texto libre que el administrador revisara" — una finalidad de revision administrativa
-            interna, mas estrecha que "exhibicion publica a atletas en el catalogo de planes".
-            Bajo el principio de finalidad de la Ley 1581/2012 (art. 4 lit. b: el tratamiento debe
-            obedecer una finalidad legitima e informada al titular antes de la recoleccion), usar
-            un dato para una finalidad distinta de la informada requiere avisar al titular del
-            cambio y, en general, obtener nueva autorizacion — no basta con que el dato ya haya
-            sido aprobado por un ADMIN para un proposito distinto (la aprobacion valida la
-            solicitud de ser entrenador, no autoriza per se la publicacion del texto).
-            Distingo dos frentes, ambos necesarios antes de que HU-011 se exponga en produccion:
-            (a) ENTRENADORES FUTUROS: actualizar la descripcion del campo `planDescription` en el
-            flujo de registro de entrenador (y, si el negocio lo decide, el documento HABEAS_DATA
-            referenciado por `personalDataDocumentVersion`) para declarar explicitamente, antes de
-            que el entrenador envie su solicitud, que si es aprobada su descripcion y banner se
-            mostraran publicamente a los atletas en el catalogo. Es un cambio de texto/contenido,
-            no de arquitectura.
-            (b) ENTRENADORES YA APROBADOS: la base de datos ya tiene usuarios reales (ver
-            `outputs/execution-log.md`, migracion de EPICA-02 aplicada contra una DB con 3
-            usuarios). Cualquier entrenador aprobado antes de que exista el aviso de (a) dio su
-            `planDescription` bajo la finalidad antigua, sin saber que se publicaria. Antes de
-            activar el catalogo en produccion, el humano/negocio debe decidir explicitamente como
-            cerrar esto: notificar el cambio de finalidad a los entrenadores ya aprobados (via
-            email o al iniciar sesion) es la opcion mas conforme; omitirlo sin decision documentada
-            no es aceptable bajo este guardarrail.
-            No propongo que el Arquitecto resuelva esto con un mecanismo tecnico especifico — es
-            una decision de negocio/legal sobre contenido y comunicacion — pero el reporte no
-            puede afirmar que este guardarrail esta cumplido hasta que el humano tome la decision.
-            Distinto es el caso de `name` y `avatarUrl`: los interpreto como de bajo riesgo y
-            razonablemente dentro de la finalidad esperada por el propio acto de solicitar ser
-            entrenador en una plataforma cuyo proposito central es conectar entrenadores con
-            atletas — a diferencia de `planDescription`, no llevan una finalidad textual mas
-            estrecha declarada en el DTO que los contradiga.
-
-        - ley: "Ley 1273/2009 — Seguridad de la informacion"
+        - ley: "Ley 1273/2009"
           aplica: true
           cumple: true
           accion_requerida: >
-            Cubierto. CA-011-4 verifica el rechazo por falta de credenciales. El middleware de
-            auditoria global registra el acceso al catalogo sin exponer datos personales (solo
-            userId, segun el diseno ya cerrado el 2026-08-19).
-
-        - ley: "Ley 527/1999 — Validez de documentos digitales"
-          aplica: false
+            Ninguna. CA-014-6 (solo el titular de la suscripcion acepta su propio
+            consentimiento) y CA-014-7 (autenticacion) cubren el acceso no autorizado.
+        - ley: "Ley 1581/2012 + Circular SIC 2024"
+          aplica: true
           cumple: true
           accion_requerida: >
-            No aplica. Explorar el catalogo no genera ni consume un consentimiento o contrato con
-            valor legal propio; reutiliza las aceptaciones ya registradas en el registro.
-
-      fuentes_consultadas:
-        - url: "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981"
-          resumen: >
-            Texto oficial de la Ley 1581 de 2012. El principio de finalidad (art. 4 lit. b) exige
-            que el tratamiento obedezca una finalidad legitima informada al titular; un cambio de
-            finalidad no informada al momento de la recoleccion requiere nueva autorizacion. Base
-            de la condicion bloqueante declarada en esta HU sobre `planDescription`/`bannerUrl`.
-        - url: "https://sic.gov.co/preguntas-frecuentes-pdp"
-          resumen: >
-            Guia de preguntas frecuentes de la Superintendencia de Industria y Comercio (autoridad
-            de proteccion de datos en Colombia) sobre proteccion de datos personales, consistente
-            con el principio de finalidad aplicado arriba.
-
+            Ninguna. El consentimiento informado deportivo no es una nueva recoleccion
+            de datos personales sino un registro de aceptacion sobre un documento
+            versionado a nivel de plataforma (tercer supuesto confirmado por el
+            humano). La finalidad (dejar constancia de comprension de riesgos del
+            entrenamiento) esta declarada explicitamente en el "para" de la HU.
+        - ley: "Ley 527/1999"
+          aplica: true
+          cumple: true
+          accion_requerida: >
+            Ninguna respecto del mecanismo: CA-014-2 exige registrar momento exacto,
+            version del documento y plan — mismo patron append-only usado y validado en
+            EPICA-01 para Habeas Data y Terminos, que garantiza autenticidad,
+            integridad y disponibilidad del registro. Verificado contra el schema real
+            (prisma/schema.prisma:109-123): LegalAcceptance ya tiene documentVersion,
+            ip, userAgent y acceptedAt no nulables, y DocumentType ya incluye
+            SPORT_CONSENT.
+        - ley: "CA-014-5 — disclaimer de IA (buena practica de industria, no una ley especifica)"
+          aplica: true
+          cumple: true
+          accion_requerida: >
+            Ninguna. La investigacion de mercado confirma que el disclaimer de que las
+            recomendaciones de IA no sustituyen asesoria medica profesional es
+            practica estandar recomendada para apps de fitness/salud que usan IA
+            (ver fuentes consultadas). CA-014-5 lo exige explicitamente como parte del
+            contenido visible del consentimiento, no como texto oculto o en letra
+            pequena — consistente con la mejor practica encontrada.
+  fuentes_consultadas:
+    - url: "https://www.trainingpeaks.com/pricing/for-coaches/"
+      resumen: >
+        Plataformas de coaching deportivo comparables (TrainingPeaks) modelan la
+        conexion entrenador-atleta como una solicitud que el entrenador debe aceptar, y
+        la expiran automaticamente (72 horas) si no se atiende. Confirma que el patron
+        solicitud->aprobacion de HU-012/HU-013 es estandar de industria; la ausencia de
+        expiracion en esta epica se documenta como observacion no bloqueante en HU-012.
+    - url: "https://ensorahealth.com/blog/how-to-handle-informed-consent-for-ai/"
+      resumen: >
+        Guias de consentimiento informado para IA en salud recomiendan declarar
+        explicitamente el alcance y las limitaciones de las recomendaciones generadas
+        por IA como parte del consentimiento, no como aviso separado. Respalda CA-014-5
+        (disclaimer de IA integrado al consentimiento informado deportivo, no aparte).
+    - url: "https://aistandardofcare.com/industries/fitness-wellness/"
+      resumen: >
+        Estandares de la industria de fitness/wellness con IA recomiendan disclosures
+        explicitos de limitaciones y evitar presentar la IA como sustituto de
+        asesoria profesional — alineado con el tercer y quinto criterio de aceptacion
+        de HU-014.
   conflictos_con_arquitecto: []
-
+  # Estuvo en true por el vacio funcional de HU-014 (plan que deja de estar vigente
+  # con una suscripcion Aprobada esperando consentimiento). Resuelto por el humano el
+  # 2026-08-20 con CA-014-8; ver la observacion de HU-014. Ninguna HU queda con
+  # condiciones abiertas.
   escalamiento_requerido: false
-  motivo_escalamiento: ""
-
-  nota_sobre_comparacion_con_arquitecto: >
-    Al momento de esta validacion, `outputs/plan_de_implementacion.yaml` corresponde todavia a
-    EPICA-02 — el plan del Arquitecto para EPICA-03 no estaba disponible para comparar. No se
-    detectan conflictos porque no hay artefacto contra el cual detectarlos todavia, no porque se
-    haya verificado ausencia de conflicto. Si el plan del Arquitecto introduce, por ejemplo,
-    campos adicionales en el perfil publico del entrenador mas alla de los cinco confirmados, o
-    resuelve la condicion legal de HU-011 de una forma que reintroduce datos excluidos por
-    Ley 1581/2012, eso seria un conflicto directo con esta validacion y debe escalarse al humano
-    en cuanto se detecte.
-
-  condiciones_no_bloqueantes_resumen:
-    - hu: "HU-008"
-      ley: "funcional / completitud de CA"
-      estado: "ABIERTA"
-      condicion: >
-        Falta un criterio de aceptacion que verifique el rechazo al agregar a una sesion un
-        `exerciseId` inexistente en la biblioteca global (dependencia HU-008->HU-005 declarada
-        pero no testeable hoy). Recomiendo agregarlo antes de que el Documentador escriba las
-        respuestas de error del endpoint correspondiente.
-
-    - hu: "HU-008"
-      ley: "funcional / completitud de CA"
-      estado: "ABIERTA"
-      condicion: >
-        Falta un criterio de aceptacion que declare el comportamiento al referenciar por id un
-        ejercicio existente pero inhabilitado (`isActive=false`) directamente en una sesion, mas
-        alla de que no aparezca como opcion en el listado filtrado. Precedente directo en el
-        propio proyecto: CA-006-6 de EPICA-02 resolvio el mismo tipo de vacio con un CA explicito
-        y un codigo de error dedicado (EXERCISE_INACTIVE).
-
-    - hu: "HU-009"
-      ley: "funcional / trazabilidad de QA"
-      estado: "ABIERTA"
-      condicion: >
-        Ratifico lo que las propias notas de la HU ya exigen: el reporte de QA debe declarar
-        explicitamente que CA-009-7 (rechazo por atletas suscritos) esta verificado solo a nivel
-        unitario, mockeando `hasSubscribers(planId)`, y no de forma end-to-end en esta epica, con
-        su cobertura e2e real pendiente hasta EPICA-04. Mismo patron ya aplicado a CA-006-1 de
-        EPICA-02.
-
-    - hu: "HU-011"
-      ley: "Ley 1581/2012 (evaluada — no aplica)"
-      estado: "CERRADA POR DECISION DEL HUMANO (2026-08-20)"
-      condicion: >
-        RESUELTA. El humano decidio el 2026-08-20 que `planDescription` es informacion PUBLICA
-        del programa por naturaleza: describe la oferta comercial del entrenador (de que va el
-        plan al que el atleta se inscribe), no un dato personal del titular. La Ley 1581/2012
-        regula el tratamiento de datos personales, y la descripcion de un servicio ofrecido no
-        cae en esa categoria — el analisis original confundio "texto escrito por una persona"
-        con "dato personal de esa persona". Publicarla en el catalogo es su destino natural, no
-        un cambio de finalidad.
-
-        Se corrige ademas la premisa factual del analisis: NO existen usuarios en produccion.
-        El proyecto esta en fase de construccion, asi que el punto (b) del hallazgo original
-        (notificar a entrenadores ya aprobados) no tiene sujetos a los que aplicar.
-
-        UNICA ACCION REMANENTE, no bloqueante y de calidad documental: el `@ApiProperty` de
-        `planDescription` en `register-coach.dto.ts:141-142` todavia lo describe como "Texto
-        libre que el administrador revisara", lo que subdescribe su proposito real. Actualizarlo
-        para que diga que se publicara en el catalogo ayuda al entrenador a redactarlo sabiendo
-        quien lo va a leer. Es una mejora de contrato, no un requisito legal.
-
-        DIRECTRIZ PARA EPICAS FUTURAS (indicacion del humano): tener presente esta distincion al
-        evaluar campos nuevos — separar el dato personal del titular (protegido) de la
-        informacion comercial o de servicio que el usuario publica de forma deliberada.
-
-    - hu: "HU-011"
-      ley: "documentacion / calidad de RN"
-      estado: "ABIERTA — NO BLOQUEANTE"
-      condicion: >
-        RN-24 dentro de HU-011 menciona un campo "centro" que no existe en `User`, residual del
-        documento fuente ya corregido en la practica por la decision confirmada del humano y por
-        el glosario. Recomiendo limpiar el texto en una proxima revision de `epica_input.yaml`
-        para evitar confusion futura del Arquitecto o del DBA.
-
-  notas_finales: >
-    Las tres decisiones del humano del 2026-08-20 (jerarquia con semana como entidad propia,
-    perfil publico del entrenador acotado, `hasSubscribers` como stub aislado) no se reabren en
-    este reporte y se verificaron incorporadas de forma consistente en las cuatro HU. Se
-    validaron con investigacion de industria (periodizacion NSCA/TrainingPeaks) y contra el
-    codigo real de EPICA-01/09 (atomicidad del registro, bloqueo de login de COACH sin solicitud
-    aprobada, ausencia de campos "centro"/"descripcion" en `User`).
-
-    Se identifica una unica condicion legal bloqueante, en HU-011: el cambio de finalidad al
-    publicar `CoachRequest.planDescription` (recogido bajo la finalidad textual "el administrador
-    revisara") a un atleta en el catalogo, sin aviso previo al entrenador ni tratamiento
-    diferenciado para los entrenadores ya aprobados en produccion. No bloquea la planificacion
-    tecnica del Arquitecto, pero si debe resolverse — con una decision explicita del humano — antes
-    de que el catalogo se exponga en produccion.
-
-    Se identifican ademas tres condiciones funcionales no bloqueantes de completitud de criterios
-    de aceptacion (dos en HU-008 sobre validacion de `exerciseId`, una en HU-009 ya prevista por
-    la propia HU sobre el gap e2e de CA-009-7) y una nota de limpieza documental no bloqueante en
-    HU-011 (RN-24). Ninguna de las tres impide que el Arquitecto empiece a planificar.
-
-    Ley 1273/2009 aplica a las cuatro HU y esta cubierta en su totalidad: a diferencia de
-    EPICA-02, la trazabilidad de auditoria ya no es un hallazgo abierto — el middleware global
-    (`audit.middleware.ts`, cerrado el 2026-08-19) cubrira los endpoints de esta epica sin trabajo
-    adicional de cada modulo. Ley 527/1999 no aplica a ninguna HU de esta epica: no se crea ningun
-    consentimiento o documento con valor legal nuevo, solo se reutilizan las aceptaciones ya
-    registradas en el registro (EPICA-01).
-
-    El Documentador puede iniciar una vez el Arquitecto cierre su plan y ambas condiciones
-    funcionales de HU-008 queden resueltas (agregadas como CA o descartadas con justificacion
-    explicita del humano), sujeto a que no surjan conflictos con esta validacion (ver
-    `nota_sobre_comparacion_con_arquitecto`). La condicion legal de HU-011 puede convivir con la
-    planificacion tecnica pero debe quedar resuelta antes del CHECKPOINT 1 o registrada como
-    riesgo asumido explicitamente por el humano.
+  motivo_escalamiento: >
+    No es un conflicto con el Arquitecto (no hay contradiccion entre mi validacion y un
+    plan tecnico ya emitido). Es una pregunta funcional abierta que no estaba entre los
+    cuatro supuestos confirmados por el humano ni entre los dos puntos PENDIENTE
+    marcados como decision del Arquitecto/DBA, y que condiciona la aprobacion plena de
+    HU-014: ¿que debe ocurrir si el plan subyacente pasa a Finalizado (automatico, por
+    vencimiento de endDate) o es Archivado (accion del entrenador) mientras una
+    suscripcion esta en estado Aprobada esperando el consentimiento de HU-014, o
+    inclusive despues de que el atleta ya lo acepto? Opciones a decidir: (a) bloquear la
+    aceptacion del consentimiento si el plan ya no esta Publicado, agregando un CA
+    nuevo a HU-014; (b) permitir la aceptacion igual y dejar que EPICA-05 decida si una
+    suscripcion Activa sobre un plan no Publicado puede iniciar sesiones (mismo patron
+    de gap declarado que hasSubscribers en EPICA-03); (c) alguna otra regla que el
+    humano prefiera. Mientras no se resuelva, HU-014 queda APROBADA_CON_CONDICIONES, no
+    RECHAZADA, porque el nucleo legal y funcional de la HU esta correcto y el gap es
+    acotado a un edge case de transicion de estados, no al flujo principal.

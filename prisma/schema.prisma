@@ -26,6 +26,15 @@ enum PlanStatus {
   ARCHIVED
 }
 
+// RN-27 (EPICA-04): exactamente estos cuatro estados. NO se agrega un
+// quinto valor (p.ej. `CONSENT_PENDING`) para representar "Aprobada pero
+// esperando el consentimiento deportivo de HU-014" — esa espera ya es
+// observable como status=APPROVED + activatedAt=null, sin necesidad de un
+// estado adicional. Decision confirmada por el humano el 2026-08-20:
+// no se toca este enum. El diagrama de Subscription Lifecycle en el skill
+// design-patterns (SKILL.md §2) documenta hoy un quinto estado intermedio
+// que NO existe aqui — es una desactualizacion del skill, no de este schema
+// (ver riesgos del plan de implementacion de EPICA-04).
 enum SubscriptionStatus {
   PENDING
   APPROVED
@@ -82,6 +91,8 @@ model User {
   refreshTokens                RefreshToken[]
   adminInvitationsCreated     AdminInvitation[]  @relation("AdminInvitationInvitedBy")
   plans                        Plan[]
+  subscriptions                Subscription[]    @relation("SubscriptionAthlete")
+  reviewedSubscriptions        Subscription[]    @relation("SubscriptionReviewer")
 
   @@map("users")
 }
@@ -113,10 +124,20 @@ model LegalAcceptance {
   documentVersion String       @map("document_version")
   ip              String       @map("ip")
   userAgent       String       @map("user_agent")
+  // EPICA-04/D-5: FK real a Plan (antes String? sin relation — un planId
+  // invalido entraba sin error). Sigue opcional: HABEAS_DATA y
+  // TERMS_OF_SERVICE (EPICA-01) se registran sin plan asociado, solo
+  // SPORT_CONSENT (HU-014) lo usa. onDelete: Restrict, no Cascade ni
+  // SetNull — un registro legal append-only jamas debe poder quedar
+  // huerfano de forma silenciosa (mismo criterio que Plan.coach frente a
+  // User, y que RN-13 exige para todo registro con valor de trazabilidad
+  // legal). Hoy es una salvaguarda que nunca se activa: no existe ningun
+  // endpoint que borre un Plan.
   planId          String?      @map("plan_id")
   acceptedAt      DateTime     @default(now()) @map("accepted_at")
 
   user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan            Plan?        @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@map("legal_acceptances")
@@ -356,6 +377,13 @@ model Plan {
   coach  User    @relation(fields: [coachId], references: [id], onDelete: Restrict)
   phases Phase[]
 
+  // EPICA-04: lado inverso de Subscription.plan y LegalAcceptance.plan
+  // (D-5). Sin @relation nombrado — cada modelo tiene una unica relacion
+  // hacia Plan, a diferencia de las dos relaciones hacia User que si
+  // requieren nombre (SubscriptionAthlete/SubscriptionReviewer).
+  subscriptions     Subscription[]
+  legalAcceptances  LegalAcceptance[]
+
   // Cubre GET /plans (listado propio del entrenador, todos los estados).
   @@index([coachId])
   // Cubre el query mas caliente de la epica (HU-011, decision D-1): el
@@ -496,4 +524,110 @@ model SessionExercise {
   // scan de session_exercises en cada edicion del catalogo.
   @@index([exerciseVersionId])
   @@map("session_exercises")
+}
+
+// --- Modelos EPICA-04 ---
+
+// Inscripcion de un atleta a un plan (RN-17, RN-18, RN-20, RN-27). Maquina
+// de estados de 4 valores (SubscriptionStatus, ver enum arriba):
+// PENDING -> APPROVED -> ACTIVE, con REJECTED como salida desde PENDING.
+// A diferencia de Phase/Week/Session/SessionExercise (EPICA-03), SI lleva
+// `updatedAt`: approve()/reject()/acceptConsent() son escrituras UPDATE
+// reales sobre la misma fila (no append-only) — omitirlo esconderia cuando
+// fue la ultima transicion de estado.
+//
+// El par (atleta, plan) puede repetirse legitimamente: CA-012-3 permite
+// reintentar la solicitud tras un Rechazo, asi que NO se declara
+// `@@unique([athleteId, planId])` a nivel de modelo — bloquearia ese
+// reintento. La exclusividad real (CA-012-2: a lo sumo una suscripcion
+// "viva" por atleta y plan) se implementa con un INDICE UNICO PARCIAL de
+// PostgreSQL, no expresable en el schema declarativo de Prisma (no soporta
+// indices parciales) — mismo mecanismo, mismo workflow y mismas garantias
+// de sobrevivencia ya documentados arriba para `exercises_name_lower_active_key`
+// (EPICA-02). Ver bloque de instrucciones abajo (decision D-3 del plan de
+// implementacion de EPICA-04).
+//
+// ============================================================================
+// INDICE PARCIAL REQUERIDO — el humano lo agrega a mano en la migracion:
+//
+//   CREATE UNIQUE INDEX "subscriptions_athlete_plan_active_key"
+//     ON "subscriptions" ("athlete_id", "plan_id")
+//     WHERE "status" IN ('PENDING', 'APPROVED', 'ACTIVE');
+//
+// Una fila REJECTED nunca colisiona con este indice — exactamente lo que
+// CA-012-3 exige (reintento libre tras un rechazo). El pre-check en
+// SubscriptionsService.create() (buscar una suscripcion propia en esos tres
+// estados antes del INSERT) sigue siendo necesario para devolver
+// SUBSCRIPTION_ALREADY_EXISTS con un mensaje claro en el caso comun; este
+// indice es la salvaguarda de base de datos contra la ventana de carrera
+// entre ese SELECT y el INSERT (dos solicitudes concurrentes del mismo
+// atleta al mismo plan).
+//
+// Workflow (identico al de EPICA-02, ver Exercise arriba):
+//   1. pnpm prisma migrate dev --create-only --name add_subscriptions
+//   2. Editar el migration.sql generado: pegar el CREATE UNIQUE INDEX de
+//      arriba al final del archivo, despues de que Prisma cree la tabla
+//      "subscriptions".
+//   3. pnpm prisma migrate dev   (aplica la migracion ya editada)
+//
+// Sobrevivencia ante un futuro `prisma migrate dev`: SI sobrevive, por el
+// mismo motivo ya documentado para "exercises_name_lower_active_key" — el
+// motor de diff de Prisma Migrate no reconoce indices parciales como
+// "propios" del schema declarativo, asi que nunca genera un DROP INDEX para
+// este. Se mantiene SIEMPRE que: (a) el archivo de migracion con este SQL
+// crudo permanezca en prisma/migrations/ sin editar ni borrar; (b) nadie
+// corra `prisma db pull` sobre la tabla "subscriptions"; (c) nadie agregue
+// `@@unique([athleteId, planId])` a este modelo en una migracion futura —
+// colisionaria con este indice parcial.
+// ============================================================================
+model Subscription {
+  id          String             @id @default(uuid())
+  athleteId   String             @map("athlete_id")
+  planId      String             @map("plan_id")
+  status      SubscriptionStatus @default(PENDING) @map("status")
+
+  // Escritos juntos por approve()/reject() (HU-013) — quien decidio y
+  // cuando. Sin motivo de rechazo (decision D-4 del plan): a diferencia de
+  // CoachRequest.rejectionReason, ninguna CA de HU-013 pide capturarlo.
+  reviewedAt  DateTime?          @map("reviewed_at")
+  reviewedBy  String?            @map("reviewed_by")
+
+  // Escrito por acceptConsent() (HU-014, CA-014-2) en la misma
+  // $transaction que crea el LegalAcceptance(SPORT_CONSENT) — momento en
+  // que la suscripcion pasa a ACTIVE. null mientras status esta en
+  // PENDING/APPROVED/REJECTED.
+  activatedAt DateTime?          @map("activated_at")
+
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  // onDelete: Restrict en ambas relaciones (no Cascade) — mismo criterio ya
+  // documentado en Plan.coach: Subscription es contenido de negocio
+  // sustantivo (historial de inscripcion de un atleta a un plan, con
+  // implicaciones sobre RN-17/RN-18/RN-20), no un artefacto de identidad
+  // 1:1 como CoachRequest/RefreshToken. Hoy no existe ningun endpoint que
+  // borre un User ni un Plan, pero si alguna vez se agrega uno
+  // administrativo, no debe poder arrastrar en cascada silenciosa el
+  // historial de inscripciones.
+  athlete  User  @relation("SubscriptionAthlete", fields: [athleteId], references: [id], onDelete: Restrict)
+  plan     Plan  @relation(fields: [planId], references: [id], onDelete: Restrict)
+  // onDelete: SetNull — mismo criterio que CoachRequest.reviewer: es un
+  // campo de auditoria sobre QUIEN decidio, no informacion estructural de
+  // la suscripcion; perderla ante el borrado del coach no compromete la
+  // integridad del registro (el estado APPROVED/REJECTED y reviewedAt
+  // se mantienen).
+  reviewer User? @relation("SubscriptionReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  // Cubre GET /subscriptions (listado propio del atleta, todos los
+  // estados, paginado).
+  @@index([athleteId])
+  // Compuesto, columna lider planId: cubre DOS consultas sin necesitar un
+  // indice adicional. (1) hasSubscribers(planId) en PlansService —
+  // `count({ where: { planId, status: { in: [APPROVED, ACTIVE] } } })`,
+  // que corre en cada intento de unpublish() (cierra el gap declarado de
+  // CA-009-7 de EPICA-03). (2) GET /subscriptions/pending (HU-013): tras
+  // resolver los planId propios del coach via Plan.@@index([coachId]), el
+  // filtro `planId IN (...) AND status = PENDING` usa este mismo indice.
+  @@index([planId, status])
+  @@map("subscriptions")
 }
