@@ -45,6 +45,8 @@ const TAG_DESCRIPTIONS = {
     'Construccion, publicacion y ciclo de vida de planes de entrenamiento (COACH)',
   'plans-catalog':
     'Catalogo publico de planes publicados, para cualquier usuario autenticado',
+  subscriptions:
+    'Inscripcion de atletas a planes, aprobacion del entrenador y aceptacion del consentimiento informado',
 };
 
 const HTTP_METHODS = new Set([

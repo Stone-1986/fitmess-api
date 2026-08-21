@@ -3173,7 +3173,7 @@
     },
     {
       "name": "subscriptions",
-      "description": "Operaciones de subscriptions"
+      "description": "Inscripcion de atletas a planes, aprobacion del entrenador y aceptacion del consentimiento informado"
     }
   ],
   "servers": [
