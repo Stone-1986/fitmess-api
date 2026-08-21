@@ -2663,8 +2663,8 @@
   },
   "tags": [
     {
-      "name": "health",
-      "description": "Estado de la API y sus dependencias"
+      "name": "admin-invitations",
+      "description": "Invitaciones para crear administradores"
     },
     {
       "name": "auth",
@@ -2675,12 +2675,12 @@
       "description": "Solicitudes de registro de entrenadores"
     },
     {
-      "name": "admin-invitations",
-      "description": "Invitaciones para crear administradores"
-    },
-    {
       "name": "exercises",
       "description": "Biblioteca global de ejercicios"
+    },
+    {
+      "name": "health",
+      "description": "Estado de la API y sus dependencias"
     },
     {
       "name": "plans",
