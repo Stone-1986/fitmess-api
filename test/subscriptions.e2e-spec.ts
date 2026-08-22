@@ -264,10 +264,18 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Orden de limpieza: LegalAcceptance/Subscription primero (referencian
-  // Plan/User via FK onDelete: Restrict), despues Plan (Phase/Week/Session/
-  // SessionExercise cascadean), despues Exercise, y al final los Users.
+  // Orden de limpieza: PlanInstance primero (EPICA-05: accept-consent ahora
+  // dispara SubscriptionActivatedListener/HU-023, que crea una PlanInstance
+  // por cada Subscription activada en este archivo — sin borrarla antes,
+  // Subscription.deleteMany() abajo viola
+  // plan_instances_subscription_id_fkey, Restrict), despues
+  // LegalAcceptance/Subscription (referencian Plan/User via FK
+  // onDelete: Restrict), despues Plan (Phase/Week/Session/SessionExercise
+  // cascadean), despues Exercise, y al final los Users.
   await prisma.auditLog.deleteMany({ where: { userAgent: AUDIT_AGENT } });
+  await prisma.planInstance.deleteMany({
+    where: { athleteId: { in: [athleteId, otherAthleteId] } },
+  });
   await prisma.legalAcceptance.deleteMany({
     where: { userId: { in: [athleteId, otherAthleteId] } },
   });
@@ -361,10 +369,13 @@ async function buildPublishedPlan(
     .expect(201);
   const exerciseId = exerciseRes.body.data.id as string;
 
+  // D-15 (EPICA-05): publish() ahora exige prescripcion significativa por
+  // ejercicio — sets+reps (regimen de fuerza) es suficiente. Sin esto, el
+  // publish() de abajo responde 422 PLAN_INCOMPLETE.
   await supertest(http)
     .post(`/api/plans/${planId}/sessions/${sessionId}/exercises`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ exerciseId })
+    .send({ exerciseId, sets: 4, reps: 10 })
     .expect(201);
 
   await supertest(http)
@@ -386,6 +397,90 @@ async function requestSubscription(
     .expect(201);
   return res.body.data.id as string;
 }
+
+// ── Indice unico parcial de subscriptions — CA-012-2/CA-012-3 ────────────────
+//
+// Espejo del bloque equivalente de exercises.e2e-spec.ts ("Indice unico
+// parcial de exercises"). Blinda el COMPORTAMIENTO del indice unico parcial
+// de Postgres `subscriptions_athlete_plan_active_key`
+// (athlete_id, plan_id) WHERE status IN (PENDING, APPROVED, ACTIVE), no la
+// implementacion del service — escribe directo a la tabla `subscriptions`
+// con Prisma, saltandose deliberadamente el pre-check de aplicacion de
+// SubscriptionsService.create() para verificar que la garantia real vive en
+// la base de datos, no solo en el codigo.
+//
+// Motivo (ver rules/rulesArquitectura.md § Testing): la migracion de
+// EPICA-05 genero por si sola un `DROP INDEX` de este mismo indice y ningun
+// gate lo detecto — se encontro leyendo el SQL a mano. El indice es la
+// salvaguarda de BD de CA-012-2 (un atleta no puede tener dos suscripciones
+// vivas al mismo plan): sin el, dos requests concurrentes pasan ambos el
+// pre-check de SubscriptionsService.create() y el catch de P2002 no tiene
+// nada que atrapar. Si el indice desaparece en un futuro
+// `prisma migrate dev`, alguno de los dos tests de este bloque debe fallar.
+describe('Indice unico parcial de subscriptions — CA-012-2/CA-012-3', () => {
+  it('UNICIDAD — rechaza una segunda suscripcion PENDING del mismo atleta al mismo plan', async () => {
+    const planId = await buildPublishedPlan(coachToken);
+
+    await prisma.subscription.create({
+      data: { athleteId, planId, status: SubscriptionStatus.PENDING },
+    });
+
+    // Segundo INSERT directo, mismo (athleteId, planId), tambien dentro del
+    // conjunto PENDING/APPROVED/ACTIVE que cubre el indice parcial. El
+    // pre-check de aplicacion (SubscriptionsService.create) NO corre aqui —
+    // la unica garantia posible en este test es el indice unico parcial de
+    // Postgres.
+    await expect(
+      prisma.subscription.create({
+        data: { athleteId, planId, status: SubscriptionStatus.APPROVED },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+
+    await prisma.subscription.deleteMany({ where: { athleteId, planId } });
+  });
+
+  it('PARCIALIDAD — permite una suscripcion PENDING nueva si la anterior del mismo par esta REJECTED (CA-012-3)', async () => {
+    const planId = await buildPublishedPlan(coachToken);
+
+    // Primer INSERT: REJECTED desde el inicio — fuera del WHERE del
+    // indice parcial.
+    await prisma.subscription.create({
+      data: { athleteId, planId, status: SubscriptionStatus.REJECTED },
+    });
+
+    // Segundo INSERT: mismo (athleteId, planId), esta vez PENDING. El
+    // indice parcial solo cubre PENDING/APPROVED/ACTIVE, asi que este
+    // INSERT debe proceder sin error (CA-012-3: reintento libre tras un
+    // rechazo).
+    const second = await prisma.subscription.create({
+      data: { athleteId, planId, status: SubscriptionStatus.PENDING },
+    });
+
+    expect(second.id).toBeDefined();
+    expect(second.status).toBe(SubscriptionStatus.PENDING);
+
+    await prisma.subscription.deleteMany({ where: { athleteId, planId } });
+  });
+
+  it(
+    'PARCIALIDAD — dos suscripciones REJECTED del mismo par (atleta, plan) coexisten ' +
+      'sin conflicto (ambas fuera del WHERE del indice parcial)',
+    async () => {
+      const planId = await buildPublishedPlan(coachToken);
+
+      await prisma.subscription.create({
+        data: { athleteId, planId, status: SubscriptionStatus.REJECTED },
+      });
+      const second = await prisma.subscription.create({
+        data: { athleteId, planId, status: SubscriptionStatus.REJECTED },
+      });
+
+      expect(second.id).toBeDefined();
+
+      await prisma.subscription.deleteMany({ where: { athleteId, planId } });
+    },
+  );
+});
 
 // ── POST /subscriptions ─────────────────────────────────────────────────────
 
@@ -744,37 +839,75 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
       const response = await supertest(http)
         .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
         .set('Authorization', `Bearer ${athleteToken}`)
-        .send({ documentVersion: '1.0.0' })
+        .send({
+          sportConsentDocumentVersion: '1.0.0',
+          healthDataConsentDocumentVersion: '1.0.0',
+        })
         .expect(200);
 
       expect(response.body.data.status).toBe(SubscriptionStatus.ACTIVE);
 
-      const legalAcceptance = await prisma.legalAcceptance.findFirst({
+      // D-14 (EPICA-05 reabre EPICA-04, CA-016-8): ambos LegalAcceptance se
+      // crean en el MISMO acto — el gap que ningun test del repo verificaba
+      // hasta ahora.
+      const sportConsent = await prisma.legalAcceptance.findFirst({
         where: {
           userId: athleteId,
           planId,
           documentType: DocumentType.SPORT_CONSENT,
         },
       });
-      expect(legalAcceptance).not.toBeNull();
-      expect(legalAcceptance?.documentVersion).toBe('1.0.0');
+      const healthDataConsent = await prisma.legalAcceptance.findFirst({
+        where: {
+          userId: athleteId,
+          planId,
+          documentType: DocumentType.HEALTH_DATA_CONSENT,
+        },
+      });
+      expect(sportConsent).not.toBeNull();
+      expect(sportConsent?.documentVersion).toBe('1.0.0');
+      expect(healthDataConsent).not.toBeNull();
+      expect(healthDataConsent?.documentVersion).toBe('1.0.0');
     },
   );
 
-  it('rechaza con 400 si documentVersion no viene en el body', async () => {
-    const planId = await buildPublishedPlan(coachToken);
-    const subscriptionId = await requestSubscription(athleteToken, planId);
-    await supertest(http)
-      .post(`/api/subscriptions/${subscriptionId}/approve`)
-      .set('Authorization', `Bearer ${coachToken}`)
-      .expect(200);
+  it(
+    'rechaza con 400 si falta sportConsentDocumentVersion o ' +
+      'healthDataConsentDocumentVersion en el body (D-14 — ambos obligatorios, sin ' +
+      'opcion de aceptar uno y declinar el otro)',
+    async () => {
+      const planId = await buildPublishedPlan(coachToken);
+      const subscriptionId = await requestSubscription(athleteToken, planId);
+      await supertest(http)
+        .post(`/api/subscriptions/${subscriptionId}/approve`)
+        .set('Authorization', `Bearer ${coachToken}`)
+        .expect(200);
 
-    await supertest(http)
-      .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
-      .set('Authorization', `Bearer ${athleteToken}`)
-      .send({})
-      .expect(400);
-  });
+      await supertest(http)
+        .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
+        .set('Authorization', `Bearer ${athleteToken}`)
+        .send({})
+        .expect(400);
+
+      await supertest(http)
+        .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
+        .set('Authorization', `Bearer ${athleteToken}`)
+        .send({ sportConsentDocumentVersion: '1.0.0' })
+        .expect(400);
+
+      await supertest(http)
+        .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
+        .set('Authorization', `Bearer ${athleteToken}`)
+        .send({ healthDataConsentDocumentVersion: '1.0.0' })
+        .expect(400);
+
+      // Ninguno de los tres intentos activo la suscripcion.
+      const subscription = await prisma.subscription.findUnique({
+        where: { id: subscriptionId },
+      });
+      expect(subscription?.status).toBe(SubscriptionStatus.APPROVED);
+    },
+  );
 
   it('rechaza con 401 sin autenticacion', async () => {
     const planId = await buildPublishedPlan(coachToken);
@@ -782,7 +915,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
 
     await supertest(http)
       .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(401);
   });
 
@@ -793,7 +929,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
     await supertest(http)
       .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
       .set('Authorization', `Bearer ${coachToken}`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(403);
   });
 
@@ -803,7 +942,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
         '/api/subscriptions/00000000-0000-4000-8000-000000000000/accept-consent',
       )
       .set('Authorization', `Bearer ${athleteToken}`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(404);
   });
 
@@ -818,7 +960,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
     await supertest(http)
       .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
       .set('Authorization', `Bearer ${otherAthleteToken}`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(403);
   });
 
@@ -829,7 +974,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
     const response = await supertest(http)
       .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
       .set('Authorization', `Bearer ${athleteToken}`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(409);
     expect(response.body.errorCode).toBe('INVALID_STATE_TRANSITION');
   });
@@ -853,7 +1001,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
       const response = await supertest(http)
         .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
         .set('Authorization', `Bearer ${athleteToken}`)
-        .send({ documentVersion: '1.0.0' })
+        .send({
+          sportConsentDocumentVersion: '1.0.0',
+          healthDataConsentDocumentVersion: '1.0.0',
+        })
         .expect(409);
       expect(response.body.errorCode).toBe('PLAN_NOT_PUBLISHED');
 
@@ -903,7 +1054,10 @@ describe('POST /api/subscriptions/:id/accept-consent', () => {
       const response = await supertest(http)
         .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
         .set('Authorization', `Bearer ${athleteToken}`)
-        .send({ documentVersion: '1.0.0' })
+        .send({
+          sportConsentDocumentVersion: '1.0.0',
+          healthDataConsentDocumentVersion: '1.0.0',
+        })
         .expect(409);
       expect(response.body.errorCode).toBe('PLAN_NOT_PUBLISHED');
 
@@ -948,7 +1102,10 @@ describe('POST /api/plans/:id/unpublish — CA-009-7 (gap de EPICA-03 cerrado en
     await supertest(http)
       .post(`/api/subscriptions/${subscriptionId}/accept-consent`)
       .set('Authorization', `Bearer ${athleteToken}`)
-      .send({ documentVersion: '1.0.0' })
+      .send({
+        sportConsentDocumentVersion: '1.0.0',
+        healthDataConsentDocumentVersion: '1.0.0',
+      })
       .expect(200);
 
     const response = await supertest(http)

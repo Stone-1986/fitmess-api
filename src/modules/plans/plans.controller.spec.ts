@@ -21,6 +21,7 @@ const mockPlansService = {
   addSession: vi.fn(),
   removeSession: vi.fn(),
   addSessionExercise: vi.fn(),
+  updateSessionExercisePrescription: vi.fn(),
   removeSessionExercise: vi.fn(),
   publish: vi.fn(),
   unpublish: vi.fn(),
@@ -259,6 +260,35 @@ describe('PlansController', () => {
         USER.id,
         'plan-uuid',
         'session-uuid',
+        dto,
+      );
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe('updateSessionExercisePrescription()', () => {
+    it('delega en el service (D-15, PATCH .../exercises/:sessionExerciseId)', async () => {
+      const dto = { sets: 4, reps: 10 };
+      const expected = { id: 'session-exercise-uuid', sets: 4, reps: 10 };
+      mockPlansService.updateSessionExercisePrescription.mockResolvedValue(
+        expected,
+      );
+
+      const result = await controller.updateSessionExercisePrescription(
+        USER as never,
+        'plan-uuid',
+        'session-uuid',
+        'session-exercise-uuid',
+        dto as never,
+      );
+
+      expect(
+        mockPlansService.updateSessionExercisePrescription,
+      ).toHaveBeenCalledWith(
+        USER.id,
+        'plan-uuid',
+        'session-uuid',
+        'session-exercise-uuid',
         dto,
       );
       expect(result).toBe(expected);

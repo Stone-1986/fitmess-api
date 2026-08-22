@@ -1,100 +1,75 @@
 revision_codigo:
-  fecha: "2026-08-20"
-  ciclo: 2
-  epica_id: "EPICA-04"
+  fecha: "2026-08-21"
+  epica_id: "EPICA-05"
+  ciclo: 1
   razonamiento: >
-    QUÉ: verifiqué que la corrección del ciclo 1 (agregar
-    @AuditResources('Subscription') a findPending) está aplicada donde
-    corresponde y en ningún otro lugar, leyendo subscriptions.controller.ts
-    directamente en vez de confiar en el resumen del orquestador, y leí el
-    test e2e nuevo completo (líneas 579-604 de
-    test/subscriptions.e2e-spec.ts) para confirmar que ejercita el camino
-    real (HTTP -> interceptor -> middleware -> audit_logs), no un mock del
-    interceptor. Recontrasté los 6 gates contra la salida cruda del
-    orquestador. POR QUÉ: mi propio hallazgo del ciclo 1 exigía verificación
-    de disco, no de reporte — el mismo criterio que le exigí implícitamente
-    al Desarrollador aplica a mí mismo al cerrar el ciclo. REFERENCIA:
-    subscriptions.controller.ts:29 (import), :182-189 (decorador en
-    findPending, con comentario que cita el hallazgo del ciclo 1),
-    ausencia confirmada en findMine (grep: una sola ocurrencia de
-    @AuditResources en todo el archivo); test e2e :583-604.
+    QUE: revise el reporte del QA (34/34 CAs, APROBADO) contra la salida
+    verificada de gates del orquestador (test:cov, test:e2e, lint,
+    format:check, build, openapi:validate) y contra el codigo real de
+    execution/plans/subscriptions; juzgue con criterio propio el hallazgo
+    BAJA de auto-reparacion asincrona, la consistencia codigo-contrato de
+    los 9 endpoints, las 2 lineas sin cubrir de instances.service.ts, D-15
+    (hasSignificantPrescription) y D-14 (doble LegalAcceptance). POR QUE:
+    gate final antes del CHECKPOINT 2, epica que reabre EPICA-03 y EPICA-04
+    taggeadas. REFERENCIA: mensaje de asignacion del team lead, 2026-08-21,
+    ciclo 1.
 
   linting:
     eslint: "PASS"
     prettier: "PASS"
     errores: []
-    nota: >
-      299 warnings (+1 sobre el ciclo 1, coherente con el test nuevo),
-      todos @typescript-eslint/no-unsafe-argument en archivos de test, regla
-      en `warn`. El orquestador reporta que la primera pasada de gates falló
-      en lint/format:check por un único error de `prettier/prettier` en
-      test/subscriptions.e2e-spec.ts:593, y que aplicó `pnpm run format`
-      directamente (Paso 4.5, categoría "Errores de Prettier / formato") en
-      vez de devolverlo al Desarrollador, re-ejecutando los 6 gates después.
-      Es la ruta correcta: la lista blanca de esa categoría cubre
-      exactamente reformateo sin cambio de lógica, y lo confirmo — el test
-      que leí (líneas 583-604) no tiene ninguna marca de un fix a medias, es
-      una prueba completa y coherente con el resto del archivo.
 
   cobertura:
     dominio:
-      porcentaje: 100
+      porcentaje: 98.41
       target: 80
       cumple: true
     adaptadores:
       porcentaje: 100
       target: 70
       cumple: true
-    nota: >
-      Sin cambios respecto al ciclo 1: subscriptions.controller.ts y
-      subscriptions.service.ts siguen en 100/100/100/100, 99.78% global,
-      535/535 unitarios. La corrección no tocó ningún archivo de dominio ni
-      de servicio — solo el controller (un decorador) y el e2e (un test) —
-      así que no había superficie nueva que arriesgara el gate de cobertura.
-
-  suite_e2e:
-    estado: "PASS"
-    pasaron: 200
-    fallaron: 0
-    nota: >
-      199 -> 200: el +1 es exactamente el test de auditoría nuevo, ningún
-      otro test se agregó ni se quitó. Leí el test completo: crea un plan
-      publicado y una suscripción real (buildPublishedPlan +
-      requestSubscription), llama GET /subscriptions/pending como el coach,
-      confirma que el id de la suscripción viene en la respuesta, y luego
-      espera la fila de auditoría por url+userId y afirma
-      resourceType==='Subscription' y resourceIds===[los ids devueltos] —
-      ejercita el camino real end-to-end (interceptor -> middleware ->
-      persistencia), no un mock. Cierra el hallazgo del ciclo 1 con
-      evidencia de comportamiento, no solo de presencia del decorador.
+    notas: >
+      Coincide exactamente con la salida verificada del orquestador
+      (fuente de verdad) y con el reporte del QA — cero discrepancias.
+      Ningun umbral perFile fallido.
 
   patrones:
     violaciones: []
-    nota: >
-      El hallazgo del ciclo 1 (GET /subscriptions/pending sin
-      @AuditResources) queda CERRADO: decorador presente en findPending
-      (:189), ausente en findMine (correcto — ahí el atleta consulta sus
-      propios datos, no los de un tercero, y no aplica el criterio del
-      decorador). No reviso de nuevo el resto de subscriptions/notifications
-      /plans.service.ts/business-error.enum.ts: ya aprobado en el ciclo 1 y
-      el diff de este ciclo no los toca.
+    notas: >
+      Verificado por lectura directa, no por el reporte del QA:
+      instances.service.ts/subscriptions.service.ts/plans.service.ts usan
+      exclusivamente BusinessException/TechnicalException (grep de
+      HttpException/BadRequestException/NotFoundException/etc. nativas:
+      cero coincidencias en execution). InstancesController: 0 try/catch,
+      0 acceso a PrismaService, todos los metodos delegan y retornan sin
+      modificar. Import de Prisma en instances.service.ts y
+      subscriptions.service.ts desde '../../../generated/prisma/index.js'
+      unicamente. grep de PlansService/PlansModule/SubscriptionsService/
+      SubscriptionsModule/ExercisesService/ExercisesModule dentro de
+      src/modules/execution: las 4 coincidencias son comentarios que
+      afirman la ausencia de esos imports, no imports reales — confirmado
+      leyendo cada linea. PATCH nuevo de plans hereda @Roles(COACH) del
+      controller (linea 70) + PlanPublishedGuard propio; sin enums locales
+      nuevos (sets/reps/loadKg/durationSeconds/distanceMeters son
+      Int?/Float? de Prisma, no enums).
 
   consistencia_contrato: "OK"
   consistencia_contrato_detalle: >
-    @AuditResources es metadata interna (SetMetadata), no genera ni altera
-    ningún schema de OpenAPI ni código de respuesta — Spectral sigue en
-    verde (0 errores) y no había razón para que cambiara. Sin impacto en el
-    contrato, consistente con lo que instruí en el ciclo 1.
-
-  validacion_openapi_spectral:
-    revisado: true
-    errores_confirmados: 0
-    warnings_documentados: 1
-    notas: >
-      Mismo aviso cosmético del tag 'subscriptions' sin descripción en
-      TAG_DESCRIPTIONS, ya evaluado y cerrado como no bloqueante en el ciclo
-      1 (comportamiento esperado del mecanismo de reconcileTags). Sin
-      cambios.
+    Los 9 endpoints (5 nuevos en InstancesController, 1 PATCH nuevo en
+    plans, 1 modificado en subscriptions, mas los 2 POST/publish de plans
+    ya existentes con DTOs ampliados) verificados campo por campo contra
+    outputs/contrato_openapi/src/modules/. instances.controller.ts es
+    IDENTICO al contrato salvo saltos de linea de Prettier (mismas rutas,
+    roles, @ApiProblemResponse, orden de parametros). accept-consent.dto.ts
+    y update-session-exercise-prescription.dto.ts, comparados linea a
+    linea contra su copia en el contrato, son identicos en sustancia
+    (mismos validadores, mismos campos obligatorios/opcionales, mismos
+    limites). PATCH /plans/:id/sessions/:sessionId/exercises/:sessionExerciseId
+    presente con el mismo guard PlanPublishedGuard y los mismos 5 errores
+    documentados (400/401/403/404/409) que el plan describe en D-15 punto
+    5. AcceptConsentDto renombra documentVersion -> sportConsentDocumentVersion
+    y agrega healthDataConsentDocumentVersion, ambos @IsNotEmpty, tal como
+    exige D-14 (cambio de ruptura documentado y aprobado en CHECKPOINT).
 
   escaneo_automatico:
     revisado: true
@@ -102,17 +77,83 @@ revision_codigo:
     hallazgos_descartados_validados: 0
     hallazgos_descartados_rechazados: 0
     notas: >
-      Sin cambios de superficie de seguridad respecto al ciclo 1 — el único
-      diff es un decorador de metadata + un test. No amerita re-escaneo
-      completo; el propio decorador reduce superficie de riesgo de
-      cumplimiento (Ley 1581/2012), no la aumenta.
+      /security-review ejecutado por el orquestador sobre el diff completo
+      de la epica: CERO hallazgos. Evidencia con numeros de linea revisada
+      y coherente con el codigo leido de forma independiente: @Roles
+      explicito en los 5 handlers, RESOURCE_OWNERSHIP_DENIED antes de leer
+      dato alguno del atleta en findForCoach (linea 377 de
+      instances.service.ts, confirmado), assertExactExerciseSet impide
+      escritura fuera de la sesion verificada, subscriptionId siempre
+      derivado del athleteId del JWT via findActiveSubscriptionOrFail
+      (nunca del request). Nada que descartar ni revertir de mi lado.
 
-  decisiones_no_reabiertas:
-    - "CA-014-3 / D-9 — diferido a EPICA-05."
-    - "subscription.activated sin listener / D-7 — punto de integración de EPICA-05."
-    - "archive() sin gate de suscriptores — asimetría deliberada con unpublish()."
-    - "Duplicación cross-módulo de isPlanCurrentlyPublished() / D-2 — intencional."
-    - "documentVersion sin validación server-side / D-8 — sistémico, preexistente de EPICA-01."
+  validacion_openapi_spectral:
+    revisado: true
+    errores_confirmados: 0
+    warnings_documentados: 0
+    notas: >
+      "No results with a severity of 'error' found!" — coincide entre la
+      salida del orquestador y el reporte del QA. El aviso de
+      export-openapi.mjs sobre el tag 'instances' sin entrada en
+      TAG_DESCRIPTIONS no es un error de Spectral ni de contrato — es
+      deuda de scripts/, correctamente diferida al Desarrollador para la
+      proxima iteracion, no bloqueante.
+
+  juicio_hallazgo_qa_auto_reparacion_asincrona:
+    veredicto: "VALIDADO — BAJA, no bloquea"
+    analisis: >
+      Verificado contra outputs/epica_input.yaml (CA-023-1 texto literal,
+      linea 90): "el atleta puede consultar SU INSTANCIA inmediatamente
+      despues" — se lee como el detalle (GET /instances/:planId), que SI
+      auto-repara (D-3). CA-023-4 y CA-023-5 (independencia entre atletas,
+      filtro de ownership en listado y detalle) no prometen inmediatez de
+      aparicion en el LISTADO, solo que cada atleta vea unicamente lo
+      suyo — findAll() cumple eso sin auto-reparacion. Si el listener
+      (fire-and-forget) no ha terminado y el atleta entra por GET
+      /instances (listado) o el coach por GET /.../athletes/:athleteId,
+      ninguno ve un error ni datos ajenos: el atleta ve una lista sin ese
+      item (o vacia), el coach ve 404 ENTITY_NOT_FOUND — ambos estados
+      transitorios y honestos, no un fallo de ningun CA. Es exactamente el
+      riesgo que D-3/riesgos_identificados ya documenta explicitamente
+      ("si NADIE vuelve a consultar la instancia, el hueco persiste") y
+      que la propia arquitectura eligio (reparar bajo demanda vs. cola de
+      reintentos, prohibida por rules como Saga Pattern de facto). Ademas,
+      en la practica del coach, D-9/D-17 describen una consulta que ocurre
+      cuando el atleta YA esta entrenando, no en el instante de activacion
+      — la ventana de milisegundos del listener rara vez coincide con esa
+      consulta. Concuerdo con el QA: no requiere cambio de codigo, solo
+      que quede documentado — lo cual ya esta en revision_codigo.yaml y en
+      el propio plan.
+
+  lineas_sin_cubrir_instances_service:
+    linea_216:
+      veredicto: "Aceptable — rama de guarda, no logica de negocio"
+      detalle: >
+        TechnicalException si planInstance.findUnique no puede releer la
+        fila que la propia transaccion acaba de crear (findOwn). Requiere
+        forzar una lectura fallida entre dos operaciones consecutivas de
+        Prisma contra la misma conexion — no reproducible sin mockear el
+        driver. Guardia defensiva legitima, mismo patron ya aceptado en
+        otras epicas para condiciones de carrera imposibles de forzar.
+    linea_812:
+      veredicto: "Aceptable para el gate, pero la justificacion del QA es imprecisa"
+      detalle: >
+        Es `return Math.min(limit as number, 100)` dentro de
+        normalizeLimit() — el camino que SI aplica el tope de 100 cuando
+        se recibe un limit valido. El QA la describe como "cubierta
+        indirectamente por otros tests de paginacion", pero
+        instances.service.spec.ts SOLO llama findAll() sin argumentos
+        (grep confirmado: 2 usos, ambos sin page/limit) — nunca se ejerce
+        esta linea DENTRO de este archivo. Lo que SI es cierto es que el
+        mismo patron literal (normalizePage/normalizeLimit) esta probado
+        con 100% de cobertura en subscriptions.service.ts, que es codigo
+        ya auditado en EPICA-04 — por eso el riesgo real es bajo, no
+        porque el archivo actual la ejercite. No bloquea (89.33% branches
+        sigue por encima del 75% requerido, perFile), pero anoto la
+        imprecision para que no se repita como justificacion en el
+        proximo ciclo: "cubierta indirectamente" deberia decir "mismo
+        patron ya probado en otro archivo", que es una afirmacion mas
+        debil y distinta.
 
   instrucciones_desarrollador: []
 

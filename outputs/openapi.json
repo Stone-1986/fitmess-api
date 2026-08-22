@@ -2078,7 +2078,7 @@
     },
     "/api/plans/{id}/sessions/{sessionId}/exercises": {
       "post": {
-        "description": "Agrega un ejercicio de la biblioteca global (Exercise) a una sesion (CA-008-3). El service resuelve exerciseId -> ExerciseVersion vigente (mayor versionNumber) en el momento de la llamada y persiste SessionExercise.exerciseVersionId — nunca un puntero al ejercicio (RN-07), de modo que si el ejercicio se modifica o se inhabilita despues, la sesion conserva la version original. Rechaza con ENTITY_NOT_FOUND (404) si el ejercicio no existe en la biblioteca global (RN-04), y con EXERCISE_INACTIVE (422) si existe pero esta inhabilitado (isActive=false) — mismo precedente que CA-006-6 de EPICA-02. Esta operacion es la que hace real isUsedInPlan(exerciseId) de EPICA-02 (D-2). Solo procede si el plan sigue en Borrador.",
+        "description": "Agrega un ejercicio de la biblioteca global (Exercise) a una sesion (CA-008-3). El service resuelve exerciseId -> ExerciseVersion vigente (mayor versionNumber) en el momento de la llamada y persiste SessionExercise.exerciseVersionId — nunca un puntero al ejercicio (RN-07), de modo que si el ejercicio se modifica o se inhabilita despues, la sesion conserva la version original. Rechaza con ENTITY_NOT_FOUND (404) si el ejercicio no existe en la biblioteca global (RN-04), y con EXERCISE_INACTIVE (422) si existe pero esta inhabilitado (isActive=false) — mismo precedente que CA-006-6 de EPICA-02. Esta operacion es la que hace real isUsedInPlan(exerciseId) de EPICA-02 (D-2). Acepta ademas la prescripcion del ejercicio (sets, reps, loadKg, durationSeconds, distanceMeters), TODOS opcionales — el entrenador puede agregarlo sin ninguna prescripcion y completarla despues via PATCH .../exercises/:sessionExerciseId (D-15). Solo procede si el plan sigue en Borrador.",
         "operationId": "PlansController_addSessionExercise",
         "parameters": [
           {
@@ -2192,6 +2192,117 @@
       }
     },
     "/api/plans/{id}/sessions/{sessionId}/exercises/{sessionExerciseId}": {
+      "patch": {
+        "description": "Edita la prescripcion (sets, reps, loadKg, durationSeconds, distanceMeters — todos opcionales, actualizacion parcial) de un SessionExercise ya agregado a la sesion. Primer endpoint de edicion de SessionExercise del proyecto — hasta esta epica, EPICA-03 solo exponia POST (agregar) y DELETE (quitar), nunca PATCH (D-15 punto 5). Sin validacion de \"prescripcion significativa\" aqui — esa regla solo se evalua al publicar el plan (D-15 punto 2/3). Mismo findOwnedOrFail de ownership que el resto del controller. Solo procede si el plan sigue en Borrador (RN-31, PlanPublishedGuard).",
+        "operationId": "PlansController_updateSessionExercisePrescription",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionExerciseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSessionExercisePrescriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prescripcion del ejercicio de sesion actualizada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionExerciseResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos de la prescripcion",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede modificarlo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan, sesion o ejercicio de sesion no encontrados",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El plan no esta en Borrador — la estructura ya es inmutable (RN-31)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Editar la prescripcion de un ejercicio de sesion (D-15)",
+        "tags": [
+          "plans"
+        ]
+      },
       "delete": {
         "description": "Elimina el ejercicio de sesion (hard-delete real — D-7). Solo procede si el plan sigue en Borrador.",
         "operationId": "PlansController_removeSessionExercise",
@@ -2296,7 +2407,7 @@
     },
     "/api/plans/{id}/publish": {
       "post": {
-        "description": "Transiciona el plan de Borrador a Publicado. Rechaza con INVALID_STATE_TRANSITION (409) si el estado actual no es Borrador; con PLAN_INCOMPLETE (422) si el plan no cumple RN-01 (name + fechas + al menos una fase con una semana con una sesion con un ejercicio — CA-009-2), listando explicitamente los requisitos faltantes. Emite el evento plan.published. Solo el entrenador propietario puede publicar (CA-009-5).",
+        "description": "Transiciona el plan de Borrador a Publicado. Rechaza con INVALID_STATE_TRANSITION (409) si el estado actual no es Borrador; con PLAN_INCOMPLETE (422) si el plan no cumple RN-01 (name + fechas + al menos una fase con una semana con una sesion con un ejercicio — CA-009-2) O si algun SessionExercise del arbol no tiene prescripcion significativa (D-15, EPICA-05: regimen de fuerza — sets Y reps; regimen de resistencia — durationSeconds O distanceMeters), listando explicitamente los requisitos faltantes por ejercicio, en el mismo checklist acumulativo de siempre. Emite el evento plan.published. Solo el entrenador propietario puede publicar (CA-009-5).",
         "operationId": "PlansController_publish",
         "parameters": [
           {
@@ -2360,7 +2471,7 @@
             }
           },
           "422": {
-            "description": "El plan no cumple los requisitos minimos de validez para publicarse (RN-01, CA-009-2)",
+            "description": "El plan no cumple los requisitos minimos de validez para publicarse (RN-01, CA-009-2), o al menos un ejercicio de sesion no tiene prescripcion significativa (D-15, EPICA-05)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3040,7 +3151,7 @@
     },
     "/api/subscriptions/{id}/accept-consent": {
       "post": {
-        "description": "Transiciona la suscripcion de Aprobada a Activa (CA-014-2). Verifica que la suscripcion pertenece al atleta autenticado, si no rechaza con RESOURCE_OWNERSHIP_DENIED (403, CA-014-6). Rechaza con INVALID_STATE_TRANSITION (409) si status !== APPROVED. Si status === APPROVED pero el plan referenciado ya no esta efectivamente vigente (esta Archivado, o su endDate ya paso aunque la columna status siga en PUBLISHED — CA-014-8, D-10), rechaza con PLAN_NOT_PUBLISHED (409) SIN escribir nada: la suscripcion permanece en Aprobada, ninguna transaccion se abre. Si ambos checks de estado pasan, crea un LegalAcceptance (documentType=SPORT_CONSENT, documentVersion del body, ip, userAgent) y actualiza la suscripcion a Activa en una unica transaccion atomica. Emite subscription.activated. Solo accesible para ATHLETE.",
+        "description": "Transiciona la suscripcion de Aprobada a Activa (CA-014-2). Verifica que la suscripcion pertenece al atleta autenticado, si no rechaza con RESOURCE_OWNERSHIP_DENIED (403, CA-014-6). Rechaza con INVALID_STATE_TRANSITION (409) si status !== APPROVED. Si status === APPROVED pero el plan referenciado ya no esta efectivamente vigente (esta Archivado, o su endDate ya paso aunque la columna status siga en PUBLISHED — CA-014-8, D-10), rechaza con PLAN_NOT_PUBLISHED (409) SIN escribir nada: la suscripcion permanece en Aprobada, ninguna transaccion se abre. Si ambos checks de estado pasan, crea DOS LegalAcceptance dentro de una unica transaccion atomica — SPORT_CONSENT (sportConsentDocumentVersion del body) y, desde EPICA-05, tambien HEALTH_DATA_CONSENT (healthDataConsentDocumentVersion del body, D-14 rama (a), CA-016-8, precondicion de HU-016) — ambos con ip y userAgent de la peticion, y actualiza la suscripcion a Activa en el mismo acto. AMBOS campos del body son obligatorios: no existe la opcion de aceptar el consentimiento deportivo y declinar el de datos sensibles de salud. Emite subscription.activated. Solo accesible para ATHLETE.",
         "operationId": "SubscriptionsController_acceptConsent",
         "parameters": [
           {
@@ -3064,7 +3175,7 @@
         },
         "responses": {
           "200": {
-            "description": "Consentimiento aceptado exitosamente — suscripcion activada",
+            "description": "Consentimiento(s) aceptado(s) exitosamente — suscripcion activada",
             "content": {
               "application/json": {
                 "schema": {
@@ -3074,7 +3185,7 @@
             }
           },
           "400": {
-            "description": "Error de validacion en los datos del consentimiento",
+            "description": "Error de validacion en los datos del consentimiento (sportConsentDocumentVersion o healthDataConsentDocumentVersion faltantes o invalidos)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3129,9 +3240,463 @@
             "bearer": []
           }
         ],
-        "summary": "Aceptar el consentimiento informado deportivo (Aprobada -> Activa)",
+        "summary": "Aceptar el consentimiento informado deportivo y de datos sensibles de salud (Aprobada -> Activa)",
         "tags": [
           "subscriptions"
+        ]
+      }
+    },
+    "/api/instances": {
+      "get": {
+        "description": "Lista, paginada, todas las instancias del atleta autenticado — un item por plan al que llego a tener una suscripcion Activa (CA-023-4, CA-023-5). Resumen liviano (id, planId, planName, createdAt), sin el arbol completo — mismo criterio D-8 de EPICA-03. planName resuelto via join de solo lectura contra Plan. Solo accesible para ATHLETE.",
+        "operationId": "InstancesController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Numero de pagina (base 1)",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Cantidad de resultados por pagina (max 100)",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada de las instancias propias del atleta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InstanceSummaryResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Atleta",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar las instancias personalizadas propias del atleta autenticado",
+        "tags": [
+          "instances"
+        ]
+      }
+    },
+    "/api/instances/{planId}": {
+      "get": {
+        "description": "Devuelve el arbol completo de la instancia propia del atleta para el plan :planId: fases -> semanas (con isClosed/closedAt y sensaciones si existen) -> sesiones (con el resultado registrado si existe) -> ejercicios (con la version congelada y la prescripcion copiada de la plantilla, D-15). Verifica primero que el plan exista (404 si no), luego que exista una Subscription propia en estado Activa para ese plan (CONSENT_REQUIRED, 422, si no — CA-023-6). Si la suscripcion esta Activa pero la instancia todavia no existe (ventana de carrera del listener), la crea sobre la marcha con el mismo metodo idempotente del listener antes de responder — auto-reparacion (D-3): el atleta nunca ve un 404 \"todavia no existe\" mientras su suscripcion siga Activa (CA-023-1). Solo accesible para ATHLETE.",
+        "operationId": "InstancesController_findOne",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle completo de la instancia propia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acceso denegado — se requiere rol Atleta",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Se requiere una inscripcion activa con consentimiento informado aceptado (CONSENT_REQUIRED, CA-023-6) — la suscripcion del atleta a este plan no esta en estado Activa",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener el detalle propio de la instancia personalizada de un plan",
+        "tags": [
+          "instances"
+        ]
+      }
+    },
+    "/api/instances/{planId}/athletes/{athleteId}": {
+      "get": {
+        "description": "Devuelve el mismo arbol completo que GET /instances/:planId (D-8, MISMO DTO), para la instancia del atleta :athleteId en el plan :planId. Verifica que :planId pertenece al entrenador autenticado (RESOURCE_OWNERSHIP_DENIED, 403, si no — CA-017-4). Si el atleta no tiene una suscripcion Activa a :planId (o el plan no existe), responde ENTITY_NOT_FOUND (404) — NUNCA CONSENT_REQUIRED: ese codigo es un mensaje dirigido al propio atleta, sin sentido de negocio para un entrenador que consulta a un tercero (D-9). :athleteId viaja en la URL, por eso este endpoint NO requiere @AuditResources (D-12) — la fila de auditoria ya identifica al titular consultado via la columna url. Solo accesible para COACH.",
+        "operationId": "InstancesController_findForCoach",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "athleteId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle completo de la instancia del atleta consultado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceDetailResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No tiene acceso a este plan — solo el entrenador propietario puede consultar sus atletas (RESOURCE_OWNERSHIP_DENIED, CA-017-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan no encontrado, o el atleta no tiene una instancia en este plan (sin suscripcion Activa)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Obtener el panel de la instancia de un atleta para un plan propio",
+        "tags": [
+          "instances"
+        ]
+      }
+    },
+    "/api/instances/{planId}/sessions/{sessionId}/results": {
+      "post": {
+        "description": "Upsert de los resultados de la sesion :sessionId de la instancia propia del atleta (D-6b, un solo endpoint para alta y edicion — ningun CA distingue esos dos casos). Por cada ejercicio: series, repeticiones, carga, duracion, distancia (solo los que apliquen segun el tipo, CA-015-11) y nota libre opcional, columnas tipadas (CA-015-9, D-6). Orden de verificacion: (1) Subscription Activa del atleta para :planId, si no CONSENT_REQUIRED (422, CA-015-7); (2) la sesion pertenece a la instancia propia, si no ENTITY_NOT_FOUND (404) o RESOURCE_OWNERSHIP_DENIED (403, CA-015-6); (3) el payload trae EXACTAMENTE los ejercicios de esa sesion, si no RESULT_FIELDS_INVALID (422, CA-015-10) SIN escribir nada — la sesion no cuenta como completada; (4) la semana no esta cerrada, si lo esta WEEK_FROZEN (409, CA-015-4/5). Si las cuatro pasan, upserta el resultado y cada resultado de ejercicio en una unica transaccion; si esta era la ultima sesion pendiente de su semana, la cierra (isClosed=true, closedAt=now(), RN-30) y emite week.closed despues del commit (D-4). Editable sin limite de tiempo mientras la semana siga abierta (CA-015-2/3, RN-08 derogada). Solo accesible para ATHLETE.",
+        "operationId": "InstancesController_registerSessionResult",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterSessionResultDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultados de la sesion registrados o actualizados exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResultResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error de validacion en los datos del resultado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "La sesion pertenece a la instancia de otro atleta (RESOURCE_OWNERSHIP_DENIED, CA-015-6)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o sesion no encontrados en la instancia propia",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La semana a la que pertenece esta sesion ya cerro y sus datos son definitivos (WEEK_FROZEN, CA-015-4/5)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Se requiere una inscripcion activa con consentimiento informado aceptado (CONSENT_REQUIRED, CA-015-7), o el payload no incluye exactamente los ejercicios programados de la sesion (RESULT_FIELDS_INVALID, CA-015-10)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registrar o editar los resultados de una sesion de la instancia propia",
+        "tags": [
+          "instances"
+        ]
+      }
+    },
+    "/api/instances/{planId}/weeks/{weekId}/feelings": {
+      "post": {
+        "description": "Upsert de las sensaciones (dolor muscular, motivacion; escala entera 1-10 inclusive) de la semana :weekId de la instancia propia del atleta (CA-016-1, D-6b). Un valor fuera de 1-10 se rechaza con 400 (ValidationPipe global, CA-016-9) y no se guarda nada de esa semana. Orden de verificacion en el service: (1) Subscription Activa del atleta para :planId, si no CONSENT_REQUIRED (422, CA-016-5); (2) la semana pertenece a la instancia propia, si no ENTITY_NOT_FOUND (404) o RESOURCE_OWNERSHIP_DENIED (403, CA-016-4); (3) la semana no esta cerrada, si lo esta WEEK_FROZEN (409, CA-016-2). Dolor muscular y motivacion son datos sensibles de salud (Ley 1581/2012) — nunca se loggean, y este DTO de respuesta nunca se expone fuera de este endpoint o de GET /instances/:planId(/athletes/:athleteId) (CA-016-6). El consentimiento especifico de datos sensibles de salud (CA-016-8) ya se captura en subscriptions/accept-consent (D-14) — este endpoint no lo verifica de nuevo, la Subscription Activa ya lo implica. Solo accesible para ATHLETE.",
+        "operationId": "InstancesController_registerWeeklyFeeling",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "weekId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterWeeklyFeelingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sensaciones semanales registradas o actualizadas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyFeelingResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "muscleSoreness o motivation fuera del rango 1-10, o error de validacion en los datos de la solicitud (CA-016-9) — no se guarda ningun registro de sensaciones de esa semana",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No autenticado — se requiere token JWT valido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "La semana pertenece a la instancia de otro atleta (RESOURCE_OWNERSHIP_DENIED, CA-016-4)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan o semana no encontrados en la instancia propia",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Esta semana ya cerro y sus datos son definitivos (WEEK_FROZEN, CA-016-2)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Se requiere una inscripcion activa con consentimiento informado aceptado (CONSENT_REQUIRED, CA-016-5)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registrar o editar las sensaciones semanales de la instancia propia",
+        "tags": [
+          "instances"
         ]
       }
     }
@@ -3162,6 +3727,10 @@
     {
       "name": "health",
       "description": "Estado de la API y sus dependencias"
+    },
+    {
+      "name": "instances",
+      "description": "Operaciones de instances"
     },
     {
       "name": "plans",
@@ -4655,6 +5224,36 @@
             "description": "Numero de la version del ejercicio que esta sesion conserva — la vigente al momento de agregarlo (RN-07), no necesariamente la vigente hoy en la biblioteca.",
             "example": 1
           },
+          "sets": {
+            "type": "number",
+            "description": "Series prescritas (D-15). null si el entrenador aun no la cargo — publish() la exige junto con reps como parte del regimen de fuerza (D-15 punto 2a).",
+            "example": 4,
+            "nullable": true
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones prescritas por serie (D-15). null si aun no se cargo.",
+            "example": 10,
+            "nullable": true
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga prescrita, en kilogramos (convencion, D-6). null si aun no se cargo o si el ejercicio es de peso corporal (D-15 punto 2a).",
+            "example": 80,
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion prescrita, en segundos (D-15). null si aun no se cargo o si el ejercicio usa distanceMeters en su lugar (regimen de resistencia, D-15 punto 2b).",
+            "example": 1200,
+            "nullable": true
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia prescrita, en metros (convencion, D-6). null si aun no se cargo o si el ejercicio usa durationSeconds en su lugar (regimen de resistencia, D-15 punto 2b).",
+            "example": 5000,
+            "nullable": true
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string",
@@ -5011,11 +5610,76 @@
             "description": "UUID del ejercicio de la biblioteca global (Exercise) a agregar a la sesion. Debe existir (RN-04) y estar activo (isActive=true) — un ejercicio inhabilitado se rechaza con EXERCISE_INACTIVE (422) aunque exista.",
             "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "format": "uuid"
+          },
+          "sets": {
+            "type": "number",
+            "description": "Series prescritas (D-15). Opcional al guardar — el entrenador puede bosquejar la sesion sin volumenes en Borrador; se exige junto con reps solo al publicar, como parte del regimen de fuerza (D-15 punto 2a).",
+            "example": 4,
+            "minimum": 1
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones prescritas por serie (D-15). Opcional al guardar — ver sets.",
+            "example": 10,
+            "minimum": 1
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga prescrita, en kilogramos (convencion, D-6). Opcional incluso dentro del regimen de fuerza — cubre ejercicios de peso corporal sin carga externa (D-15 punto 2a).",
+            "example": 80,
+            "minimum": 0
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion prescrita, en segundos (D-15). Regimen de resistencia — no se exige junto con distanceMeters al publicar (D-15 punto 2b, basta uno de los dos).",
+            "example": 1200,
+            "minimum": 1
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia prescrita, en metros (convencion, D-6). Regimen de resistencia — no se exige junto con durationSeconds al publicar (D-15 punto 2b).",
+            "example": 5000,
+            "minimum": 0
           }
         },
         "required": [
           "exerciseId"
         ]
+      },
+      "UpdateSessionExercisePrescriptionDto": {
+        "type": "object",
+        "properties": {
+          "sets": {
+            "type": "number",
+            "description": "Series prescritas (D-15). Omitido = sin cambios.",
+            "example": 4,
+            "minimum": 1
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones prescritas por serie (D-15). Omitido = sin cambios.",
+            "example": 10,
+            "minimum": 1
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga prescrita, en kilogramos (convencion, D-6). Omitido = sin cambios.",
+            "example": 80,
+            "minimum": 0
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion prescrita, en segundos (D-15). Omitido = sin cambios.",
+            "example": 1200,
+            "minimum": 1
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia prescrita, en metros (convencion, D-6). Omitido = sin cambios.",
+            "example": 5000,
+            "minimum": 0
+          }
+        }
       },
       "CoachSummaryResponseDto": {
         "type": "object",
@@ -5405,15 +6069,538 @@
       "AcceptConsentDto": {
         "type": "object",
         "properties": {
-          "documentVersion": {
+          "sportConsentDocumentVersion": {
             "type": "string",
-            "description": "Version del documento de consentimiento informado deportivo que el atleta esta aceptando en este momento. El contenido de esa version lo posee y versiona el frontend (D-8) — este campo solo identifica CUAL version se acepto.",
+            "description": "Version del documento de consentimiento informado DEPORTIVO que el atleta esta aceptando en este momento (renombrado de `documentVersion`, D-14). El contenido de esa version lo posee y versiona el frontend (D-8) — este campo solo identifica CUAL version se acepto.",
+            "example": "1.0.0",
+            "maxLength": 50
+          },
+          "healthDataConsentDocumentVersion": {
+            "type": "string",
+            "description": "Version del documento de tratamiento de DATOS SENSIBLES DE SALUD (dolor muscular, motivacion — HU-016) que el atleta esta aceptando en este mismo acto (D-14, CA-016-8). Distinto del consentimiento deportivo y del HABEAS_DATA general del registro inicial (RN-19) — exige finalidad especifica declarada (Art. 6 Ley 1581/2012 + Circular SIC 002/2024). Sin esta aceptacion la suscripcion no puede activarse: no existe la opcion de aceptar el deportivo y declinar este.",
             "example": "1.0.0",
             "maxLength": 50
           }
         },
         "required": [
-          "documentVersion"
+          "sportConsentDocumentVersion",
+          "healthDataConsentDocumentVersion"
+        ]
+      },
+      "InstanceSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID interno de la instancia (PlanInstance). No se usa como parametro de ruta — el detalle se consulta con GET /instances/:planId (D-7b).",
+            "example": "a7b8c9d0-e1f2-4345-fabc-678901234567",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string",
+            "description": "UUID del plan (plantilla) del que esta instancia es una copia — usado como :planId en GET /instances/:planId",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "planName": {
+            "type": "string",
+            "description": "Nombre del plan (plantilla), resuelto via join de solo lectura",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la instancia (momento de la copia profunda desde la plantilla — CA-023-1)",
+            "example": "2026-08-22T09:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "planId",
+          "planName",
+          "createdAt"
+        ]
+      },
+      "InstanceSessionExerciseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del ejercicio de sesion de la instancia (InstanceSessionExercise)",
+            "example": "a2b3c4d5-e6f7-4890-b123-c4d5e6f78901",
+            "format": "uuid"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de este ejercicio dentro de la sesion, copiada de la plantilla",
+            "example": 1
+          },
+          "exerciseId": {
+            "type": "string",
+            "description": "UUID del ejercicio de la biblioteca global (Exercise) referenciado",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre del ejercicio (identidad del catalogo, no versionado)",
+            "example": "Sentadilla con barra"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripcion de la version del ejercicio que esta instancia congelo al crearse (RN-07, CA-023-2)",
+            "example": "Parado con los pies al ancho de los hombros, descender flexionando cadera y rodillas manteniendo la espalda neutra, hasta que los muslos queden paralelos al piso."
+          },
+          "muscleGroup": {
+            "type": "string",
+            "description": "Grupo muscular principal de la version del ejercicio que esta instancia congelo al crearse",
+            "example": "Cuadriceps"
+          },
+          "versionNumber": {
+            "type": "number",
+            "description": "Numero de la version del ejercicio congelada por la instancia — la vigente en la plantilla al momento en que esta se copio (RN-07, D-13), no necesariamente la vigente hoy en la biblioteca.",
+            "example": 1
+          },
+          "sets": {
+            "type": "number",
+            "description": "Series prescritas por el entrenador, copiadas de la plantilla (CA-023-9). Tipico de ejercicios de regimen de fuerza.",
+            "example": 4,
+            "nullable": true
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones prescritas por serie, copiadas de la plantilla.",
+            "example": 10,
+            "nullable": true
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga prescrita, en kilogramos (convencion, D-6). Ausente para ejercicios de peso corporal dentro del regimen de fuerza (D-15 punto 2a).",
+            "example": 80,
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion prescrita, en segundos. Tipico de ejercicios de regimen de resistencia.",
+            "example": 1200,
+            "nullable": true
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia prescrita, en metros (convencion, D-6). Tipico de ejercicios de regimen de resistencia — no se exige junto con durationSeconds (D-15 punto 2b).",
+            "example": 5000,
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha en la que este ejercicio fue copiado a la instancia",
+            "example": "2026-08-22T09:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "order",
+          "exerciseId",
+          "name",
+          "description",
+          "muscleGroup",
+          "versionNumber",
+          "createdAt"
+        ]
+      },
+      "SessionExerciseResultResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de este resultado de ejercicio (SessionExerciseResult)",
+            "example": "e1a2b3c4-d5e6-4789-a012-b3c4d5e6f789",
+            "format": "uuid"
+          },
+          "sessionExerciseId": {
+            "type": "string",
+            "description": "UUID del ejercicio de sesion de la instancia (InstanceSessionExercise) al que corresponde este resultado — el mismo id listado en InstanceSessionResponseDto.exercises[].id.",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            "format": "uuid"
+          },
+          "sets": {
+            "type": "number",
+            "description": "Series realizadas. Solo presente si el atleta la reporto — tipico de ejercicios de fuerza (CA-015-11).",
+            "example": 4,
+            "nullable": true
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones realizadas por serie. Tipico de ejercicios de fuerza.",
+            "example": 10,
+            "nullable": true
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga utilizada, en kilogramos (convencion, D-6 — sin unidad confirmada por CA).",
+            "example": 80,
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion realizada, en segundos. Tipico de ejercicios de resistencia (CA-015-11).",
+            "example": 1200,
+            "nullable": true
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia recorrida, en metros (convencion, D-6). Tipico de ejercicios de resistencia.",
+            "example": 5000,
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "description": "Nota libre opcional del atleta sobre este ejercicio",
+            "example": "Sentí molestia leve en la rodilla derecha en la última serie",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "sessionExerciseId"
+        ]
+      },
+      "SessionResultResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del resultado de sesion (SessionResult)",
+            "example": "d0e1f2a3-b4c5-4678-9012-a3b4c5d6e789",
+            "format": "uuid"
+          },
+          "exerciseResults": {
+            "description": "Resultados por ejercicio de esta sesion — uno por cada ejercicio programado, sin excepcion (CA-015-10).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionExerciseResultResponseDto"
+            }
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha del primer registro de resultados de esta sesion",
+            "example": "2026-08-24T18:30:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de la ultima edicion de este resultado — se actualiza aunque el cambio este en un SessionExerciseResult hijo (D-6, sin updatedAt propio en el hijo)",
+            "example": "2026-08-24T18:30:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "exerciseResults",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "InstanceSessionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la sesion de la instancia (InstanceSession) — usado como :sessionId en POST .../sessions/:sessionId/results",
+            "example": "c4d5e6f7-a8b9-4012-cdef-345678901234",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nombre de la sesion, copiado de la plantilla",
+            "example": "Dia 1 — Tren inferior (fuerza)"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta sesion dentro de la semana, copiada de la plantilla",
+            "example": 1
+          },
+          "exercises": {
+            "description": "Ejercicios de esta sesion, con su prescripcion copiada de la plantilla (CA-023-9)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceSessionExerciseResponseDto"
+            }
+          },
+          "result": {
+            "description": "Resultado registrado por el atleta para esta sesion. null si aun no lo registro (D-2, D-6b).",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionResultResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "order",
+          "exercises"
+        ]
+      },
+      "WeeklyFeelingResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID del registro de sensaciones semanales (WeeklyFeeling)",
+            "example": "f1a2b3c4-d5e6-4789-a012-b3c4d5e6f890",
+            "format": "uuid"
+          },
+          "muscleSoreness": {
+            "type": "number",
+            "description": "Nivel de dolor muscular percibido, escala entera de 1 (ninguno) a 10 (severo), ambos inclusive (RN-21, CA-016-9). Dato sensible de salud (Ley 1581/2012).",
+            "example": 4,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "motivation": {
+            "type": "number",
+            "description": "Nivel de motivacion percibido, escala entera de 1 (muy baja) a 10 (muy alta), ambos inclusive (RN-21, CA-016-9). Dato sensible de salud (Ley 1581/2012).",
+            "example": 8,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha del primer registro de sensaciones de esta semana",
+            "example": "2026-08-24T20:00:00.000Z"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de la ultima edicion de este registro",
+            "example": "2026-08-24T20:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "muscleSoreness",
+          "motivation",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "InstanceWeekResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la semana de la instancia (InstanceWeek) — usado como :weekId en POST .../weeks/:weekId/feelings",
+            "example": "d5e6f7a8-b9c0-4123-defa-456789012345",
+            "format": "uuid"
+          },
+          "weekNumber": {
+            "type": "number",
+            "description": "Numero de la semana, secuencial a lo largo de TODA la instancia (no reinicia por fase — mismo criterio D-4 de EPICA-03 aplicado a InstanceWeek, D-1)",
+            "example": 1
+          },
+          "isClosed": {
+            "type": "boolean",
+            "description": "true si la semana cerro automaticamente por completitud de todas sus sesiones (RN-09, RN-30, CA-017-1). Una semana cerrada congela sus resultados y sensaciones — cualquier intento de editarlos responde WEEK_FROZEN (409, CA-015-4/CA-016-2).",
+            "example": false
+          },
+          "closedAt": {
+            "type": "string",
+            "description": "Momento exacto en que la semana cerro. Solo presente cuando isClosed=true.",
+            "example": "2026-09-05T22:10:00.000Z",
+            "nullable": true
+          },
+          "sessions": {
+            "description": "Sesiones de esta semana, en el orden en que fueron copiadas de la plantilla",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceSessionResponseDto"
+            }
+          },
+          "feeling": {
+            "description": "Sensaciones semanales registradas por el atleta. null si aun no las registro (CA-016-3). Dato sensible de salud (Ley 1581/2012, CA-016-6) — solo visible para el atleta titular y el entrenador del plan.",
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WeeklyFeelingResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "weekNumber",
+          "isClosed",
+          "sessions"
+        ]
+      },
+      "InstancePhaseResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID de la fase de la instancia (InstancePhase)",
+            "example": "e6f7a8b9-c0d1-4234-efab-567890123456",
+            "format": "uuid"
+          },
+          "order": {
+            "type": "number",
+            "description": "Posicion de esta fase dentro de la instancia, copiada de la plantilla",
+            "example": 1
+          },
+          "weeks": {
+            "description": "Semanas de esta fase, en el orden en que fueron copiadas de la plantilla",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceWeekResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "order",
+          "weeks"
+        ]
+      },
+      "InstanceDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "UUID interno de la instancia (PlanInstance). Nunca se usa como parametro de ruta — todos los endpoints de la instancia identifican por :planId (D-7b).",
+            "example": "a7b8c9d0-e1f2-4345-fabc-678901234567",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string",
+            "description": "UUID del plan (plantilla) del que esta instancia es una copia personalizada",
+            "example": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "format": "uuid"
+          },
+          "planName": {
+            "type": "string",
+            "description": "Nombre del plan (plantilla), resuelto via join de solo lectura",
+            "example": "Fuerza e hipertrofia — bloque 1"
+          },
+          "athleteId": {
+            "type": "string",
+            "description": "UUID del atleta titular de esta instancia. Para el atleta consultando su propia instancia es redundante con su propia identidad; para el entrenador (GET .../athletes/:athleteId) confirma de que atleta es este panel.",
+            "example": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+            "format": "uuid"
+          },
+          "phases": {
+            "description": "Arbol completo de fases de la instancia, en el orden en que fueron copiadas de la plantilla (D-2), cada una con sus semanas, sesiones, ejercicios, resultados y sensaciones embebidos.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstancePhaseResponseDto"
+            }
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Fecha de creacion de la instancia (momento de la copia profunda desde la plantilla — CA-023-1)",
+            "example": "2026-08-22T09:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "planId",
+          "planName",
+          "athleteId",
+          "phases",
+          "createdAt"
+        ]
+      },
+      "SessionExerciseResultItemDto": {
+        "type": "object",
+        "properties": {
+          "sessionExerciseId": {
+            "type": "string",
+            "description": "UUID del ejercicio de sesion de la instancia (InstanceSessionExercise) al que corresponde este resultado — obtenido de InstanceSessionResponseDto.exercises[].id en GET /instances/:planId.",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            "format": "uuid"
+          },
+          "sets": {
+            "type": "number",
+            "description": "Series realizadas. Solo aplica a ejercicios de regimen de fuerza (CA-015-11).",
+            "example": 4,
+            "minimum": 1
+          },
+          "reps": {
+            "type": "number",
+            "description": "Repeticiones realizadas por serie. Solo aplica a ejercicios de regimen de fuerza.",
+            "example": 10,
+            "minimum": 1
+          },
+          "loadKg": {
+            "type": "number",
+            "description": "Carga utilizada, en kilogramos (convencion, D-6).",
+            "example": 80,
+            "minimum": 0
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Duracion realizada, en segundos. Solo aplica a ejercicios de regimen de resistencia.",
+            "example": 1200,
+            "minimum": 1
+          },
+          "distanceMeters": {
+            "type": "number",
+            "description": "Distancia recorrida, en metros (convencion, D-6). Solo aplica a ejercicios de regimen de resistencia.",
+            "example": 5000,
+            "minimum": 0
+          },
+          "notes": {
+            "type": "string",
+            "description": "Nota libre opcional sobre este ejercicio",
+            "example": "Sentí molestia leve en la rodilla derecha en la última serie",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "sessionExerciseId"
+        ]
+      },
+      "RegisterSessionResultDto": {
+        "type": "object",
+        "properties": {
+          "exercises": {
+            "description": "Resultados por ejercicio de la sesion. Debe incluir EXACTAMENTE los ejercicios programados de la sesion referenciada por :sessionId (ni de mas ni de menos) — un payload que omita alguno, o incluya uno que no pertenece a la sesion, se rechaza con RESULT_FIELDS_INVALID (422, CA-015-10) sin escribir nada.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionExerciseResultItemDto"
+            }
+          }
+        },
+        "required": [
+          "exercises"
+        ]
+      },
+      "RegisterWeeklyFeelingDto": {
+        "type": "object",
+        "properties": {
+          "muscleSoreness": {
+            "type": "number",
+            "description": "Nivel de dolor muscular percibido, entero de 1 (ninguno) a 10 (severo), ambos inclusive (RN-21, CA-016-9). Fuera de rango: 400, y no se guarda ningun registro de sensaciones de esa semana.",
+            "example": 4,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "motivation": {
+            "type": "number",
+            "description": "Nivel de motivacion percibido, entero de 1 (muy baja) a 10 (muy alta), ambos inclusive (RN-21, CA-016-9). Fuera de rango: 400, y no se guarda ningun registro de sensaciones de esa semana.",
+            "example": 8,
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "muscleSoreness",
+          "motivation"
         ]
       }
     }

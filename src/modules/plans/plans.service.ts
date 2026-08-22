@@ -22,6 +22,7 @@ import { UpdatePlanDto } from './dto/update-plan.dto.js';
 import { AddPhaseDto } from './dto/add-phase.dto.js';
 import { AddSessionDto } from './dto/add-session.dto.js';
 import { AddSessionExerciseDto } from './dto/add-session-exercise.dto.js';
+import { UpdateSessionExercisePrescriptionDto } from './dto/update-session-exercise-prescription.dto.js';
 import { PlanResponseDto } from './dto/plan-response.dto.js';
 import { PlanDetailResponseDto } from './dto/plan-detail-response.dto.js';
 import { PhaseResponseDto } from './dto/phase-response.dto.js';
@@ -604,7 +605,19 @@ export class PlansService {
         });
         const order = (maxOrder._max.order ?? 0) + 1;
         return tx.sessionExercise.create({
-          data: { sessionId, exerciseVersionId: currentVersion.id, order },
+          data: {
+            sessionId,
+            exerciseVersionId: currentVersion.id,
+            order,
+            // D-15: los 5 campos de prescripcion son opcionales al
+            // guardar — el entrenador puede agregar el ejercicio sin
+            // ninguna prescripcion y completarla despues via PATCH.
+            sets: dto.sets ?? null,
+            reps: dto.reps ?? null,
+            loadKg: dto.loadKg ?? null,
+            durationSeconds: dto.durationSeconds ?? null,
+            distanceMeters: dto.distanceMeters ?? null,
+          },
         });
       });
     } catch (error) {
@@ -622,8 +635,86 @@ export class PlansService {
       description: currentVersion.description,
       muscleGroup: currentVersion.muscleGroup,
       versionNumber: currentVersion.versionNumber,
+      sets: sessionExercise.sets,
+      reps: sessionExercise.reps,
+      loadKg: sessionExercise.loadKg,
+      durationSeconds: sessionExercise.durationSeconds,
+      distanceMeters: sessionExercise.distanceMeters,
       createdAt: sessionExercise.createdAt,
     };
+  }
+
+  /**
+   * NUEVO (D-15): edita la prescripcion (5 campos, TODOS opcionales —
+   * actualizacion parcial) de un SessionExercise ya agregado. Primer
+   * endpoint de edicion de SessionExercise — hasta esta epica EPICA-03
+   * solo exponia add/remove. Mismo patron de ownership que
+   * removeSessionExercise. Sin validacion de "prescripcion significativa"
+   * aqui — esa regla solo se evalua en publish() (D-15 punto 2/3).
+   */
+  async updateSessionExercisePrescription(
+    coachId: string,
+    id: string,
+    sessionId: string,
+    sessionExerciseId: string,
+    dto: UpdateSessionExercisePrescriptionDto,
+  ): Promise<SessionExerciseResponseDto> {
+    await this.findOwnedOrFail(coachId, id);
+
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { week: true },
+    });
+
+    if (!session || session.week.planId !== id) {
+      throw new BusinessException(
+        BusinessError.ENTITY_NOT_FOUND,
+        `Sesion con id '${sessionId}' no fue encontrada en el plan '${id}'`,
+        { entity: 'Session', identifier: sessionId },
+      );
+    }
+
+    const existing = await this.prisma.sessionExercise.findUnique({
+      where: { id: sessionExerciseId },
+      include: { exerciseVersion: { include: { exercise: true } } },
+    });
+
+    if (!existing || existing.sessionId !== sessionId) {
+      throw new BusinessException(
+        BusinessError.ENTITY_NOT_FOUND,
+        `Ejercicio de sesion con id '${sessionExerciseId}' no fue encontrado en la sesion '${sessionId}'`,
+        { entity: 'SessionExercise', identifier: sessionExerciseId },
+      );
+    }
+
+    let updated: SessionExerciseTree;
+
+    try {
+      updated = await this.prisma.sessionExercise.update({
+        where: { id: sessionExerciseId },
+        data: {
+          ...(dto.sets !== undefined && { sets: dto.sets }),
+          ...(dto.reps !== undefined && { reps: dto.reps }),
+          ...(dto.loadKg !== undefined && { loadKg: dto.loadKg }),
+          ...(dto.durationSeconds !== undefined && {
+            durationSeconds: dto.durationSeconds,
+          }),
+          ...(dto.distanceMeters !== undefined && {
+            distanceMeters: dto.distanceMeters,
+          }),
+        },
+        include: { exerciseVersion: { include: { exercise: true } } },
+      });
+    } catch (error) {
+      throw new TechnicalException(
+        TechnicalError.DATABASE_ERROR,
+        'Error al editar la prescripcion del ejercicio de sesion',
+        {},
+        error as Error,
+      );
+    }
+
+    return this.toSessionExerciseResponseDto(updated);
   }
 
   /** Quita un ejercicio de una sesion (hard-delete real — D-7). */
@@ -985,6 +1076,11 @@ export class PlansService {
    * con al menos una semana con al menos una sesion con al menos un
    * ejercicio (CA-009-2). Lista explicitamente los requisitos faltantes —
    * nunca un mensaje generico (criterio tecnico del plan de implementacion).
+   *
+   * SEGUNDA PASADA (D-15, RN-01 EXTENDIDA, EPICA-05): solo si la estructura
+   * minima ya paso, recorre TODOS los SessionExercise del arbol y exige
+   * "prescripcion significativa" en cada uno — MISMO BusinessError.PLAN_INCOMPLETE
+   * (422), issues individuales por ejercicio (nunca generico).
    */
   private validatePlanCompleteness(plan: PlanTree): void {
     const issues: string[] = [];
@@ -1008,6 +1104,16 @@ export class PlansService {
       );
       if (!hasExercises) {
         issues.push('al menos un ejercicio en una sesion');
+      } else {
+        for (const session of sessions) {
+          for (const sessionExercise of session.exercises) {
+            if (!this.hasSignificantPrescription(sessionExercise)) {
+              issues.push(
+                `prescripcion de '${sessionExercise.exerciseVersion.exercise.name}' en la sesion '${session.name}'`,
+              );
+            }
+          }
+        }
       }
     }
 
@@ -1018,6 +1124,28 @@ export class PlansService {
         { planId: plan.id, missingRequirements: issues },
       );
     }
+  }
+
+  /**
+   * D-15 punto 2: un SessionExercise tiene prescripcion significativa si
+   * CUALQUIERA de estos dos conjuntos esta completo — (a) regimen de
+   * fuerza: sets Y reps ambos no-nulos (loadKg OPCIONAL, cubre peso
+   * corporal); (b) regimen de resistencia: durationSeconds O
+   * distanceMeters no-nulo (no se exige el par completo). Se evalua sobre
+   * los VALORES presentes, nunca una categoria declarada.
+   */
+  private hasSignificantPrescription(sessionExercise: {
+    sets: number | null;
+    reps: number | null;
+    durationSeconds: number | null;
+    distanceMeters: number | null;
+  }): boolean {
+    const strengthRegime =
+      sessionExercise.sets !== null && sessionExercise.reps !== null;
+    const enduranceRegime =
+      sessionExercise.durationSeconds !== null ||
+      sessionExercise.distanceMeters !== null;
+    return strengthRegime || enduranceRegime;
   }
 
   /**
@@ -1124,6 +1252,11 @@ export class PlansService {
       description: sessionExercise.exerciseVersion.description,
       muscleGroup: sessionExercise.exerciseVersion.muscleGroup,
       versionNumber: sessionExercise.exerciseVersion.versionNumber,
+      sets: sessionExercise.sets,
+      reps: sessionExercise.reps,
+      loadKg: sessionExercise.loadKg,
+      durationSeconds: sessionExercise.durationSeconds,
+      distanceMeters: sessionExercise.distanceMeters,
       createdAt: sessionExercise.createdAt,
     };
   }

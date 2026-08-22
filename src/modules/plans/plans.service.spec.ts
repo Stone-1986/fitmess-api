@@ -48,6 +48,7 @@ const mockPrisma = {
     aggregate: vi.fn(),
     create: vi.fn(),
     findUnique: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn(),
   },
   exercise: {
@@ -866,6 +867,11 @@ describe('PlansService', () => {
           sessionId: 'session-uuid',
           exerciseVersionId: 'version-uuid',
           order: 1,
+          sets: null,
+          reps: null,
+          loadKg: null,
+          durationSeconds: null,
+          distanceMeters: null,
         },
       });
       expect(result.versionNumber).toBe(2);
@@ -965,6 +971,144 @@ describe('PlansService', () => {
         service.addSessionExercise(COACH_ID, PLAN_ID, 'session-uuid', {
           exerciseId: 'exercise-uuid',
         } as never),
+      ).rejects.toThrow(TechnicalException);
+    });
+  });
+
+  // ── updateSessionExercisePrescription() ───────────────────────────────
+
+  describe('updateSessionExercisePrescription()', () => {
+    it('D-15: edita la prescripcion (actualizacion PARCIAL — solo los campos enviados)', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(buildPlan());
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'session-uuid',
+        week: { planId: PLAN_ID },
+      });
+      mockPrisma.sessionExercise.findUnique.mockResolvedValue(
+        buildSessionExercise(),
+      );
+      mockPrisma.sessionExercise.update.mockResolvedValue(
+        buildSessionExercise({ sets: 5, reps: 8 }),
+      );
+
+      const result = await service.updateSessionExercisePrescription(
+        COACH_ID,
+        PLAN_ID,
+        'session-uuid',
+        'session-exercise-uuid',
+        { sets: 5, reps: 8 } as never,
+      );
+
+      expect(mockPrisma.sessionExercise.update).toHaveBeenCalledWith({
+        where: { id: 'session-exercise-uuid' },
+        data: { sets: 5, reps: 8 },
+        include: { exerciseVersion: { include: { exercise: true } } },
+      });
+      expect(result.sets).toBe(5);
+      expect(result.reps).toBe(8);
+    });
+
+    it('D-15: un campo omitido del DTO NO se sobreescribe a null (actualizacion parcial)', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(buildPlan());
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'session-uuid',
+        week: { planId: PLAN_ID },
+      });
+      mockPrisma.sessionExercise.findUnique.mockResolvedValue(
+        buildSessionExercise(),
+      );
+      mockPrisma.sessionExercise.update.mockResolvedValue(
+        buildSessionExercise({ loadKg: 80 }),
+      );
+
+      await service.updateSessionExercisePrescription(
+        COACH_ID,
+        PLAN_ID,
+        'session-uuid',
+        'session-exercise-uuid',
+        { loadKg: 80 } as never,
+      );
+
+      expect(mockPrisma.sessionExercise.update).toHaveBeenCalledWith({
+        where: { id: 'session-exercise-uuid' },
+        data: { loadKg: 80 },
+        include: { exerciseVersion: { include: { exercise: true } } },
+      });
+    });
+
+    it('lanza ENTITY_NOT_FOUND si la sesion no existe o no pertenece al plan', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(buildPlan());
+      mockPrisma.session.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.updateSessionExercisePrescription(
+          COACH_ID,
+          PLAN_ID,
+          'inexistente',
+          'session-exercise-uuid',
+          { sets: 4 } as never,
+        ),
+      ).rejects.toMatchObject({ errorEntry: BusinessError.ENTITY_NOT_FOUND });
+    });
+
+    it('lanza ENTITY_NOT_FOUND si el ejercicio de sesion no existe o no pertenece a la sesion', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(buildPlan());
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'session-uuid',
+        week: { planId: PLAN_ID },
+      });
+      mockPrisma.sessionExercise.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.updateSessionExercisePrescription(
+          COACH_ID,
+          PLAN_ID,
+          'session-uuid',
+          'inexistente',
+          { sets: 4 } as never,
+        ),
+      ).rejects.toMatchObject({ errorEntry: BusinessError.ENTITY_NOT_FOUND });
+    });
+
+    it('lanza RESOURCE_OWNERSHIP_DENIED si el plan es de otro coach', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(
+        buildPlan({ coachId: OTHER_COACH_ID }),
+      );
+
+      await expect(
+        service.updateSessionExercisePrescription(
+          COACH_ID,
+          PLAN_ID,
+          'session-uuid',
+          'session-exercise-uuid',
+          { sets: 4 } as never,
+        ),
+      ).rejects.toMatchObject({
+        errorEntry: BusinessError.RESOURCE_OWNERSHIP_DENIED,
+      });
+    });
+
+    it('lanza TechnicalException DATABASE_ERROR ante fallo de DB', async () => {
+      mockPrisma.plan.findUnique.mockResolvedValue(buildPlan());
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'session-uuid',
+        week: { planId: PLAN_ID },
+      });
+      mockPrisma.sessionExercise.findUnique.mockResolvedValue(
+        buildSessionExercise(),
+      );
+      mockPrisma.sessionExercise.update.mockRejectedValue(
+        new Error('DB caida'),
+      );
+
+      await expect(
+        service.updateSessionExercisePrescription(
+          COACH_ID,
+          PLAN_ID,
+          'session-uuid',
+          'session-exercise-uuid',
+          { sets: 4 } as never,
+        ),
       ).rejects.toThrow(TechnicalException);
     });
   });
@@ -1187,6 +1331,110 @@ describe('PlansService', () => {
         }),
       });
     });
+
+    it(
+      'D-15: lanza PLAN_INCOMPLETE cuando un SessionExercise tiene sets sin reps ' +
+        '(ni durationSeconds ni distanceMeters) — prescripcion NO significativa por ' +
+        'ninguno de los dos regimenes',
+      async () => {
+        mockPrisma.plan.findUnique.mockResolvedValue(
+          buildPlanTree({
+            phases: [
+              {
+                id: 'phase-uuid',
+                weeks: [
+                  {
+                    id: 'week-uuid',
+                    sessions: [
+                      {
+                        id: 'session-uuid',
+                        name: 'Dia 1',
+                        exercises: [
+                          buildSessionExercise({
+                            sets: 4,
+                            reps: null,
+                            loadKg: null,
+                            durationSeconds: null,
+                            distanceMeters: null,
+                          }),
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+
+        await expect(service.publish(COACH_ID, PLAN_ID)).rejects.toMatchObject({
+          errorEntry: BusinessError.PLAN_INCOMPLETE,
+          context: expect.objectContaining({
+            missingRequirements: expect.arrayContaining([
+              expect.stringContaining('prescripcion'),
+            ]) as unknown,
+          }),
+        });
+        expect(mockPrisma.plan.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it(
+      'D-15: ACEPTA un plan con un SessionExercise de regimen de fuerza (sets+reps, ' +
+        'sin loadKg) y otro de regimen de resistencia (solo distanceMeters, sin ' +
+        'durationSeconds) en la MISMA sesion — no exige los 5 campos ni el par completo',
+      async () => {
+        mockPrisma.plan.findUnique.mockResolvedValue(
+          buildPlanTree({
+            phases: [
+              {
+                id: 'phase-uuid',
+                weeks: [
+                  {
+                    id: 'week-uuid',
+                    sessions: [
+                      {
+                        id: 'session-uuid',
+                        name: 'Dia 1',
+                        exercises: [
+                          buildSessionExercise({
+                            id: 'session-exercise-fuerza',
+                            sets: 4,
+                            reps: 10,
+                            loadKg: null,
+                            durationSeconds: null,
+                            distanceMeters: null,
+                          }),
+                          buildSessionExercise({
+                            id: 'session-exercise-resistencia',
+                            sets: null,
+                            reps: null,
+                            loadKg: null,
+                            durationSeconds: null,
+                            distanceMeters: 5000,
+                          }),
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+        mockPrisma.plan.update.mockResolvedValue(
+          buildPlan({ status: PlanStatus.PUBLISHED }),
+        );
+
+        const result = await service.publish(COACH_ID, PLAN_ID);
+
+        expect(result.status).toBe(PlanStatus.PUBLISHED);
+        expect(mockPrisma.plan.update).toHaveBeenCalledWith({
+          where: { id: PLAN_ID },
+          data: { status: PlanStatus.PUBLISHED },
+        });
+      },
+    );
 
     it('lanza ENTITY_NOT_FOUND si el plan no existe', async () => {
       mockPrisma.plan.findUnique.mockResolvedValue(null);

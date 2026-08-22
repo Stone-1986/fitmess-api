@@ -299,10 +299,14 @@ async function buildCompletePlan(
 
   const exercise = await createExercise(token);
 
+  // D-15 (EPICA-05): publish() ahora exige prescripcion significativa por
+  // ejercicio — sets+reps (regimen de fuerza) es suficiente. Sin esto,
+  // cualquier llamado a POST /plans/:id/publish sobre un plan construido
+  // con este helper responde 422 PLAN_INCOMPLETE.
   const sessionExerciseRes = await supertest(http)
     .post(`/api/plans/${plan.id}/sessions/${sessionId}/exercises`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ exerciseId: exercise.id })
+    .send({ exerciseId: exercise.id, sets: 4, reps: 10 })
     .expect(201);
   const sessionExerciseId = sessionExerciseRes.body.data.id as string;
 

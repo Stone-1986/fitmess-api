@@ -516,7 +516,10 @@ describe('SubscriptionsService', () => {
   // ── acceptConsent() ───────────────────────────────────────────────────
 
   describe('acceptConsent()', () => {
-    const DTO = { documentVersion: '1.0.0' };
+    const DTO = {
+      sportConsentDocumentVersion: '1.0.0',
+      healthDataConsentDocumentVersion: '1.0.0',
+    };
     const IP = '127.0.0.1';
     const USER_AGENT = 'vitest';
 
@@ -528,7 +531,8 @@ describe('SubscriptionsService', () => {
           buildSubscriptionWithPlan({ status: SubscriptionStatus.APPROVED }),
         );
         mockPrisma.$transaction.mockResolvedValueOnce([
-          { id: 'legal-acceptance-uuid' },
+          { id: 'legal-acceptance-sport-uuid' },
+          { id: 'legal-acceptance-health-uuid' },
           buildSubscription({ status: SubscriptionStatus.ACTIVE }),
         ]);
 
@@ -544,12 +548,12 @@ describe('SubscriptionsService', () => {
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         const transactionArg = mockPrisma.$transaction.mock
           .calls[0][0] as unknown[];
-        expect(transactionArg).toHaveLength(2);
+        expect(transactionArg).toHaveLength(3);
         expect(mockPrisma.legalAcceptance.create).toHaveBeenCalledWith({
           data: expect.objectContaining({
             userId: ATHLETE_ID,
             documentType: DocumentType.SPORT_CONSENT,
-            documentVersion: DTO.documentVersion,
+            documentVersion: DTO.sportConsentDocumentVersion,
             planId: PLAN_ID,
             ip: IP,
             userAgent: USER_AGENT,
@@ -563,6 +567,62 @@ describe('SubscriptionsService', () => {
             planId: PLAN_ID,
           },
         );
+      },
+    );
+
+    it(
+      'CRITICO (D-14, EPICA-05): crea AMBOS LegalAcceptance — SPORT_CONSENT y ' +
+        'HEALTH_DATA_CONSENT — en la MISMA $transaction, con el mismo userId y planId ' +
+        'y documentType distinto (CA-016-8)',
+      async () => {
+        mockPrisma.subscription.findUnique.mockResolvedValue(
+          buildSubscriptionWithPlan({ status: SubscriptionStatus.APPROVED }),
+        );
+        mockPrisma.$transaction.mockResolvedValueOnce([
+          { id: 'legal-acceptance-sport-uuid' },
+          { id: 'legal-acceptance-health-uuid' },
+          buildSubscription({ status: SubscriptionStatus.ACTIVE }),
+        ]);
+
+        await service.acceptConsent(
+          ATHLETE_ID,
+          SUBSCRIPTION_ID,
+          DTO,
+          IP,
+          USER_AGENT,
+        );
+
+        expect(mockPrisma.legalAcceptance.create).toHaveBeenCalledTimes(2);
+        const calls = mockPrisma.legalAcceptance.create.mock.calls as Array<
+          [{ data: Record<string, unknown> }]
+        >;
+        const sportCall = calls.find(
+          ([arg]) => arg.data.documentType === DocumentType.SPORT_CONSENT,
+        );
+        const healthCall = calls.find(
+          ([arg]) => arg.data.documentType === DocumentType.HEALTH_DATA_CONSENT,
+        );
+
+        expect(sportCall).toBeDefined();
+        expect(healthCall).toBeDefined();
+        expect(sportCall?.[0].data).toMatchObject({
+          userId: ATHLETE_ID,
+          planId: PLAN_ID,
+          documentType: DocumentType.SPORT_CONSENT,
+          documentVersion: DTO.sportConsentDocumentVersion,
+        });
+        expect(healthCall?.[0].data).toMatchObject({
+          userId: ATHLETE_ID,
+          planId: PLAN_ID,
+          documentType: DocumentType.HEALTH_DATA_CONSENT,
+          documentVersion: DTO.healthDataConsentDocumentVersion,
+        });
+
+        // Ambos creates viajan DENTRO del mismo array pasado a $transaction
+        // (atomicidad — D-14): ninguno se ejecuta como escritura suelta.
+        const transactionArg = mockPrisma.$transaction.mock
+          .calls[0][0] as unknown[];
+        expect(transactionArg).toHaveLength(3);
       },
     );
 
@@ -669,7 +729,8 @@ describe('SubscriptionsService', () => {
         ),
       );
       mockPrisma.$transaction.mockResolvedValueOnce([
-        { id: 'legal-acceptance-uuid' },
+        { id: 'legal-acceptance-sport-uuid' },
+        { id: 'legal-acceptance-health-uuid' },
         buildSubscription({ status: SubscriptionStatus.ACTIVE }),
       ]);
 

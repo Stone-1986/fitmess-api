@@ -380,9 +380,13 @@ export class SubscriptionsService {
    * referenciado ya no esta efectivamente vigente (CA-014-8), rechaza con
    * PLAN_NOT_PUBLISHED (409) SIN escribir nada — la suscripcion permanece
    * en Aprobada, ninguna $transaction se abre (D-10). Si ambos checks
-   * pasan, crea LegalAcceptance(SPORT_CONSENT) y actualiza la suscripcion
-   * a Activa en una unica $transaction atomica (mismo patron que
-   * AuthService.registerAthlete). Emite subscription.activated.
+   * pasan, crea DOS LegalAcceptance — SPORT_CONSENT y, desde EPICA-05
+   * (D-14 rama (a), CA-016-8), tambien HEALTH_DATA_CONSENT — y actualiza
+   * la suscripcion a Activa, todo en una unica $transaction atomica
+   * (mismo patron que AuthService.registerAthlete). Ambos consentimientos
+   * son obligatorios en el mismo acto: no existe la opcion de aceptar el
+   * deportivo y declinar el de datos sensibles de salud. Emite
+   * subscription.activated.
    */
   async acceptConsent(
     athleteId: string,
@@ -416,12 +420,25 @@ export class SubscriptionsService {
     let updated: Subscription;
 
     try {
-      [, updated] = await this.prisma.$transaction([
+      [, , updated] = await this.prisma.$transaction([
         this.prisma.legalAcceptance.create({
           data: {
             userId: athleteId,
             documentType: DocumentType.SPORT_CONSENT,
-            documentVersion: dto.documentVersion,
+            documentVersion: dto.sportConsentDocumentVersion,
+            planId: subscription.planId,
+            ip,
+            userAgent,
+          },
+        }),
+        // D-14 rama (a), EPICA-05: segundo LegalAcceptance en el MISMO
+        // acto y transaccion — precondicion de HU-016 (CA-016-8). Sin
+        // @@unique que lo bloquee (verificado por el DBA).
+        this.prisma.legalAcceptance.create({
+          data: {
+            userId: athleteId,
+            documentType: DocumentType.HEALTH_DATA_CONSENT,
+            documentVersion: dto.healthDataConsentDocumentVersion,
             planId: subscription.planId,
             ip,
             userAgent,
